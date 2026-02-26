@@ -1,0 +1,20 @@
+# Ambiente virtual
+.venv/
+
+# IDE
+.idea/
+
+# Build
+build/
+dist/
+
+# Logs
+*.log
+build_log.txt
+
+# Arquivos temporários
+__pycache__/
+*.pyc
+
+# Especifico do PyInstaller
+*.spec

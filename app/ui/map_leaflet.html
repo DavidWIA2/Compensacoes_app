@@ -1,0 +1,379 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Mapa Microbacias</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<style>
+  /* ====== Layout base (evita problemas de altura no QWebEngine) ====== */
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background: #f4f6f9;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+
+  body.dark {
+    background: #141516;
+    color: #e7e9ee;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 100%;
+    background: transparent;
+  }
+
+  /* ====== Status flutuante (mais premium, menos intrusivo) ====== */
+  .floating {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 2000;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.25;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(160,170,185,0.55);
+    max-width: min(520px, calc(100vw - 24px));
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    user-select: none;
+    pointer-events: none; /* não atrapalha cliques no mapa */
+  }
+
+  body.dark .floating {
+    background: rgba(20,22,25,0.85);
+    border: 1px solid rgba(58,61,67,0.9);
+    color: #e7e9ee;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+  }
+
+  /* ====== Leaflet controls (tema claro/escuro) ====== */
+  .leaflet-control {
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .leaflet-control-zoom a,
+  .leaflet-control-layers-toggle,
+  .leaflet-control-layers {
+    border: none !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+  }
+
+  .leaflet-control-zoom a {
+    width: 34px;
+    height: 34px;
+    line-height: 34px;
+    font-weight: 700;
+  }
+
+  /* Claro */
+  .leaflet-control-zoom a,
+  .leaflet-control-layers {
+    background: rgba(255,255,255,0.95);
+    color: #111827;
+  }
+  .leaflet-control-layers label,
+  .leaflet-control-layers-list {
+    color: #111827;
+    font-size: 12px;
+  }
+
+  /* Escuro */
+  body.dark .leaflet-control-zoom a,
+  body.dark .leaflet-control-layers {
+    background: rgba(27,29,31,0.92);
+    color: #e7e9ee;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+  }
+
+  body.dark .leaflet-control-layers label,
+  body.dark .leaflet-control-layers-list {
+    color: #e7e9ee;
+  }
+
+  /* Ajuste do botão de camadas */
+  .leaflet-control-layers-toggle {
+    width: 36px !important;
+    height: 36px !important;
+    background-size: 18px 18px !important;
+  }
+
+  /* Tooltip microbacias */
+  .leaflet-tooltip {
+    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,0.08);
+    padding: 6px 10px;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.15);
+  }
+  body.dark .leaflet-tooltip {
+    background: rgba(20,22,25,0.92);
+    color: #e7e9ee;
+    border: 1px solid rgba(58,61,67,0.9);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+  }
+
+</style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <div class="floating" id="status">Carregando mapa...</div>
+
+<script>
+  function setStatus(txt){
+    const el = document.getElementById("status");
+    if (el) el.innerText = txt;
+  }
+
+  window.onerror = function(msg,url,line,col){
+    setStatus("Erro JS:\n" + msg);
+  };
+
+  // Mapa base
+  const map = L.map("map", {
+    zoomControl:false,
+    preferCanvas:true,
+    maxZoom: 18 // Trava de zoom mantida
+  }).setView([-22.015,-47.89], 12);
+
+  L.control.zoom({ position:'bottomright' }).addTo(map);
+
+  /* ===========================
+     CAMADAS BASE (100% HTTPS)
+  ============================ */
+  const tileLight = L.tileLayer(
+    "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    { maxZoom:20, attribution:"© OpenStreetMap © CARTO" }
+  );
+
+  const tileDark = L.tileLayer(
+    "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    { maxZoom:20, attribution:"© OpenStreetMap © CARTO" }
+  );
+
+  const tileSat = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom:18, attribution:"© Esri" }
+  );
+
+  const baseLayers = {
+    "Mapa Claro": tileLight,
+    "Mapa Escuro": tileDark,
+    "Satélite": tileSat
+  };
+
+  // Objeto para conter as sobreposições (Overlays)
+  const overlayLayers = {};
+
+  // Inicializa o controle com o seletor de microbacias habilitado futuramente
+  const layerControl = L.control.layers(baseLayers, overlayLayers, { position:"topright" }).addTo(map);
+
+  tileLight.addTo(map);
+
+  /* ===========================
+     MICROBACIAS / MARKER / HEAT
+  ============================ */
+  let microLayer = null;
+  let marker = null;
+  let heatLayer = null;
+
+  const PALETA = [
+    "#e6194B","#3cb44b","#ffe119","#4363d8","#f58231",
+    "#911eb4","#42d4f4","#f032e6","#bfef45","#fabed4",
+    "#469990","#dcbeff","#9A6324","#fffac8","#800000"
+  ];
+
+  let mapaCores = {};
+  let corIndex = 0;
+
+  function getCor(nome){
+    if(!nome) return "#3388ff";
+    if(!mapaCores[nome]){
+      mapaCores[nome] = PALETA[corIndex % PALETA.length];
+      corIndex++;
+    }
+    return mapaCores[nome];
+  }
+
+  function bringOverlaysToFront(){
+    try { if (microLayer) microLayer.bringToFront(); } catch(e){}
+    try { if (heatLayer) heatLayer.bringToFront(); } catch(e){}
+    try { if (marker) marker.setZIndexOffset(1000); } catch(e){}
+  }
+
+  /* ===========================
+     CONTROLE CAMADA ATIVA
+  ============================ */
+  function setBaseLayer(name){
+    Object.values(baseLayers).forEach(layer => {
+      if(map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if(baseLayers[name]){
+      baseLayers[name].addTo(map);
+      bringOverlaysToFront();
+    }
+  }
+
+  function setTheme(theme){
+    if(theme === "dark"){
+      document.body.classList.add("dark");
+    } else {
+      document.body.classList.remove("dark");
+    }
+  }
+
+  /* ===========================
+     MICROBACIAS
+  ============================ */
+  function setMicrobacias(geojsonObj){
+    // Se já existe, remove do mapa e do controle de camadas antes de recriar
+    if(microLayer) {
+        layerControl.removeLayer(microLayer);
+        map.removeLayer(microLayer);
+    }
+
+    mapaCores = {};
+    corIndex = 0;
+
+    microLayer = L.geoJSON(geojsonObj, {
+      style: (feat) => {
+        const nome = feat?.properties?.Nome_Do_Arquivo || "Desconhecido";
+        const cor = getCor(nome);
+        return {
+          color: cor,
+          weight: 2,
+          opacity: 0.9,
+          fillColor: cor,
+          fillOpacity: 0.14
+        };
+      },
+      onEachFeature: (feature, layer) => {
+        const nome = feature?.properties?.Nome_Do_Arquivo;
+        if(nome){
+          layer.bindTooltip(nome, { sticky:true, direction:"top" });
+        }
+      }
+    }).addTo(map);
+
+    // ADICIONA O TOGGLE: Permite ligar/desligar no menu superior direito
+    layerControl.addOverlay(microLayer, "Exibir Microbacias");
+
+    try {
+      map.fitBounds(microLayer.getBounds(), { padding:[18,18] });
+    } catch(e) {}
+
+    bringOverlaysToFront();
+    setStatus("Microbacias carregadas ✔");
+  }
+
+  // Highlight sem recriar o layer
+  function highlightGeoJsonByName(field, value){
+    if(!microLayer) return;
+
+    const target = String(value || "").trim().toUpperCase();
+
+    microLayer.eachLayer(layer => {
+      try {
+        const props = layer?.feature?.properties || {};
+        const nome = props?.Nome_Do_Arquivo;
+        const cor = getCor(nome);
+        const v = props?.[field];
+
+        const hit = v && String(v).trim().toUpperCase() === target;
+
+        layer.setStyle(hit
+          ? { color: cor, weight: 4, opacity: 0.95, fillColor: cor, fillOpacity: 0.38 }
+          : { color: cor, weight: 1.5, opacity: 0.75, fillColor: cor, fillOpacity: 0.06 }
+        );
+      } catch(e){}
+    });
+
+    bringOverlaysToFront();
+  }
+
+  /* ===========================
+     MARKER
+  ============================ */
+  function setMarker(lat, lng){
+    if(marker) map.removeLayer(marker);
+    marker = L.marker([lat, lng], { riseOnHover:true }).addTo(map);
+    marker.setZIndexOffset(1000);
+    map.setView([lat, lng], Math.min(map.getZoom(), 17));
+  }
+
+  /* ===========================
+     HEATMAP
+  ============================ */
+  function setHeatmap(points){
+    if(heatLayer){
+      map.removeLayer(heatLayer);
+      heatLayer = null;
+    }
+    if(!points || points.length === 0) return;
+
+    heatLayer = L.heatLayer(points, {
+      radius: 28,
+      blur: 20,
+      maxZoom: 15
+    }).addTo(map);
+
+    bringOverlaysToFront();
+  }
+
+  /* ===========================
+     QWEBCHANNEL
+  ============================ */
+  let bridge = null;
+
+  new QWebChannel(qt.webChannelTransport, function(channel){
+    bridge = channel.objects.bridge;
+  });
+
+  map.on("baselayerchange", function(e){
+    if(bridge && bridge.onLayerChanged){
+      bridge.onLayerChanged(e.name);
+    }
+    bringOverlaysToFront();
+  });
+
+  map.on("click", function(e){
+    const lat = e.latlng.lat;
+    const lng = e.latlng.lng;
+    setMarker(lat, lng);
+    if(bridge && bridge.onMapClicked){
+      bridge.onMapClicked(lat, lng);
+    }
+  });
+
+  /* ===========================
+     EXPORTS
+  ============================ */
+  window.setTheme = setTheme;
+  window.setBaseLayer = setBaseLayer;
+  window.setHeatmap = setHeatmap;
+  window.setStatus = setStatus;
+  window.setMarker = setMarker;
+  window.setMicrobacias = setMicrobacias;
+  window.highlightGeoJsonByName = highlightGeoJsonByName;
+
+</script>
+</body>
+</html>

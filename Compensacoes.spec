@@ -6,36 +6,57 @@ from PyInstaller.utils.hooks import (
     copy_metadata
 )
 import importlib.util
+from PyInstaller.building.datastruct import Tree
+
 
 def has_module(modname: str) -> bool:
     return importlib.util.find_spec(modname) is not None
 
+
+def _normalize_pairs(items):
+    """PyInstaller sometimes returns (src, dest, typecode). Analysis expects only (src, dest)."""
+    out = []
+    for it in items or []:
+        try:
+            if len(it) == 2:
+                out.append((it[0], it[1]))
+            elif len(it) == 3:
+                out.append((it[0], it[1]))
+        except Exception:
+            pass
+    return out
+
+
 def safe_collect_data_files(modname: str):
     try:
-        return collect_data_files(modname)
+        return _normalize_pairs(collect_data_files(modname))
     except Exception:
         return []
+
 
 def safe_collect_dynamic_libs(modname: str):
     try:
-        return collect_dynamic_libs(modname)
+        return _normalize_pairs(collect_dynamic_libs(modname))
     except Exception:
         return []
+
 
 def safe_copy_metadata(distname: str):
     try:
-        return copy_metadata(distname)
+        return _normalize_pairs(copy_metadata(distname))
     except Exception:
         return []
 
+
 # --------------------------------------------------------------------
-# Arquivos do seu projeto
+# Arquivos do projeto
 # --------------------------------------------------------------------
+# No seu arquivo .spec, substitua a linha Tree(...) por:
 datas = [
     ('app/ui/map_leaflet.html', 'app/ui'),
     ('app/ui/vendor', 'app/ui/vendor'),
     ('assets', 'assets'),
-    ('data', 'data'),
+    ('data', 'data'), # ✅ Isso coloca a pasta 'data' na raiz do executável
 ]
 
 binaries = []
@@ -44,37 +65,35 @@ hiddenimports = ['reportlab']
 # --------------------------------------------------------------------
 # Geo stack (GeoPandas no Windows)
 # --------------------------------------------------------------------
-# pyproj quase sempre precisa de data files (PROJ)
 if has_module('pyproj'):
     datas += safe_collect_data_files('pyproj')
     datas += safe_copy_metadata('pyproj')
     binaries += safe_collect_dynamic_libs('pyproj')
     hiddenimports += ['pyproj']
 
-# shapely (binário, às vezes precisa de libs)
 if has_module('shapely'):
     datas += safe_copy_metadata('shapely')
     binaries += safe_collect_dynamic_libs('shapely')
     hiddenimports += ['shapely', 'shapely.geometry']
 
-# geopandas (python puro)
 if has_module('geopandas'):
     datas += safe_copy_metadata('geopandas')
     hiddenimports += ['geopandas']
 
-# Fiona: o dist geralmente é "Fiona" (F maiúsculo).
-# Além disso, fiona nem sempre é um "package" para coletar data_files.
 if has_module('fiona'):
+    # Fiona (metadata) - depende do build, tentamos ambos
     datas += safe_copy_metadata('Fiona')
-    datas += safe_copy_metadata('fiona')   # fallback se existir
+    datas += safe_copy_metadata('fiona')
     binaries += safe_collect_dynamic_libs('fiona')
     hiddenimports += ['fiona']
 
-# Alternativa moderna (muitos setups usam pyogrio em vez de fiona)
 if has_module('pyogrio'):
-    datas += safe_copy_metadata('pyogrio')
+    from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+    datas += safe_collect_data_files('pyogrio')
     binaries += safe_collect_dynamic_libs('pyogrio')
-    hiddenimports += ['pyogrio']
+    hiddenimports += collect_submodules('pyogrio')
+    hiddenimports += ['pyogrio._err', 'pyogrio._geometry', 'pyogrio._io', 'pyogrio._ogr']
+
 
 # --------------------------------------------------------------------
 # Build

@@ -13,15 +13,26 @@ from shapely import force_2d
 # =====================================================================
 # UTILITÁRIO DE CAMINHO PARA PYINSTALLER
 # =====================================================================
-def resource_path(relative_path):
-    """ Retorna o caminho absoluto para o recurso, compatível com PyInstaller """
-    try:
-        # Quando o PyInstaller empacota o app, ele usa sys._MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+def resource_path(*partes: str) -> str:
+    rel = os.path.join(*partes)
+    # Se estiver rodando como executável
+    if getattr(sys, "frozen", False):
+        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
 
+        # Tenta encontrar direto no MEIPASS ou dentro de _internal (conforme seu .spec)
+        opcoes = [
+            os.path.join(base_path, rel),
+            os.path.join(base_path, "_internal", rel)
+        ]
+
+        for p in opcoes:
+            if os.path.exists(p):
+                return p
+        return opcoes[0]  # Retorno padrão para erro
+
+    # Modo desenvolvimento: assume a raiz do projeto
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(base_dir, rel)
 
 class GisService:
     DE_PARA_NOMES = {
@@ -33,32 +44,31 @@ class GisService:
     }
 
     def __init__(self, microbacias_dir: str, name_field: str):
-        # 1) Se já veio um caminho válido, usa direto
-        if os.path.isdir(microbacias_dir):
-            self.microbacias_dir = os.path.abspath(microbacias_dir)
-
+        # Se for caminho absoluto (ex.: C:\...), usa direto
+        if os.path.isabs(microbacias_dir):
+            self.microbacias_dir = microbacias_dir
         else:
-            # 2) Se for caminho absoluto (ex.: C:\... ), NÃO faça resource_path()
-            #    (evita virar "_MEIPASS\\C:\\...")
-            if os.path.isabs(microbacias_dir):
-                self.microbacias_dir = microbacias_dir
-            else:
-                # 3) Se for relativo, resolve via PyInstaller/dev
-                self.microbacias_dir = resource_path(microbacias_dir)
+            # Se for relativo (ex: "data/microbacias"), resolve via PyInstaller/dev
+            self.microbacias_dir = resource_path(microbacias_dir)
 
         self.name_field = name_field
 
-        # Log de depuração (ajuda a ver onde ele está procurando no erro)
+        # Log de depuração essencial para ver o caminho final no executável
         if not os.path.isdir(self.microbacias_dir):
-            print(f"DEBUG: Tentativa falhou em: {self.microbacias_dir}")
+            print(f"ERRO GIS: Pasta não encontrada em: {self.microbacias_dir}")
+            raise ValueError(f"Diretório de microbacias não encontrado: {self.microbacias_dir}")
 
-        # Agora o _load_folder recebe o caminho validado
+        # Carrega os arquivos .shp encontrados na pasta resolvida
         self.gdf = self._load_folder(self.microbacias_dir)
 
-        if self.gdf.crs is None: raise ValueError("Microbacias sem CRS (.prj).")
+        if self.gdf.crs is None:
+            raise ValueError("Microbacias sem arquivo de projeção (.prj).")
+
         self.gdf = self.gdf.to_crs(epsg=4326)
+
         if self.name_field not in self.gdf.columns:
             raise ValueError(f"Campo '{name_field}' não existe nas microbacias.")
+
         self.sindex = self.gdf.sindex
 
     def _padronizar_nome(self, nome_arquivo_raw: str) -> str:

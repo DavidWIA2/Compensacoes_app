@@ -26,7 +26,13 @@ class ExcelService:
         self._create_rotating_backup()
 
         self.wb = openpyxl.load_workbook(path, data_only=False)
-        self.ws = self.wb.active
+        nome_aba_alvo = "Compensações"
+        if nome_aba_alvo in self.wb.sheetnames:
+            self.ws = self.wb[nome_aba_alvo]
+        else:
+            # Caso a aba específica não exista, ele volta para a ativa (padrão)
+            print(f"Aviso: Aba '{nome_aba_alvo}' não encontrada. Usando aba ativa.")
+            self.ws = self.wb.active
 
         # Garante cabeçalhos para Lat/Lon se não existirem (Colunas 9 e 10)
         if self.ws.max_column < 10:

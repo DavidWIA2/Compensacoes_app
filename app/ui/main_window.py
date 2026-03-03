@@ -59,38 +59,37 @@ _ajustar_ambiente_pyinstaller()
 import os
 import sys
 
+if getattr(sys, 'frozen', False):
+    # Caminho para a pasta _internal onde o PyInstaller coloca as DLLs
+    internal_path = os.path.join(os.path.dirname(sys.executable), "_internal")
+    os.environ["PATH"] = internal_path + os.pathsep + os.environ.get("PATH", "")
+
+    # Tentativa específica para o pyogrio/GDAL
+    pyogrio_dlls = os.path.join(internal_path, "pyogrio", "shlib")
+    if os.path.exists(pyogrio_dlls):
+        os.add_dll_directory(pyogrio_dlls) if hasattr(os, "add_dll_directory") else None
+
+
 def resource_path(*partes: str) -> str:
-    """
-    Resolve caminhos tanto no modo desenvolvimento quanto no executável (PyInstaller).
-    - ONEDIR: sys._MEIPASS costuma ser ...\\dist\\Compensacoes\\_internal
-    - Fallback: ...\\dist\\Compensacoes\\_internal (a partir do sys.executable)
-    """
+    """ Resolve caminhos para dev e para a estrutura _internal do PyInstaller """
     rel = os.path.join(*partes)
 
-    # Executável (PyInstaller)
     if getattr(sys, "frozen", False):
-        candidatos = []
+        # Pasta onde o .exe reside
+        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
 
-        # 1) Base do PyInstaller (mais confiável)
-        meipass = getattr(sys, "_MEIPASS", None)
-        if meipass:
-            candidatos.append(os.path.join(meipass, rel))
-            # alguns casos antigos colocam coisas em _internal dentro do meipass
-            candidatos.append(os.path.join(meipass, "_internal", rel))
+        # Ordem de busca: 1. Raiz do pacote, 2. Dentro de _internal
+        opcoes = [
+            os.path.join(base_path, rel),
+            os.path.join(base_path, "_internal", rel)
+        ]
 
-        # 2) Fallback: pasta do .exe
-        exe_dir = os.path.dirname(sys.executable)
-        candidatos.append(os.path.join(exe_dir, rel))
-        candidatos.append(os.path.join(exe_dir, "_internal", rel))
-
-        for p in candidatos:
+        for p in opcoes:
             if os.path.exists(p):
                 return p
+        return opcoes[0]  # Fallback
 
-        # Retorna o mais provável (para mostrar em mensagens de erro)
-        return candidatos[0] if candidatos else os.path.join(exe_dir, rel)
-
-    # Desenvolvimento: raiz do projeto (assumindo main_window.py em app/ui/)
+    # Desenvolvimento: sobe 2 níveis (de app/ui/ para a raiz)
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     return os.path.join(base_dir, rel)
 
@@ -115,7 +114,8 @@ COLS = [
     "Compensação", "Endereço", "Microbacia", "Compensado"
 ]
 MICROB_NAME_FIELD = "Nome_Do_Arquivo"
-MICROB_DIR = resource_path(os.path.join("data", "microbacias"))
+# No topo do arquivo main_window.py
+MICROB_DIR = resource_path("data", "microbacias") # Use vírgulas em vez de os.path.join aqui
 
 
 
@@ -2673,12 +2673,17 @@ class MainWindow(QMainWindow):
 
         to_process = [
             r for r in self.records
-            if (r.endereco or "").strip() and (not getattr(r, "latitude", "") or not getattr(r, "longitude", ""))
+            if (r.endereco or "").strip() and (
+                    not getattr(r, "latitude", "") or
+                    not getattr(r, "longitude", "") or
+                    not str(getattr(r, "microbacia", "") or "").strip()  # Adicione esta verificação
+            )
         ]
 
         if not to_process:
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Sucesso", "Tudo georeferenciado!")
+            # Mensagem atualizada para refletir a nova lógica
+            QMessageBox.information(self, "Sucesso", "Tudo georreferenciado e com microbacias preenchidas!")
             return
 
         from PySide6.QtWidgets import QMessageBox, QProgressDialog

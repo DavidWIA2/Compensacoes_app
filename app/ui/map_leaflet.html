@@ -5,8 +5,8 @@
 <title>Mapa Microbacias</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
+<script src="vendor/leaflet/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
@@ -328,6 +328,10 @@
       heatLayer = null;
     }
     if(!points || points.length === 0) return;
+    if(typeof L.heatLayer !== "function"){
+      setStatus("Mapa carregado sem plugin de calor.");
+      return;
+    }
 
     heatLayer = L.heatLayer(points, {
       radius: 28,

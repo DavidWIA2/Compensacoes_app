@@ -10,8 +10,7 @@ if projeto_raiz not in sys.path:
     sys.path.insert(0, projeto_raiz)
 
 os.environ[
-    "QTWEBENGINE_CHROMIUM_FLAGS"] = "--ignore-certificate-errors --disable-quic --disable-gpu --disable-web-security --no-sandbox"
-os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+    "QTWEBENGINE_CHROMIUM_FLAGS"] = "--ignore-certificate-errors --disable-quic --disable-gpu"
 
 from PySide6.QtWidgets import QApplication, QSplashScreen, QLabel
 from PySide6.QtGui import QMovie, QPixmap, QFont

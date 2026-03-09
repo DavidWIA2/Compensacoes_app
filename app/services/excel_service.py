@@ -1,12 +1,13 @@
-import os
+﻿import os
 import shutil
 import glob
 from datetime import datetime
 from typing import List, Optional
+
 import openpyxl
-from openpyxl.worksheet.worksheet import Worksheet
-# ADICIONE ESTA LINHA ABAIXO:
 from openpyxl.cell.cell import MergedCell
+from openpyxl.worksheet.worksheet import Worksheet
+
 from app.models.compensacao import Compensacao
 
 MAX_BACKUPS = 10
@@ -21,20 +22,19 @@ class ExcelService:
         self.headers: dict = {}
 
     def load(self, path: str) -> List[Compensacao]:
-        if not os.path.exists(path): raise FileNotFoundError(f"Arquivo não encontrado: {path}")
-        self.path = path
-        self._create_rotating_backup()
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Arquivo nao encontrado: {path}")
 
+        self.path = path
         self.wb = openpyxl.load_workbook(path, data_only=False)
+
         nome_aba_alvo = "Compensações"
         if nome_aba_alvo in self.wb.sheetnames:
             self.ws = self.wb[nome_aba_alvo]
         else:
-            # Caso a aba específica não exista, ele volta para a ativa (padrão)
-            print(f"Aviso: Aba '{nome_aba_alvo}' não encontrada. Usando aba ativa.")
+            print(f"Aviso: Aba '{nome_aba_alvo}' nao encontrada. Usando aba ativa.")
             self.ws = self.wb.active
 
-        # Garante cabeçalhos para Lat/Lon se não existirem (Colunas 9 e 10)
         if self.ws.max_column < 10:
             self.ws.cell(row=1, column=9, value="Latitude")
             self.ws.cell(row=1, column=10, value="Longitude")
@@ -43,29 +43,33 @@ class ExcelService:
         records = []
         for row_idx, row_cells in enumerate(self.ws.iter_rows(min_row=2, values_only=False), start=2):
             vals = [c.value for c in row_cells]
-            if not vals or all(v is None or str(v).strip() == "" for v in vals[:8]): continue
+            if not vals or all(v is None or str(v).strip() == "" for v in vals[:8]):
+                continue
 
             def get_v(i):
                 return vals[i] if i < len(vals) else None
 
-            c = Compensacao(
-                excel_row=row_idx,
-                oficio_processo=self._str(get_v(0)),
-                eletronico=self._str(get_v(1)),
-                caixa=self._str(get_v(2)),
-                av_tec=self._str(get_v(3)),
-                compensacao=get_v(4),
-                endereco=self._str(get_v(5)),
-                microbacia=self._str(get_v(6)),
-                compensado=self._str(get_v(7)),
-                latitude=self._str(get_v(8)),
-                longitude=self._str(get_v(9))
+            records.append(
+                Compensacao(
+                    excel_row=row_idx,
+                    oficio_processo=self._str(get_v(0)),
+                    eletronico=self._str(get_v(1)),
+                    caixa=self._str(get_v(2)),
+                    av_tec=self._str(get_v(3)),
+                    compensacao=get_v(4),
+                    endereco=self._str(get_v(5)),
+                    microbacia=self._str(get_v(6)),
+                    compensado=self._str(get_v(7)),
+                    latitude=self._str(get_v(8)),
+                    longitude=self._str(get_v(9)),
+                )
             )
-            records.append(c)
         return records
 
     def _create_rotating_backup(self):
-        if not self.path: return
+        if not self.path:
+            return
+
         base_dir = os.path.dirname(self.path)
         backup_dir = os.path.join(base_dir, BACKUP_FOLDER_NAME)
         os.makedirs(backup_dir, exist_ok=True)
@@ -76,7 +80,8 @@ class ExcelService:
         try:
             shutil.copy2(self.path, backup_path)
         except Exception as e:
-            print(f"Aviso: Não foi possível criar backup: {e}")
+            print(f"Aviso: Nao foi possivel criar backup: {e}")
+
         files = glob.glob(os.path.join(backup_dir, "*.xlsx"))
         files.sort(key=os.path.getmtime)
         while len(files) > MAX_BACKUPS:
@@ -106,26 +111,26 @@ class ExcelService:
     def read_all(self) -> List[Compensacao]:
         return self.load(self.path)
 
-    # Em app/services/excel_service.py
-    from openpyxl.cell.cell import MergedCell
-
     def _write_row(self, row: int, c: Compensacao):
-        # Mapeamento dos dados para as colunas 1 a 10
         dados = [
-            c.oficio_processo, c.eletronico, c.caixa, c.av_tec,
-            c.compensacao, c.endereco, c.microbacia, c.compensado,
-            c.latitude, c.longitude
+            c.oficio_processo,
+            c.eletronico,
+            c.caixa,
+            c.av_tec,
+            c.compensacao,
+            c.endereco,
+            c.microbacia,
+            c.compensado,
+            c.latitude,
+            c.longitude,
         ]
 
         for col_idx, valor in enumerate(dados, start=1):
             cell = self.ws.cell(row=row, column=col_idx)
-
-            # Agora que MergedCell foi importado, isinstance funcionará
             if not isinstance(cell, MergedCell):
                 cell.value = valor
             else:
-                # Log opcional para o console para saber quais linhas têm problemas
-                print(f"Linha {row}, Col {col_idx}: Célula mesclada ignorada.")
+                print(f"Linha {row}, Col {col_idx}: Celula mesclada ignorada.")
 
     def _str(self, v) -> str:
         return "" if v is None else str(v).strip()

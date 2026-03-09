@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import json
 import tempfile
@@ -7,12 +7,11 @@ import requests
 import gc
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
-from threading import Lock
 from PySide6.QtCore import QTimer
 
-# --- Importações PySide6 ---
+# --- ImportaÃ§Ãµes PySide6 ---
 from PySide6.QtCore import (
-    Qt, QSortFilterProxyModel, QSettings, QObject, Slot, QUrl, QThread, Signal
+    Qt, QSortFilterProxyModel, QSettings, QObject, Slot, QUrl, QThread, Signal, QTimer
 )
 from PySide6.QtGui import (
     QStandardItemModel, QStandardItem, QColor, QPainter, QAction, QKeySequence, QIcon
@@ -33,20 +32,20 @@ from PySide6.QtCharts import (
 )
 from PySide6.QtCore import Qt
 
-# --- CORREÇÃO DE CAMINHOS (ANTES dos imports do projeto que usam GIS) ---
+# --- CORREÃ‡ÃƒO DE CAMINHOS (ANTES dos imports do projeto que usam GIS) ---
 def _ajustar_ambiente_pyinstaller():
     """
-    Garante que, no executável (onedir), DLLs e dados possam ser encontrados.
+    Garante que, no executÃ¡vel (onedir), DLLs e dados possam ser encontrados.
     """
     try:
         if getattr(sys, "frozen", False):
             exe_dir = os.path.dirname(sys.executable)
             internal_dir = os.path.join(exe_dir, "_internal")
 
-            # adiciona caminhos no PATH (útil para libs que precisam de DLLs)
+            # adiciona caminhos no PATH (Ãºtil para libs que precisam de DLLs)
             os.environ["PATH"] = internal_dir + os.pathsep + exe_dir + os.pathsep + os.environ.get("PATH", "")
 
-            # Alguns builds usam _MEIPASS (onefile). Mantém compatibilidade:
+            # Alguns builds usam _MEIPASS (onefile). MantÃ©m compatibilidade:
             if hasattr(sys, "_MEIPASS"):
                 os.environ["PATH"] = sys._MEIPASS + os.pathsep + os.environ.get("PATH", "")
     except Exception:
@@ -56,22 +55,19 @@ def _ajustar_ambiente_pyinstaller():
 _ajustar_ambiente_pyinstaller()
 
 
-import os
-import sys
-
 if getattr(sys, 'frozen', False):
     # Caminho para a pasta _internal onde o PyInstaller coloca as DLLs
     internal_path = os.path.join(os.path.dirname(sys.executable), "_internal")
     os.environ["PATH"] = internal_path + os.pathsep + os.environ.get("PATH", "")
 
-    # Tentativa específica para o pyogrio/GDAL
+    # Tentativa especÃ­fica para o pyogrio/GDAL
     pyogrio_dlls = os.path.join(internal_path, "pyogrio", "shlib")
     if os.path.exists(pyogrio_dlls):
         os.add_dll_directory(pyogrio_dlls) if hasattr(os, "add_dll_directory") else None
 
 
 def resource_path(*partes: str) -> str:
-    """ Resolve caminhos para dev e para a estrutura _internal do PyInstaller """
+    """Resolve caminhos em desenvolvimento e no executavel PyInstaller."""
     rel = os.path.join(*partes)
 
     if getattr(sys, "frozen", False):
@@ -89,16 +85,16 @@ def resource_path(*partes: str) -> str:
                 return p
         return opcoes[0]  # Fallback
 
-    # Desenvolvimento: sobe 2 níveis (de app/ui/ para a raiz)
+    # Desenvolvimento: sobe 2 nÃ­veis (de app/ui/ para a raiz)
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     return os.path.join(base_dir, rel)
 
-    # Execução normal (projeto): sobe 3 níveis a partir de app/ui/main_window.py para a raiz
+    # ExecuÃ§Ã£o normal (projeto): sobe 3 nÃ­veis a partir de app/ui/main_window.py para a raiz
     base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base_path, relative_path)
 
 
-# --- Importações do Projeto ---
+# --- ImportaÃ§Ãµes do Projeto ---
 from app.models.compensacao import Compensacao
 from app.services.excel_service import ExcelService
 from app.services.validation import validate_compensacao
@@ -110,12 +106,12 @@ from app.services.gis_service import GisService
 
 # --- CONSTANTES ---
 COLS = [
-    "Ofício/ Processo", "Eletrônico", "Caixa", "Av. Tec.",
-    "Compensação", "Endereço", "Microbacia", "Compensado"
+    "OfÃ­cio/ Processo", "EletrÃ´nico", "Caixa", "Av. Tec.",
+    "CompensaÃ§Ã£o", "EndereÃ§o", "Microbacia", "Compensado"
 ]
 MICROB_NAME_FIELD = "Nome_Do_Arquivo"
 # No topo do arquivo main_window.py
-MICROB_DIR = resource_path("data", "microbacias") # Use vírgulas em vez de os.path.join aqui
+MICROB_DIR = resource_path("data", "microbacias") # Use vÃ­rgulas em vez de os.path.join aqui
 
 
 
@@ -197,7 +193,7 @@ THEME_DARK = {
 # --- WORKERS ---
 class GeocodeWorker(QThread):
     progress_update = Signal(int, str)
-    # Agora ele emite um "pacote" (dicionário) com todos os resultados no final
+    # Agora ele emite um "pacote" (dicionÃ¡rio) com todos os resultados no final
     finished_process = Signal(object)
 
     def __init__(self, records_to_process):
@@ -218,11 +214,11 @@ class GeocodeWorker(QThread):
 
             coords = self._geocode_api(address)
             if coords:
-                # Guarda as coordenadas no pacote usando o número da linha do Excel
+                # Guarda as coordenadas no pacote usando o nÃºmero da linha do Excel
                 self.resultados[r.excel_row] = (coords[0], coords[1])
             time.sleep(0.3)
 
-        # Entrega o pacote completo de uma vez só!
+        # Entrega o pacote completo de uma vez sÃ³!
         self.finished_process.emit(self.resultados)
 
     def stop(self):
@@ -233,8 +229,8 @@ class GeocodeWorker(QThread):
         if not address or not str(address).strip():
             return None
         clean_addr = str(address).strip()
-        if "são carlos" not in clean_addr.lower() and "sao carlos" not in clean_addr.lower():
-            clean_addr += ", São Carlos, SP"
+        if "sÃ£o carlos" not in clean_addr.lower() and "sao carlos" not in clean_addr.lower():
+            clean_addr += ", SÃ£o Carlos, SP"
 
         url = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
         params = {
@@ -363,7 +359,7 @@ class CheckableComboBox(QComboBox):
         model = self.model()
         # Verifica se o model existe e se tem pelo menos uma linha (o "Todos")
         if not model or model.rowCount() == 0:
-            return True  # Se não há itens, assume que não há restrição de filtro
+            return True  # Se nÃ£o hÃ¡ itens, assume que nÃ£o hÃ¡ restriÃ§Ã£o de filtro
         item = model.item(0)
         if not item:
             return True
@@ -459,7 +455,7 @@ class ColumnsDialog(QDialog):
         btn_batch_layout = QHBoxLayout()
         self.btn_all = QPushButton("Marcar Todos")
         self.btn_none = QPushButton("Desmarcar Todos")
-        self.btn_reset = QPushButton("Padrão")
+        self.btn_reset = QPushButton("PadrÃ£o")
         btn_batch_layout.addWidget(self.btn_all)
         btn_batch_layout.addWidget(self.btn_none)
         btn_batch_layout.addWidget(self.btn_reset)
@@ -510,7 +506,7 @@ class MapFullScreenDialog(QDialog):
         top_layout.setSpacing(8)
 
         self.in_search = QLineEdit()
-        self.in_search.setPlaceholderText("Pesquisar endereço...")
+        self.in_search.setPlaceholderText("Pesquisar endereÃ§o...")
         self.in_search.setMinimumWidth(340)
 
         self.btn_search = QPushButton("Buscar")
@@ -579,8 +575,8 @@ class MapFullScreenDialog(QDialog):
         QApplication.processEvents()
 
         clean = address.strip()
-        if "são carlos" not in clean.lower():
-            clean += ", São Carlos, SP"
+        if "sÃ£o carlos" not in clean.lower():
+            clean += ", SÃ£o Carlos, SP"
 
         url = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
         try:
@@ -590,7 +586,7 @@ class MapFullScreenDialog(QDialog):
                 self.web.page().runJavaScript(f"window.setMarker({loc['y']}, {loc['x']});")
                 self.lbl_status.setText("Localizado")
             else:
-                self.lbl_status.setText("Não encontrado")
+                self.lbl_status.setText("NÃ£o encontrado")
         except Exception:
             self.lbl_status.setText("Erro")
 
@@ -602,10 +598,10 @@ class TableFullScreenDialog(QDialog):
     Tela cheia da planilha.
 
     Requisitos:
-    - Manter filtros, barra de busca e botões de exportação também em tela cheia.
-    - Não duplicar a tabela (reusa o painel esquerdo com tabela + totais + exportação).
-    - Controles no topo são "espelhos" sincronizados com os controles da janela principal,
-      para não mexer no layout original e evitar bugs de reparent.
+    - Manter filtros, barra de busca e botÃµes de exportaÃ§Ã£o tambÃ©m em tela cheia.
+    - NÃ£o duplicar a tabela (reusa o painel esquerdo com tabela + totais + exportaÃ§Ã£o).
+    - Controles no topo sÃ£o "espelhos" sincronizados com os controles da janela principal,
+      para nÃ£o mexer no layout original e evitar bugs de reparent.
     """
 
     def __init__(self, parent: "MainWindow", content_widget: QWidget, on_close_callback):
@@ -649,18 +645,18 @@ class TableFullScreenDialog(QDialog):
         sb.setSpacing(8)
 
         self.in_search = QLineEdit()
-        self.in_search.setPlaceholderText("Buscar (ofício, av. tec, endereço, microbacia...)")
+        self.in_search.setPlaceholderText("Buscar (ofÃ­cio, av. tec, endereÃ§o, microbacia...)")
         self.in_search.setClearButtonEnabled(True)
         self.in_search.setText(self._mw.search.text())
 
-        # mantém sincronizado nos dois sentidos
+        # mantÃ©m sincronizado nos dois sentidos
         self.in_search.textChanged.connect(self._on_fs_search_changed)
         self._mw.search.textChanged.connect(self._on_main_search_changed)
 
         sb.addWidget(QLabel("Busca:"))
         sb.addWidget(self.in_search, 1)
 
-        # (opcional) botão limpar rápido
+        # (opcional) botÃ£o limpar rÃ¡pido
         self.btn_clear_search = QPushButton("Limpar Busca")
         self.btn_clear_search.setProperty("kind", "secondary")
         self.btn_clear_search.clicked.connect(lambda: self.in_search.setText(""))
@@ -678,13 +674,13 @@ class TableFullScreenDialog(QDialog):
         fb.addWidget(QLabel("Filtros:"))
 
         self.fs_filter_micro = self._clone_checkable_combo(self._mw.filter_micro, "Todas as Microbacias")
-        self.fs_filter_eletronico = self._clone_checkable_combo(self._mw.filter_eletronico, "Eletrônico")
+        self.fs_filter_eletronico = self._clone_checkable_combo(self._mw.filter_eletronico, "EletrÃ´nico")
 
         self.fs_filter_status = QComboBox()
         self._copy_combo_items(self._mw.filter_status, self.fs_filter_status)
         self.fs_filter_status.setCurrentIndex(self._mw.filter_status.currentIndex())
 
-        # botões (chamam as mesmas ações do MainWindow)
+        # botÃµes (chamam as mesmas aÃ§Ãµes do MainWindow)
         self.btn_clear_filters = QPushButton("Limpar")
         self.btn_clear_filters.setProperty("kind", "secondary")
         self.btn_clear_filters.clicked.connect(self._mw.clear_filters)
@@ -715,14 +711,14 @@ class TableFullScreenDialog(QDialog):
 
         layout.addWidget(filt_bar)
 
-        # sincronização filtros (fs -> main)
+        # sincronizaÃ§Ã£o filtros (fs -> main)
         self.fs_filter_micro.currentTextChanged.connect(
             lambda: self._sync_checkable_to_main(self.fs_filter_micro, self._mw.filter_micro))
         self.fs_filter_eletronico.currentTextChanged.connect(
             lambda: self._sync_checkable_to_main(self.fs_filter_eletronico, self._mw.filter_eletronico))
         self.fs_filter_status.currentTextChanged.connect(self._on_fs_status_changed)
 
-        # sincronização filtros (main -> fs)
+        # sincronizaÃ§Ã£o filtros (main -> fs)
         self._mw.filter_micro.currentTextChanged.connect(
             lambda: self._sync_checkable_to_fs(self._mw.filter_micro, self.fs_filter_micro))
         self._mw.filter_eletronico.currentTextChanged.connect(
@@ -731,7 +727,7 @@ class TableFullScreenDialog(QDialog):
 
         # manter contador em sync quando filtro roda
         try:
-            # sempre que statusbar mudar (após apply_filter), atualiza contador
+            # sempre que statusbar mudar (apÃ³s apply_filter), atualiza contador
             self._mw.search.textChanged.connect(self._refresh_results_label)
             self._mw.filter_status.currentTextChanged.connect(self._refresh_results_label)
             self._mw.filter_micro.currentTextChanged.connect(self._refresh_results_label)
@@ -739,7 +735,7 @@ class TableFullScreenDialog(QDialog):
         except Exception:
             pass
 
-        # ---------- Conteúdo (painel esquerdo com tabela + totais + exportação) ----------
+        # ---------- ConteÃºdo (painel esquerdo com tabela + totais + exportaÃ§Ã£o) ----------
         self._content.setParent(self)
         layout.addWidget(self._content, 1)
 
@@ -785,7 +781,7 @@ class TableFullScreenDialog(QDialog):
 
             # garante mesma contagem (caso main tenha sido atualizado)
             if mm.rowCount() != fm.rowCount():
-                # reconstrói o FS a partir do main
+                # reconstrÃ³i o FS a partir do main
                 rebuilt = self._clone_checkable_combo(main, main._all_label if hasattr(main, "_all_label") else "Todos")
                 fs.blockSignals(True)
                 fs.setModel(rebuilt.model())
@@ -849,7 +845,7 @@ class TableFullScreenDialog(QDialog):
             return
         self._syncing = True
         try:
-            # atualiza o campo principal (mantém toda a lógica existente de filtro)
+            # atualiza o campo principal (mantÃ©m toda a lÃ³gica existente de filtro)
             self._mw.search.setText(txt)
         finally:
             self._syncing = False
@@ -873,7 +869,7 @@ class TableFullScreenDialog(QDialog):
 
     def closeEvent(self, event):
         try:
-            # desconecta sinais (evita referências penduradas)
+            # desconecta sinais (evita referÃªncias penduradas)
             try:
                 self._mw.search.textChanged.disconnect(self._on_main_search_changed)
             except Exception:
@@ -908,13 +904,13 @@ class TableFullScreenDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Compensações - Cadastro e Consulta")
+        self.setWindowTitle("CompensaÃ§Ãµes - Cadastro e Consulta")
 
         icon_path = resource_path("assets", "app.ico")  # Ajuste o nome conforme seu arquivo em /assets
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         else:
-            print(f"Aviso: Ícone não encontrado em {icon_path}")
+            print(f"Aviso: Ãcone nÃ£o encontrado em {icon_path}")
 
         self.excel = ExcelService()
         self.records: List[Compensacao] = []
@@ -928,7 +924,7 @@ class MainWindow(QMainWindow):
         self.is_dark_mode = str(self.settings.value("dark_mode", "false")).lower() == "true"
         self.geo_worker = None
         self._is_reset_state = False
-        self._did_initial_resize = False  # evita “tremor” ao filtrar
+        self._did_initial_resize = False  # evita â€œtremorâ€ ao filtrar
         self._table_fs_dialog = None
         self._table_fs_placeholder = None
         self._table_fs_split_state = None
@@ -957,14 +953,14 @@ class MainWindow(QMainWindow):
         self.btn_reload = QPushButton("Recarregar")
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Buscar (ofício, av. tec, endereço, microbacia...)")
+        self.search.setPlaceholderText("Buscar (ofÃ­cio, av. tec, endereÃ§o, microbacia...)")
         self.search.setClearButtonEnabled(True)
 
         self.btn_theme = QPushButton("Tema")
         self.btn_theme.setToolTip("Alternar Modo Claro/Escuro")
         self.btn_theme.setFixedWidth(70)
 
-        # impedir “afinamento” ao maximizar
+        # impedir â€œafinamentoâ€ ao maximizar
         self.btn_open.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_reload.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.search.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -993,7 +989,7 @@ class MainWindow(QMainWindow):
         self.filter_micro = CheckableComboBox("Todas as Microbacias")
         self.filter_micro.setMinimumWidth(240)
 
-        self.filter_eletronico = CheckableComboBox("Eletrônico")
+        self.filter_eletronico = CheckableComboBox("EletrÃ´nico")
         self.filter_eletronico.setMinimumWidth(180)
 
         self.filter_status = QComboBox()
@@ -1017,6 +1013,12 @@ class MainWindow(QMainWindow):
         filters.addWidget(self.btn_table_full)
         filters.addStretch(1)
 
+        self.lbl_results = QLabel("0 registros")
+        self.lbl_results.setObjectName("ResultsLabel")
+        self.lbl_results.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_results.setMinimumWidth(170)
+        filters.addWidget(self.lbl_results)
+
         tab_data_layout.addLayout(filters)
 
         # Main Splitter
@@ -1035,10 +1037,10 @@ class MainWindow(QMainWindow):
         self.model = QStandardItemModel(0, len(COLS))
         self.model.setHorizontalHeaderLabels(COLS)
 
-        # Alinhamento do cabeçalho por tipo (melhor leitura)
+        # Alinhamento do cabeÃ§alho por tipo (melhor leitura)
         try:
             self.model.setHeaderData(4, Qt.Horizontal, Qt.AlignRight | Qt.AlignVCenter,
-                                     Qt.TextAlignmentRole)  # Compensação
+                                     Qt.TextAlignmentRole)  # CompensaÃ§Ã£o
             self.model.setHeaderData(7, Qt.Horizontal, Qt.AlignCenter | Qt.AlignVCenter,
                                      Qt.TextAlignmentRole)  # Compensado
         except Exception:
@@ -1054,7 +1056,7 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QTableView.SingleSelection)
         self.table.setAlternatingRowColors(True)
 
-        # Row numbers (visíveis)
+        # Row numbers (visÃ­veis)
         self.table.verticalHeader().setVisible(True)
         self.table.verticalHeader().setDefaultSectionSize(24)
         self.table.verticalHeader().setMinimumWidth(38)
@@ -1077,7 +1079,7 @@ class MainWindow(QMainWindow):
 
         self.kpi_table = QTableView()
         self.kpi_model = QStandardItemModel(0, 2)
-        self.kpi_model.setHorizontalHeaderLabels(["Métrica", "Valor"])
+        self.kpi_model.setHorizontalHeaderLabels(["MÃ©trica", "Valor"])
         self.kpi_table.setModel(self.kpi_model)
         self.kpi_table.horizontalHeader().setStretchLastSection(True)
         self.kpi_table.setMinimumHeight(120)
@@ -1093,7 +1095,7 @@ class MainWindow(QMainWindow):
         totals_layout.addWidget(self.micro_table, 1)
         left_layout.addWidget(totals_group)
 
-        # Mantém a área de Totais/Exportação estável (não “some” após sair da tela cheia)
+        # MantÃ©m a Ã¡rea de Totais/ExportaÃ§Ã£o estÃ¡vel (nÃ£o â€œsomeâ€ apÃ³s sair da tela cheia)
         totals_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         totals_group.setMinimumHeight(180)
         totals_group.setMaximumHeight(260)
@@ -1125,7 +1127,7 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(8)
 
         # Cadastro em 2 colunas
-        form_group = QGroupBox("Cadastro / Edição")
+        form_group = QGroupBox("Cadastro / EdiÃ§Ã£o")
         fg = QGridLayout(form_group)
         fg.setContentsMargins(10, 10, 10, 10)
         fg.setHorizontalSpacing(10)
@@ -1154,7 +1156,7 @@ class MainWindow(QMainWindow):
         self.in_micro.setMinimumHeight(26)
         self.in_micro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        # Eletrônico (radio buttons)
+        # EletrÃ´nico (radio buttons)
         self.eletronico_container = QWidget()
         self.eletronico_layout = QHBoxLayout(self.eletronico_container)
         self.eletronico_layout.setContentsMargins(0, 0, 0, 0)
@@ -1165,19 +1167,19 @@ class MainWindow(QMainWindow):
         self.chk_compensado = QCheckBox("Compensado (SIM)")
         self.chk_compensado.setMinimumHeight(24)
 
-        fg.addWidget(mk_label("Ofício/Processo:"), 0, 0)
+        fg.addWidget(mk_label("OfÃ­cio/Processo:"), 0, 0)
         fg.addWidget(self.in_oficio, 0, 1)
-        fg.addWidget(mk_label("Compensação:"), 0, 2)
+        fg.addWidget(mk_label("CompensaÃ§Ã£o:"), 0, 2)
         fg.addWidget(self.in_comp, 0, 3)
 
-        fg.addWidget(mk_label("Eletrônico:"), 1, 0)
+        fg.addWidget(mk_label("EletrÃ´nico:"), 1, 0)
         fg.addWidget(self.eletronico_container, 1, 1)
         fg.addWidget(mk_label("Microbacia:"), 1, 2)
         fg.addWidget(self.in_micro, 1, 3)
 
         fg.addWidget(mk_label("Caixa:"), 2, 0)
         fg.addWidget(self.in_caixa, 2, 1)
-        fg.addWidget(mk_label("Endereço:"), 2, 2)
+        fg.addWidget(mk_label("EndereÃ§o:"), 2, 2)
         fg.addWidget(self.in_end, 2, 3)
 
         fg.addWidget(mk_label("Av. Tec.:"), 3, 0)
@@ -1217,7 +1219,7 @@ class MainWindow(QMainWindow):
         mg.setHorizontalSpacing(8)
         mg.setVerticalSpacing(6)
 
-        self.btn_maps = QPushButton("Pesquisar Endereço")
+        self.btn_maps = QPushButton("Pesquisar EndereÃ§o")
         self.btn_batch_geo = QPushButton("GPS em Lote")
         self.btn_map_full = QPushButton("Tela Cheia")
 
@@ -1290,7 +1292,7 @@ class MainWindow(QMainWindow):
         self.pie_series = QPieSeries()
         self.pie_series.setHoleSize(0.40)
         self.pie_chart.addSeries(self.pie_series)
-        self.pie_chart.setTitle("Status de Compensação")
+        self.pie_chart.setTitle("Status de CompensaÃ§Ã£o")
         self.pie_chart.legend().setAlignment(Qt.AlignBottom)
 
         self.pie_container = QFrame()
@@ -1304,7 +1306,7 @@ class MainWindow(QMainWindow):
         self.bar_chart_micro = QChart()
         self.bar_series_micro = QBarSeries()
         self.bar_chart_micro.addSeries(self.bar_series_micro)
-        self.bar_chart_micro.setTitle("Top 10 - Pendências por Microbacia")
+        self.bar_chart_micro.setTitle("Top 10 - PendÃªncias por Microbacia")
         self.bar_chart_micro.legend().setVisible(False)
 
         self.bar_axis_x_micro = QBarCategoryAxis()
@@ -1326,6 +1328,7 @@ class MainWindow(QMainWindow):
 
         # ===== Wiring =====
         self._setup_leaflet_map()
+        self._load_last_excel()
         self._load_sort_settings()
 
         # Restore splitters
@@ -1342,24 +1345,21 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # ===== Aparência: hierarquia de botões (primário / secundário / perigo) =====
-        # (Somente visual: não altera funções)
-        try:
-            self.btn_open.setProperty("kind", "primary")
-            self.btn_save_edit.setProperty("kind", "primary")
-            self.btn_export_dashboard_pdf.setProperty("kind", "primary")
+        # ===== AparÃªncia: hierarquia de botÃµes (primÃ¡rio / secundÃ¡rio / perigo) =====
+        # (Somente visual: nÃ£o altera funÃ§Ãµes)
+        self.btn_open.setProperty("kind", "primary")
+        self.btn_save_edit.setProperty("kind", "primary")
+        self.btn_export_dashboard_pdf.setProperty("kind", "primary")
 
-            self.btn_add.setProperty("kind", "success")
-            self.btn_delete.setProperty("kind", "danger")
+        self.btn_add.setProperty("kind", "success")
+        self.btn_delete.setProperty("kind", "danger")
 
-            for b in [
-                self.btn_reload, self.btn_theme, self.btn_columns, self.btn_clear_filters, self.btn_clear_sort,
-                self.btn_export_csv, self.btn_export_pdf, self.btn_export_excel, self.btn_export_pend_pdf,
-                self.btn_maps, self.btn_batch_geo, self.btn_full
-            ]:
-                b.setProperty("kind", "secondary")
-        except Exception:
-            pass
+        for b in [
+            self.btn_reload, self.btn_theme, self.btn_columns, self.btn_clear_filters,
+            self.btn_reset_sort, self.btn_export_csv, self.btn_export_pdf, self.btn_export_excel,
+            self.btn_maps, self.btn_batch_geo, self.btn_map_full, self.btn_table_full
+        ]:
+            b.setProperty("kind", "secondary")
 
         # Connections
         self.btn_open.clicked.connect(self.open_excel)
@@ -1403,18 +1403,19 @@ class MainWindow(QMainWindow):
 
         self._set_enabled_all(False)
         self.clear_filters()
-        self._apply_columns_visibility(resize=True)  # 1x só
+        self._apply_columns_visibility(resize=True)  # 1x sÃ³
         self._apply_theme()
         self._update_address_search_enabled()
+        self._update_form_action_buttons()
 
         self.statusBar().showMessage("Pronto")
         # ==========================================================
-        # CORREÇÃO PARA TELAS 1440x900 (Evitar botões cortados)
+        # CORREÃ‡ÃƒO PARA TELAS 1440x900 (Evitar botÃµes cortados)
         # ==========================================================
-        # 1. Libera a janela principal para encolher até 600px de altura se o monitor exigir
+        # 1. Libera a janela principal para encolher atÃ© 600px de altura se o monitor exigir
         self.setMinimumSize(1024, 600)
 
-        # 2. Força a tabela principal a aceitar ser "esmagada", liberando espaço pros botões
+        # 2. ForÃ§a a tabela principal a aceitar ser "esmagada", liberando espaÃ§o pros botÃµes
         try:
             self.table.setMinimumHeight(50)
         except Exception:
@@ -1455,10 +1456,17 @@ class MainWindow(QMainWindow):
 
     # ===== Helpers UI =====
     def _update_address_search_enabled(self):
-        # Habilita o botão somente se:
-        # 1) o campo de endereço estiver habilitado (app já carregou / não está bloqueado)
-        # 2) houver algum texto no endereço
+        # Habilita o botÃ£o somente se:
+        # 1) o campo de endereÃ§o estiver habilitado (app jÃ¡ carregou / nÃ£o estÃ¡ bloqueado)
+        # 2) houver algum texto no endereÃ§o
         self.btn_maps.setEnabled(self.in_end.isEnabled() and bool(self.in_end.text().strip()))
+
+    def _update_form_action_buttons(self):
+        can_use_form = bool(self.excel.path) and self.in_oficio.isEnabled()
+        has_selected = self.selected is not None
+        self.btn_add.setEnabled(can_use_form)
+        self.btn_save_edit.setEnabled(can_use_form and has_selected)
+        self.btn_delete.setEnabled(can_use_form and has_selected)
 
     # ===== THEME =====
     def toggle_theme(self):
@@ -1559,7 +1567,7 @@ class MainWindow(QMainWindow):
                 border-color: {t['input_border']};
             }}
 
-            /* Hierarquia visual dos botões */
+            /* Hierarquia visual dos botÃµes */
             QPushButton[kind="primary"] {{
                 background-color: {t['btn_primary']};
                 color: {t['btn_text']};
@@ -1642,7 +1650,7 @@ class MainWindow(QMainWindow):
                 background: {t['splitter_handle']};
             }}
 
-            /* ===== Menus/Popups (evita texto invisível) ===== */
+            /* ===== Menus/Popups (evita texto invisÃ­vel) ===== */
             QMenu {{
                 background-color: {t['bg_panel']};
                 color: {t['text']};
@@ -1688,9 +1696,12 @@ class MainWindow(QMainWindow):
     def _save_sort_settings(self):
         if self._is_reset_state:
             self.settings.setValue("sort_column", -1)
+            self.settings.setValue("sort_order", int(Qt.AscendingOrder.value))
         else:
+            sort_order = self.proxy.sortOrder()
+            sort_order_value = getattr(sort_order, "value", sort_order)
             self.settings.setValue("sort_column", self.proxy.sortColumn())
-            self.settings.setValue("sort_order", int(self.proxy.sortOrder()))
+            self.settings.setValue("sort_order", int(sort_order_value))
 
     def _load_sort_settings(self):
         col = int(self.settings.value("sort_column", -1))
@@ -1747,8 +1758,9 @@ class MainWindow(QMainWindow):
 
         def on_loaded(ok):
             if ok:
-                self._load_last_excel()
                 self._apply_theme()
+                if self.gis:
+                    self._load_microbacias_layer()
                 saved_layer = self.settings.value("map_layer", "Mapa Claro")
                 try:
                     self.web.page().runJavaScript(f"if(window.setBaseLayer) window.setBaseLayer('{saved_layer}');")
@@ -1785,7 +1797,7 @@ class MainWindow(QMainWindow):
         if not self.gis:
             self._load_microbacias_layer()
             if not self.gis:
-                self._set_map_status(f"Erro: Pasta {MICROB_DIR} não encontrada.")
+                self._set_map_status(f"Erro: Pasta {MICROB_DIR} nÃ£o encontrada.")
                 return
 
         micro = self.gis.find_microbacia(lat, lng)
@@ -1797,9 +1809,9 @@ class MainWindow(QMainWindow):
             self._set_map_status("Fora de microbacia conhecida.")
 
     def _get_planilha_panel(self) -> Tuple[Optional[QWidget], int]:
-        """Retorna o widget do splitter principal que contém a “planilha” e seu índice.
+        """Retorna o widget do splitter principal que contÃ©m a â€œplanilhaâ€ e seu Ã­ndice.
 
-        Isso evita inversão esquerda/direita caso o layout mude.
+        Isso evita inversÃ£o esquerda/direita caso o layout mude.
         """
         try:
             if hasattr(self, "table") and self.table is not None:
@@ -1810,7 +1822,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Fallback para versões antigas que guardavam _left_panel
+        # Fallback para versÃµes antigas que guardavam _left_panel
         w = getattr(self, "_left_panel", None)
         try:
             idx = self.main_splitter.indexOf(w) if w is not None else 0
@@ -1819,7 +1831,7 @@ class MainWindow(QMainWindow):
         return w, idx
 
     def open_fullscreen_table(self):
-        """Abre a área da planilha em tela cheia (mantém filtros/busca/exportação via painel reutilizado)."""
+        """Abre a Ã¡rea da planilha em tela cheia (mantÃ©m filtros/busca/exportaÃ§Ã£o via painel reutilizado)."""
         panel = None
         try:
             if self._table_fs_dialog is not None:
@@ -1883,17 +1895,17 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Erro", f"Falha ao abrir tela cheia da planilha:\n{e}")
 
     def _restore_table_panel(self, panel_widget: QWidget):
-        """Restaura o painel da planilha no mesmo índice do splitter, sem inverter lados."""
+        """Restaura o painel da planilha no mesmo Ã­ndice do splitter, sem inverter lados."""
         if panel_widget is None:
             return
 
-        # Índice original antes de abrir a tela cheia
+        # Ãndice original antes de abrir a tela cheia
         try:
             idx = int(getattr(self, "_table_fs_index", 0))
         except Exception:
             idx = 0
 
-        # Garante índice válido
+        # Garante Ã­ndice vÃ¡lido
         try:
             count = self.main_splitter.count()
             if idx < 0:
@@ -1903,12 +1915,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # IMPORTANTE: não remover o placeholder antes de substituir
+        # IMPORTANTE: nÃ£o remover o placeholder antes de substituir
         try:
             try:
                 self.main_splitter.replaceWidget(idx, panel_widget)
             except Exception:
-                # Fallback: tenta inserir no índice (mantendo a ordem)
+                # Fallback: tenta inserir no Ã­ndice (mantendo a ordem)
                 panel_widget.setParent(self.main_splitter)
                 self.main_splitter.insertWidget(idx, panel_widget)
         except Exception:
@@ -1929,13 +1941,13 @@ class MainWindow(QMainWindow):
             pass
 
         # ==========================================================
-        # CORREÇÃO: Zerar a Política de Tamanho da Tabela
+        # CORREÃ‡ÃƒO: Zerar a PolÃ­tica de Tamanho da Tabela
         # ==========================================================
         try:
-            # 1. Guardamos a política original de redimensionamento da tabela
+            # 1. Guardamos a polÃ­tica original de redimensionamento da tabela
             politica_antiga = self.table.sizePolicy()
 
-            # 2. Forçamos a tabela a ignorar qualquer tamanho em cache (fazendo-a encolher)
+            # 2. ForÃ§amos a tabela a ignorar qualquer tamanho em cache (fazendo-a encolher)
             from PySide6.QtWidgets import QSizePolicy
             self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
@@ -1947,7 +1959,7 @@ class MainWindow(QMainWindow):
                 if getattr(self, '_table_fs_split_sizes', None):
                     self.main_splitter.setSizes(self._table_fs_split_sizes)
 
-            # Damos 50 milissegundos para o layout "puxar" os botões para cima
+            # Damos 50 milissegundos para o layout "puxar" os botÃµes para cima
             QTimer.singleShot(50, _restaurar_tamanho_tabela)
         except Exception:
             pass
@@ -1972,8 +1984,8 @@ class MainWindow(QMainWindow):
         if not address.strip():
             return None
         clean_addr = address.strip()
-        if "são carlos" not in clean_addr.lower() and "sao carlos" not in clean_addr.lower():
-            clean_addr += ", São Carlos, SP"
+        if "sÃ£o carlos" not in clean_addr.lower() and "sao carlos" not in clean_addr.lower():
+            clean_addr += ", SÃ£o Carlos, SP"
         url = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
         params = {
             "SingleLine": clean_addr, "f": "json", "maxLocations": 1,
@@ -1989,43 +2001,54 @@ class MainWindow(QMainWindow):
             pass
         return None
 
-    def search_on_map_by_address(self):
-        addr = self.in_end.text().strip()
-        if not addr:
-            QMessageBox.warning(self, "Atenção", "Digite um endereço para pesquisar.")
-            return
+    def _show_geocode_not_found(self):
+        self._set_map_status("Endereco nao encontrado.")
+        self.statusBar().showMessage("Endere?o n?o encontrado")
+        QMessageBox.warning(self, "Nao encontrado", "Nao consegui localizar esse endereco.")
 
-        self._set_map_status("Pesquisando endereço...")
-        self.statusBar().showMessage("Pesquisando endereço...")
-        result = self.geocode_address(addr)
-        if not result:
-            self._set_map_status("Endereço não encontrado.")
-            self.statusBar().showMessage("Endereço não encontrado")
-            QMessageBox.warning(self, "Não encontrado", "Não consegui localizar esse endereço.")
-            return
-
-        lat, lng = result
+    def _apply_geocode_result(self, lat: float, lng: float) -> str:
         self.last_marker_coords = (lat, lng)
         self._set_map_marker(lat, lng)
 
-        if self.selected:
-            self.selected.latitude = str(lat)
-            self.selected.longitude = str(lng)
-            try:
-                self.excel.save_edit(self.selected)
-            except Exception:
-                pass
-
+        micro = ""
         if self.gis:
             micro = self.gis.find_microbacia(lat, lng)
             if micro:
                 self.in_micro.setCurrentText(micro)
                 self._highlight_microbacia(micro)
-                self._set_map_status(f"Endereço localizado. Microbacia: {micro}")
-                self.statusBar().showMessage(f"Endereço localizado. Microbacia: {micro}")
+                self._set_map_status(f"Endereco localizado. Microbacia: {micro}")
+                self.statusBar().showMessage(f"Endereco localizado. Microbacia: {micro}")
             else:
-                self._set_map_status("Endereço localizado, mas microbacia não detectada.")
-                self.statusBar().showMessage("Endereço localizado (microbacia não detectada)")
+                self._set_map_status("Endereco localizado, mas microbacia nao detectada.")
+                self.statusBar().showMessage("Endereco localizado (microbacia nao detectada)")
+
+        if self.selected:
+            self.selected.latitude = str(lat)
+            self.selected.longitude = str(lng)
+            if micro:
+                self.selected.microbacia = micro
+            try:
+                self.excel.save_edit(self.selected)
+            except Exception:
+                pass
+
+        return micro
+
+    def search_on_map_by_address(self):
+        addr = self.in_end.text().strip()
+        if not addr:
+            QMessageBox.warning(self, "Atencao", "Digite um endereco para pesquisar.")
+            return
+
+        self._set_map_status("Pesquisando endereco...")
+        self.statusBar().showMessage("Pesquisando endereco...")
+        result = self.geocode_address(addr)
+        if not result:
+            self._show_geocode_not_found()
+            return
+
+        lat, lng = result
+        self._apply_geocode_result(lat, lng)
 
     # ===== Enable/Disable =====
     def _set_enabled_all(self, enabled: bool):
@@ -2045,6 +2068,7 @@ class MainWindow(QMainWindow):
         for btn in self.eletronico_group.buttons():
             btn.setEnabled(enabled)
         self._update_address_search_enabled()
+        self._update_form_action_buttons()
 
     # ===== Filters =====
     def clear_filters(self):
@@ -2060,11 +2084,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Filtros limpos")
 
     def clear_sorting(self):
-        """Remove ordenação da tabela (volta ao estado 'sem ordenação')."""
+        """Remove ordenaÃ§Ã£o da tabela (volta ao estado 'sem ordenaÃ§Ã£o')."""
         self._is_reset_state = True
         try:
             try:
-                # -1 remove ordenação no proxy
+                # -1 remove ordenaÃ§Ã£o no proxy
                 self.proxy.sort(-1)
             except Exception:
                 pass
@@ -2171,7 +2195,7 @@ class MainWindow(QMainWindow):
                 w.deleteLater()
 
         if not opcoes:
-            opcoes = ["SIM", "NÃO"]
+            opcoes = ["SIM", "NÃƒO"]
 
         for opt in opcoes:
             rb = QRadioButton(opt)
@@ -2194,21 +2218,21 @@ class MainWindow(QMainWindow):
         self.table.setUpdatesEnabled(True)
 
     def _auto_resize_columns(self):
-        # Auto ajuste inicial (evita “tremor” durante filtros)
+        # Auto ajuste inicial (evita â€œtremorâ€ durante filtros)
         self.table.resizeColumnsToContents()
 
-        # Endereço costuma precisar de mais espaço
+        # EndereÃ§o costuma precisar de mais espaÃ§o
         if not self.table.isColumnHidden(5):
             self.table.setColumnWidth(5, max(self.table.columnWidth(5), 320))
 
-        # Microbacia também costuma cortar
+        # Microbacia tambÃ©m costuma cortar
         if not self.table.isColumnHidden(6):
             self.table.setColumnWidth(6, max(self.table.columnWidth(6), 200))
 
     def _auto_resize_totals_tables(self):
         self.kpi_table.resizeColumnsToContents()
         self.micro_table.resizeColumnsToContents()
-        # Não deixar encolher demais após atualizar/limpar filtros
+        # NÃ£o deixar encolher demais apÃ³s atualizar/limpar filtros
         self.kpi_table.setColumnWidth(0, max(self.kpi_table.columnWidth(0), 160))
         self.kpi_table.setColumnWidth(1, max(self.kpi_table.columnWidth(1), 140))
 
@@ -2256,7 +2280,7 @@ class MainWindow(QMainWindow):
             it_compensado = QStandardItem(c.compensado)
             is_ok = self._row_is_compensado(c)
 
-            # “badge” só na coluna Compensado (sem pintar a linha inteira)
+            # â€œbadgeâ€ sÃ³ na coluna Compensado (sem pintar a linha inteira)
             if is_ok:
                 it_compensado.setText("SIM")
                 it_compensado.setBackground(badge_bg_ok)
@@ -2289,7 +2313,7 @@ class MainWindow(QMainWindow):
         for row in rows_to_add:
             self.model.appendRow(row)
 
-        # NÃO chamar resizeColumnsToContents a cada filtro (evita tremor)
+        # NÃƒO chamar resizeColumnsToContents a cada filtro (evita tremor)
         self._apply_columns_visibility(resize=not self._did_initial_resize)
         self.table.setUpdatesEnabled(True)
 
@@ -2355,49 +2379,71 @@ class MainWindow(QMainWindow):
         self._fill_bar(self.bar_series_micro, self.bar_axis_x_micro, self.bar_axis_y_micro, m["pend_micro_sorted"][:10])
 
     # ===== Export =====
+    def _show_export_success(self):
+        QMessageBox.information(self, "Sucesso", "Exportado com sucesso.")
+
+    def _get_save_path(self, title: str, file_filter: str) -> str:
+        path, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
+        return path
+
+    def _export_dashboard_images(self) -> tuple[str, str]:
+        temp_dir = tempfile.mkdtemp()
+        pie = os.path.join(temp_dir, "p.png")
+        bar = os.path.join(temp_dir, "b.png")
+        self.pie_view.grab().save(pie)
+        self.bar_view_micro.grab().save(bar)
+        return pie, bar
+
     def export_csv_clicked(self):
         if not self.records:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Salvar CSV", "", "CSV (*.csv)")
+        path = self._get_save_path("Salvar CSV", "CSV (*.csv)")
         if path:
             export_csv(path, self.filtered_records, self._selected_export_attrs())
-            QMessageBox.information(self, "Sucesso", "Exportado com sucesso.")
+            self._show_export_success()
 
     def export_excel_clicked(self):
         if not self.records:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Salvar Excel", "", "Excel (*.xlsx)")
+        path = self._get_save_path("Salvar Excel", "Excel (*.xlsx)")
         if path:
             m = self._compute_metrics(self.filtered_records)
-            kpis = [("Total", m["total_geral"]), ("Pendente", m["total_pendente"]),
-                    ("Compensado", m["total_compensado"])]
-            export_excel_two_sheets(path, self.filtered_records, "Filtro", self._selected_export_attrs(), kpis,
-                                    m["pend_micro_sorted"], m["pend_ele_sorted"])
-            QMessageBox.information(self, "Sucesso", "Exportado com sucesso.")
+            kpis = [
+                ("Total", m["total_geral"]),
+                ("Pendente", m["total_pendente"]),
+                ("Compensado", m["total_compensado"]),
+            ]
+            export_excel_two_sheets(
+                path,
+                self.filtered_records,
+                "Filtro",
+                self._selected_export_attrs(),
+                kpis,
+                m["pend_micro_sorted"],
+                m["pend_ele_sorted"],
+            )
+            self._show_export_success()
 
     def export_pdf_clicked(self):
         if not self.records:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Salvar PDF", "", "PDF (*.pdf)")
+        path = self._get_save_path("Salvar PDF", "PDF (*.pdf)")
         if path:
             m = self._compute_metrics(self.filtered_records)
             kpis = [("Total", m["total_geral"]), ("Pendente", m["total_pendente"])]
             export_pdf(path, self.filtered_records, "Filtro", self._selected_export_attrs(), kpis,
                        m["pend_micro_sorted"])
-            QMessageBox.information(self, "Sucesso", "Exportado com sucesso.")
+            self._show_export_success()
 
     def export_dashboard_pdf_clicked(self):
         if not self.records:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Salvar PDF", "", "PDF (*.pdf)")
+        path = self._get_save_path("Salvar PDF", "PDF (*.pdf)")
         if path:
-            d = tempfile.mkdtemp()
-            pie, bar = os.path.join(d, "p.png"), os.path.join(d, "b.png")
-            self.pie_view.grab().save(pie)
-            self.bar_view_micro.grab().save(bar)
+            pie, bar = self._export_dashboard_images()
             m = self._compute_metrics(self.records)
             export_dashboard_pdf(path, "Painel", [f"Total: {m['total_geral']}"], "Geral", [pie, bar])
-            QMessageBox.information(self, "Sucesso", "Exportado com sucesso.")
+            self._show_export_success()
 
     # ===== Form CRUD =====
     def clear_form(self):
@@ -2409,6 +2455,8 @@ class MainWindow(QMainWindow):
         for b in self.eletronico_group.buttons():
             b.setChecked(False)
         self.table.clearSelection()
+        self._update_form_action_buttons()
+        self.in_oficio.setFocus()
         self.statusBar().showMessage("Novo registro")
 
     def fill_form(self, c: Compensacao):
@@ -2477,17 +2525,29 @@ class MainWindow(QMainWindow):
     def delete_selected(self):
         if not self.excel.path or not self.selected:
             return
-        if QMessageBox.question(self, "Excluir", "Confirma a exclusão?") == QMessageBox.Yes:
+        if QMessageBox.question(self, "Excluir", "Confirma a exclusÃ£o?") == QMessageBox.Yes:
             self.excel.delete_record_shift_up(self.selected.excel_row)
             self.reload()
             self.clear_form()
 
-    def open_excel(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        import gc
-        import os
+    def _load_excel_records(self, path: str, *, persist_last_path: bool, status_prefix: str):
+        self.records = self.excel.load(path)
+        if persist_last_path:
+            self.settings.setValue("last_excel_path", path)
 
-        # Abre o navegador NATIVO do Windows (Permite acessar a Rede/Servidores perfeitamente)
+        gc.collect()
+
+        self._setup_dynamic_form_options_from_records()
+        self._update_filters_from_records()
+        self._load_microbacias_layer()
+
+        self.apply_filter()
+        self._update_dashboard()
+        self._set_enabled_all(True)
+        self._apply_columns_visibility(resize=True)
+        self.statusBar().showMessage(f"{status_prefix}: {len(self.records)} registros.")
+
+    def open_excel(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Abrir Excel",
@@ -2499,42 +2559,16 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self.records = self.excel.load(path)
-            self.settings.setValue("last_excel_path", path)
-
-            gc.collect()
-
-            self._setup_dynamic_form_options_from_records()
-            self._update_filters_from_records()
-            self._load_microbacias_layer()
-
-            self.apply_filter()
-            self._update_dashboard()
-            self._set_enabled_all(True)
-
-            self._apply_columns_visibility(resize=True)
+            self._load_excel_records(path, persist_last_path=True, status_prefix="Carregado")
             QMessageBox.information(self, "Sucesso", f"Carregado: {len(self.records)} registros.")
-            self.statusBar().showMessage(f"Carregado: {len(self.records)} registros.")
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao abrir a planilha na rede:\n{str(e)}")
+            QMessageBox.critical(self, "Erro", f"Falha ao abrir a planilha:\n{str(e)}")
 
     def _load_last_excel(self):
         path = self.settings.value("last_excel_path", "")
         if path and os.path.exists(path):
             try:
-                self.records = self.excel.load(path)
-                self.excel.path = path
-
-                self._setup_dynamic_form_options_from_records()
-                self._update_filters_from_records()
-                self._load_microbacias_layer()
-
-                self.apply_filter()
-                self._update_dashboard()
-                self._set_enabled_all(True)
-
-                self._apply_columns_visibility(resize=True)
-                self.statusBar().showMessage(f"Carregado: {len(self.records)} registros.")
+                self._load_excel_records(path, persist_last_path=False, status_prefix="Carregado")
             except Exception:
                 pass
 
@@ -2542,16 +2576,7 @@ class MainWindow(QMainWindow):
         if not self.excel.path:
             return
         try:
-            self.records = self.excel.load(self.excel.path)
-            gc.collect()
-
-            self._setup_dynamic_form_options_from_records()
-            self._update_filters_from_records()
-            self._load_microbacias_layer()
-
-            self.apply_filter()
-            self._update_dashboard()
-            self.statusBar().showMessage(f"Recarregado: {len(self.records)} registros.")
+            self._load_excel_records(self.excel.path, persist_last_path=False, status_prefix="Recarregado")
         except Exception as e:
             QMessageBox.critical(self, "Erro", str(e))
 
@@ -2559,9 +2584,9 @@ class MainWindow(QMainWindow):
     def _load_microbacias_layer(self):
         if not os.path.isdir(MICROB_DIR):
             self.gis = None
-            print(f"[GIS] Pasta de microbacias NÃO encontrada: {MICROB_DIR}")
-            # opcional (bem útil no exe):
-            # QMessageBox.warning(self, "GIS", f"Pasta de microbacias não encontrada:\n{MICROB_DIR}")
+            print(f"[GIS] Pasta de microbacias NÃƒO encontrada: {MICROB_DIR}")
+            # opcional (bem Ãºtil no exe):
+            # QMessageBox.warning(self, "GIS", f"Pasta de microbacias nÃ£o encontrada:\n{MICROB_DIR}")
             return
         try:
             if not self.gis:
@@ -2574,17 +2599,16 @@ class MainWindow(QMainWindow):
 
     # ===== Filtering =====
     def _agendar_filtro(self):
-        # Reinicia o timer a cada digitação; o filtro roda só quando o usuário parar
+        # Reinicia o timer a cada digitaÃ§Ã£o; o filtro roda sÃ³ quando o usuÃ¡rio parar
         self._timer_filtro.start()
 
-    def apply_filter(self):
+    def _filter_records(self) -> List[Compensacao]:
         text = self.search.text().strip().lower()
         status = self.filter_status.currentText().strip()
-
-        filtered = []
         sel_micros = self.filter_micro.checked_items()
         sel_eles = self.filter_eletronico.checked_items()
 
+        filtered = []
         for r in self.records:
             blob = f"{r.oficio_processo} {r.endereco} {r.microbacia} {r.av_tec} {r.caixa} {r.eletronico}".lower()
             if text and text not in blob:
@@ -2604,11 +2628,19 @@ class MainWindow(QMainWindow):
 
             filtered.append(r)
 
+        return filtered
+
+    def _apply_filtered_records(self, filtered: List[Compensacao]):
         self.filtered_records = filtered
         self.populate_table(filtered)
         self._update_totals_tables()
         self.toggle_heatmap()
+        self.lbl_results.setText("Nenhum registro" if not filtered else f"{len(filtered)} registros")
         self.statusBar().showMessage(f"Filtro aplicado: {len(filtered)} registros")
+
+    def apply_filter(self):
+        filtered = self._filter_records()
+        self._apply_filtered_records(filtered)
 
     def on_table_click(self, proxy_index):
         src_index = self.proxy.mapToSource(proxy_index)
@@ -2667,42 +2699,56 @@ class MainWindow(QMainWindow):
             pass
 
     # ===== Batch geocode =====
+    def _pending_geocode_records(self) -> List[Compensacao]:
+        return [
+            r for r in self.records
+            if (r.endereco or "").strip() and (
+                not getattr(r, "latitude", "") or
+                not getattr(r, "longitude", "") or
+                not str(getattr(r, "microbacia", "") or "").strip()
+            )
+        ]
+
+    def _start_batch_geocode(self, records_to_process: List[Compensacao]):
+        self.progress = QProgressDialog("Processando...", "Cancelar", 0, len(records_to_process), self)
+        self.progress.setWindowTitle("Georreferenciamento")
+        self.progress.setMinimumDuration(0)
+
+        self.geo_worker = GeocodeWorker(records_to_process)
+        self.progress.canceled.connect(self._cancel_batch_geocode)
+        self.geo_worker.progress_update.connect(
+            lambda i, t: (self.progress.setValue(i), self.progress.setLabelText(t))
+        )
+        self.geo_worker.finished_process.connect(self.on_geocode_finished)
+        self.geo_worker.start()
+
     def run_batch_geocode(self):
         if not self.excel.path:
             return
 
-        to_process = [
-            r for r in self.records
-            if (r.endereco or "").strip() and (
-                    not getattr(r, "latitude", "") or
-                    not getattr(r, "longitude", "") or
-                    not str(getattr(r, "microbacia", "") or "").strip()  # Adicione esta verificação
-            )
-        ]
-
+        to_process = self._pending_geocode_records()
         if not to_process:
-            from PySide6.QtWidgets import QMessageBox
-            # Mensagem atualizada para refletir a nova lógica
             QMessageBox.information(self, "Sucesso", "Tudo georreferenciado e com microbacias preenchidas!")
             return
 
-        from PySide6.QtWidgets import QMessageBox, QProgressDialog
         if QMessageBox.question(self, "Lote",
-                                f"Georeferenciar {len(to_process)} endereços pendentes?") == QMessageBox.Yes:
-            self.progress = QProgressDialog("Processando...", "Cancelar", 0, len(to_process), self)
-            self.progress.setWindowTitle("Georreferenciamento")
-            self.progress.setMinimumDuration(0)
+                                f"Georeferenciar {len(to_process)} enderecos pendentes?") == QMessageBox.Yes:
+            self._start_batch_geocode(to_process)
 
-            self.geo_worker = GeocodeWorker(to_process)
-            self.geo_worker.progress_update.connect(
-                lambda i, t: (self.progress.setValue(i), self.progress.setLabelText(t)))
-
-            # Agora ele conecta apenas o envio do pacote final!
-            self.geo_worker.finished_process.connect(self.on_geocode_finished)
-            self.geo_worker.start()
+    def _cancel_batch_geocode(self):
+        if self.geo_worker:
+            try:
+                self.geo_worker.stop()
+            except Exception:
+                pass
+        try:
+            if hasattr(self, "progress") and self.progress:
+                self.progress.setLabelText("Cancelando...")
+        except Exception:
+            pass
 
     def on_geocode_result(self, excel_row: int, lat: float, lon: float):
-        # 1. Pega o registro original usando o número da linha que veio do trabalhador
+        # 1. Pega o registro original usando o nÃºmero da linha que veio do trabalhador
         orig = next((r for r in self.records if r.excel_row == excel_row), None)
         if not orig:
             return
@@ -2720,12 +2766,47 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Erro ao buscar microbacia: {e}")
 
-        # 4. Salva imediatamente a linha no Excel (Método blindado)
+        # 4. Salva imediatamente a linha no Excel (MÃ©todo blindado)
         try:
             self.excel.save_edit(orig)
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Erro de Salvamento", f"Falha ao salvar linha {excel_row}: {e}")
+
+    def _apply_batch_geocode_to_record(self, excel_row: int, lat: float, lon: float) -> bool:
+        orig = next((r for r in self.records if r.excel_row == excel_row), None)
+        if not orig:
+            return False
+
+        orig.latitude = str(lat)
+        orig.longitude = str(lon)
+
+        if self.gis:
+            try:
+                micro_nome = self.gis.find_microbacia(lat, lon)
+                if micro_nome:
+                    orig.microbacia = micro_nome
+            except Exception as e:
+                print(f"Erro GIS na linha {excel_row}: {e}")
+
+        self.excel._write_row(orig.excel_row, orig)
+        return True
+
+    def _save_batch_geocode_results(self, sucessos: int, erros_escrita: int):
+        if sucessos <= 0:
+            QMessageBox.warning(self, "Aviso", "Nenhum dado pode ser gravado no arquivo.")
+            return
+
+        self.excel._create_rotating_backup()
+        self.excel.wb.save(self.excel.path)
+        self.apply_filter()
+        self._update_dashboard()
+        self.toggle_heatmap()
+
+        msg = f"{sucessos} enderecos foram georreferenciados e salvos com sucesso!"
+        if erros_escrita > 0:
+            msg += f"\n(Houve erro em {erros_escrita} registros)"
+        QMessageBox.information(self, "Concluido", msg)
 
     def on_geocode_finished(self, resultados: dict):
         try:
@@ -2735,64 +2816,28 @@ class MainWindow(QMainWindow):
             pass
 
         if not resultados:
-            QMessageBox.information(self, "Aviso", "Nenhum endereço novo foi localizado.")
+            QMessageBox.information(self, "Aviso", "Nenhum endereco novo foi localizado.")
             return
 
         erros_escrita = 0
         sucessos = 0
-
-        # 1. Itera sobre os resultados do worker
         for excel_row, coords in resultados.items():
             lat, lon = coords
-
-            # Localiza o registro na lista da memória
-            orig = next((r for r in self.records if r.excel_row == excel_row), None)
-            if not orig:
-                continue
-
-            # Atualiza Latitude e Longitude (essencial para o Mapa de Calor)
-            orig.latitude = str(lat)
-            orig.longitude = str(lon)
-
-            # 2. Busca automática da Microbacia via GIS
-            if self.gis:
-                try:
-                    micro_nome = self.gis.find_microbacia(lat, lon)
-                    if micro_nome:
-                        orig.microbacia = micro_nome
-                except Exception as e:
-                    print(f"Erro GIS na linha {excel_row}: {e}")
-
-            # 3. Escreve os dados na memória do Workbook (openpyxl)
             try:
-                # O método _write_row já contempla colunas 9 e 10 (lat/lon)
-                self.excel._write_row(orig.excel_row, orig)
-                sucessos += 1
+                if self._apply_batch_geocode_to_record(excel_row, lat, lon):
+                    sucessos += 1
             except Exception as e:
                 erros_escrita += 1
                 print(f"Erro ao escrever linha {excel_row}: {e}")
 
-        # 4. Salva o arquivo Excel físico
         try:
-            if sucessos > 0:
-                self.excel._create_rotating_backup()
-                self.excel.wb.save(self.excel.path)
-
-                # Atualiza a interface (tabela, dashboard e mapa de calor)
-                self.apply_filter()
-                self._update_dashboard()
-                self.toggle_heatmap()
-
-                msg = f"{sucessos} endereços foram georreferenciados e salvos com sucesso!"
-                if erros_escrita > 0:
-                    msg += f"\n(Houve erro em {erros_escrita} registros)"
-
-                QMessageBox.information(self, "Concluído", msg)
-            else:
-                QMessageBox.warning(self, "Aviso", "Nenhum dado pôde ser gravado no arquivo.")
-
+            self._save_batch_geocode_results(sucessos, erros_escrita)
         except PermissionError:
-            QMessageBox.critical(self, "Erro de Permissão",
-                                 "Não foi possível salvar. O arquivo Excel está aberto em outro programa.")
+            QMessageBox.critical(self, "Erro de Permissao",
+                                 "Nao foi possivel salvar. O arquivo Excel esta aberto em outro programa.")
         except Exception as e:
             QMessageBox.critical(self, "Erro Inesperado", f"Falha ao salvar o Excel:\n{e}")
+
+
+
+

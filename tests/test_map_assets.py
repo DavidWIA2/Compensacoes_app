@@ -7,3 +7,5 @@ def test_map_uses_local_leaflet_assets_and_heatmap_fallback():
     assert 'vendor/leaflet/leaflet.css' in html
     assert 'vendor/leaflet/leaflet.js' in html
     assert 'typeof L.heatLayer !== "function"' in html
+    assert '"Offline (grade)"' in html
+    assert "BASE_FALLBACK_ORDER" in html

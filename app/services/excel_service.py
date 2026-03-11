@@ -1,4 +1,4 @@
-﻿import os
+import os
 import shutil
 import glob
 from datetime import datetime
@@ -12,6 +12,11 @@ from app.models.compensacao import Compensacao
 
 MAX_BACKUPS = 10
 BACKUP_FOLDER_NAME = "backups_historico"
+SHEET_NAME = "Compensa\u00e7\u00f5es"
+TRACKING_HEADERS = {
+    9: "Latitude",
+    10: "Longitude",
+}
 
 
 class ExcelService:
@@ -28,17 +33,14 @@ class ExcelService:
         self.path = path
         self.wb = openpyxl.load_workbook(path, data_only=False)
 
-        nome_aba_alvo = "Compensações"
+        nome_aba_alvo = SHEET_NAME
         if nome_aba_alvo in self.wb.sheetnames:
             self.ws = self.wb[nome_aba_alvo]
         else:
             print(f"Aviso: Aba '{nome_aba_alvo}' nao encontrada. Usando aba ativa.")
             self.ws = self.wb.active
 
-        if self.ws.max_column < 10:
-            self.ws.cell(row=1, column=9, value="Latitude")
-            self.ws.cell(row=1, column=10, value="Longitude")
-            self.wb.save(self.path)
+        self._ensure_tracking_headers()
 
         records = []
         for row_idx, row_cells in enumerate(self.ws.iter_rows(min_row=2, values_only=False), start=2):
@@ -88,11 +90,12 @@ class ExcelService:
             oldest = files.pop(0)
             try:
                 os.remove(oldest)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Aviso: Nao foi possivel remover backup antigo '{oldest}': {exc}")
 
     def add_new(self, c: Compensacao) -> int:
         self._create_rotating_backup()
+        self._ensure_tracking_headers()
         new_row = self.ws.max_row + 1
         self._write_row(new_row, c)
         self.wb.save(self.path)
@@ -100,6 +103,7 @@ class ExcelService:
 
     def save_edit(self, c: Compensacao):
         self._create_rotating_backup()
+        self._ensure_tracking_headers()
         self._write_row(c.excel_row, c)
         self.wb.save(self.path)
 
@@ -109,6 +113,8 @@ class ExcelService:
         self.wb.save(self.path)
 
     def read_all(self) -> List[Compensacao]:
+        if not self.path:
+            raise ValueError("Nenhum arquivo Excel carregado. Chame load(path) antes de read_all().")
         return self.load(self.path)
 
     def _write_row(self, row: int, c: Compensacao):
@@ -131,6 +137,15 @@ class ExcelService:
                 cell.value = valor
             else:
                 print(f"Linha {row}, Col {col_idx}: Celula mesclada ignorada.")
+
+    def _ensure_tracking_headers(self):
+        if not self.ws:
+            return
+
+        for col_idx, label in TRACKING_HEADERS.items():
+            cell = self.ws.cell(row=1, column=col_idx)
+            if not cell.value:
+                cell.value = label
 
     def _str(self, v) -> str:
         return "" if v is None else str(v).strip()

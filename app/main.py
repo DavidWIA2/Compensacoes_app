@@ -15,6 +15,7 @@ os.environ[
 from PySide6.QtWidgets import QApplication, QSplashScreen, QLabel
 from PySide6.QtGui import QMovie, QPixmap, QFont
 from PySide6.QtCore import Qt, QSize, QTimer
+from app.services.tile_scheme_handler import install_tile_scheme, register_tile_scheme
 from app.ui.main_window import MainWindow, resource_path
 
 
@@ -58,11 +59,14 @@ class AnimatedSplashScreen(QSplashScreen):
 # FUNÇÃO PRINCIPAL
 # =====================================================================
 def main() -> int:
+    register_tile_scheme()
+
     if sys.platform == 'win32':
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u'pmsc.compensacoes.v1')
 
     app = QApplication(sys.argv)
+    install_tile_scheme()
 
     splash_img = resource_path("assets", "splash.png")
     loading_gif = resource_path("assets", "loading.gif")

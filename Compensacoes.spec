@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 
 from PyInstaller.utils.hooks import (
     collect_data_files,
@@ -56,7 +56,7 @@ datas = [
     ('app/ui/map_leaflet.html', 'app/ui'),
     ('app/ui/vendor', 'app/ui/vendor'),
     ('assets', 'assets'),
-    ('data', 'data'), # ✅ Isso coloca a pasta 'data' na raiz do executável
+    ('data', 'data'), # âœ… Isso coloca a pasta 'data' na raiz do executÃ¡vel
 ]
 
 binaries = []
@@ -99,7 +99,7 @@ if has_module('pyogrio'):
 # Build
 # --------------------------------------------------------------------
 a = Analysis(
-    ['app\\main.py'],
+    ['run.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,

@@ -47,7 +47,7 @@ def make_record(**overrides) -> Compensacao:
     return Compensacao(**base)
 
 
-def test_load_adds_lat_lon_headers_when_missing(tmp_path):
+def test_load_exposes_lat_lon_headers_without_mutating_workbook(tmp_path):
     path = tmp_path / "compensacoes.xlsx"
     build_workbook(path)
 
@@ -57,6 +57,12 @@ def test_load_adds_lat_lon_headers_when_missing(tmp_path):
     assert len(records) == 1
     assert service.ws.cell(row=1, column=9).value == "Latitude"
     assert service.ws.cell(row=1, column=10).value == "Longitude"
+
+    persisted = openpyxl.load_workbook(path)
+    ws = persisted[SHEET_NAME]
+    assert ws.max_column == 8
+    assert ws.cell(row=1, column=9).value is None
+    assert ws.cell(row=1, column=10).value is None
 
 
 def test_load_does_not_create_backup(tmp_path):
@@ -82,6 +88,8 @@ def test_add_new_persists_record_and_creates_backup(tmp_path):
     ws = reloaded[SHEET_NAME]
 
     assert new_row == 3
+    assert ws.cell(row=1, column=9).value == "Latitude"
+    assert ws.cell(row=1, column=10).value == "Longitude"
     assert ws.cell(row=3, column=1).value == "456/2026"
     assert ws.cell(row=3, column=9).value == "-22.01"
     assert ws.cell(row=3, column=10).value == "-47.89"
@@ -103,3 +111,13 @@ def test_delete_record_shift_up_removes_row(tmp_path):
 
     assert ws.max_row == 2
     assert ws.cell(row=2, column=1).value == "456/2026"
+
+
+def test_read_all_requires_loaded_path():
+    service = ExcelService()
+
+    try:
+        service.read_all()
+        assert False, "Era esperado ValueError quando path nao estiver carregado"
+    except ValueError as exc:
+        assert "Nenhum arquivo Excel carregado" in str(exc)

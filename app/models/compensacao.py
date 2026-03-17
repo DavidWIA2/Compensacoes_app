@@ -12,6 +12,10 @@ class Compensacao:
     endereco: str
     microbacia: str
     compensado: str
-    # Campos para o mapa de calor preciso
+    endereco_plantio: str = ""
+    latitude_plantio: Optional[str] = ""
+    longitude_plantio: Optional[str] = ""
+    # Campos para o mapa de calor preciso (solicitante)
     latitude: Optional[str] = ""
     longitude: Optional[str] = ""
+    uid: str = ""

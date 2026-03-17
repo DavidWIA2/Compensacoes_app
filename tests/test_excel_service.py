@@ -1,9 +1,10 @@
 from pathlib import Path
-
+import pytest
 import openpyxl
 
 from app.models.compensacao import Compensacao
 from app.services.excel_service import BACKUP_FOLDER_NAME, ExcelService
+from app.services.records_service import remove_accents
 
 
 SHEET_NAME = "Compensa\u00e7\u00f5es"
@@ -21,6 +22,26 @@ def build_workbook(path: Path) -> None:
             "Av. Tec.",
             "Compensa\u00e7\u00e3o",
             "Endere\u00e7o",
+            "Microbacia",
+            "Compensado",
+        ]
+    )
+    ws.append(["123/2026", "SIM", "CX-1", "AT-1", 8, "Rua A", "Gregorio", ""])
+    wb.save(path)
+
+
+def build_legacy_workbook(path: Path) -> None:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = SHEET_NAME
+    ws.append(
+        [
+            "Oficio/ Processo",
+            "Eletronico",
+            "Caixa",
+            "Av. Tec.",
+            "Compensacao",
+            "Endereco",
             "Microbacia",
             "Compensado",
         ]
@@ -47,7 +68,7 @@ def make_record(**overrides) -> Compensacao:
     return Compensacao(**base)
 
 
-def test_load_exposes_lat_lon_headers_without_mutating_workbook(tmp_path):
+def test_load_exposes_lat_lon_headers_and_migrates_workbook(tmp_path):
     path = tmp_path / "compensacoes.xlsx"
     build_workbook(path)
 
@@ -55,14 +76,17 @@ def test_load_exposes_lat_lon_headers_without_mutating_workbook(tmp_path):
     records = service.load(str(path))
 
     assert len(records) == 1
-    assert service.ws.cell(row=1, column=9).value == "Latitude"
-    assert service.ws.cell(row=1, column=10).value == "Longitude"
+    # Na nova estrutura, Latitude e Longitude estao nas colunas 12 e 13
+    assert service.ws.cell(row=1, column=12).value == "Latitude"
+    assert service.ws.cell(row=1, column=13).value == "Longitude"
 
+    # O servico muta o workbook em memoria, mas nao deve salvar no disco durante o load 
+    # a menos que tenha gerado UIDs. Como nosso build_workbook nao tem UID, ele vai gerar e salvar.
     persisted = openpyxl.load_workbook(path)
     ws = persisted[SHEET_NAME]
-    assert ws.max_column == 8
-    assert ws.cell(row=1, column=9).value is None
-    assert ws.cell(row=1, column=10).value is None
+    # Se gerou UID, ele salvou. E o load do ExcelService FRESH gera UID se faltar.
+    assert ws.cell(row=1, column=14).value == "UID"
+    assert ws.cell(row=1, column=12).value == "Latitude"
 
 
 def test_load_does_not_create_backup(tmp_path):
@@ -73,6 +97,25 @@ def test_load_does_not_create_backup(tmp_path):
     service.load(str(path))
 
     assert not (tmp_path / BACKUP_FOLDER_NAME).exists()
+
+
+def test_load_does_not_duplicate_legacy_headers_without_accents(tmp_path):
+    path = tmp_path / "compensacoes_legado.xlsx"
+    build_legacy_workbook(path)
+
+    service = ExcelService()
+    service.load(str(path))
+
+    persisted = openpyxl.load_workbook(path)
+    ws = persisted[SHEET_NAME]
+    headers = [cell.value for cell in ws[1]]
+    normalized = [remove_accents(str(header)).strip().upper() for header in headers if header]
+
+    assert len(headers) == 14
+    assert normalized.count("OFICIO/ PROCESSO") == 1
+    assert normalized.count("ELETRONICO") == 1
+    assert normalized.count("COMPENSACAO") == 1
+    assert normalized.count("ENDERECO") == 1
 
 
 def test_add_new_persists_record_and_creates_backup(tmp_path):
@@ -88,11 +131,11 @@ def test_add_new_persists_record_and_creates_backup(tmp_path):
     ws = reloaded[SHEET_NAME]
 
     assert new_row == 3
-    assert ws.cell(row=1, column=9).value == "Latitude"
-    assert ws.cell(row=1, column=10).value == "Longitude"
+    assert ws.cell(row=1, column=12).value == "Latitude"
+    assert ws.cell(row=1, column=13).value == "Longitude"
     assert ws.cell(row=3, column=1).value == "456/2026"
-    assert ws.cell(row=3, column=9).value == "-22.01"
-    assert ws.cell(row=3, column=10).value == "-47.89"
+    assert ws.cell(row=3, column=12).value == "-22.01"
+    assert ws.cell(row=3, column=13).value == "-47.89"
     assert (tmp_path / BACKUP_FOLDER_NAME).exists()
 
 
@@ -116,8 +159,5 @@ def test_delete_record_shift_up_removes_row(tmp_path):
 def test_read_all_requires_loaded_path():
     service = ExcelService()
 
-    try:
+    with pytest.raises(ValueError, match="Nenhum arquivo Excel carregado"):
         service.read_all()
-        assert False, "Era esperado ValueError quando path nao estiver carregado"
-    except ValueError as exc:
-        assert "Nenhum arquivo Excel carregado" in str(exc)

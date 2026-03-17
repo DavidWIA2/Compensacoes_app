@@ -34,6 +34,68 @@ BORDER_STYLE = Border(
 FONT_BOLD = Font(bold=True)
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+
+def export_individual_pdf(filepath: str, record: Compensacao):
+    doc = SimpleDocTemplate(filepath, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'MainTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        textColor=colors.HexColor("#2C3E50"),
+        alignment=1,
+        spaceAfter=20
+    )
+
+    elements = []
+    
+    # Cabeçalho
+    elements.append(Paragraph("Ficha de Compensação Ambiental", title_style))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # Dados
+    data = [
+        ["Ofício/Processo:", str(record.oficio_processo or ""), "Eletrônico:", str(record.eletronico or "")],
+        ["Av. Técnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
+        ["Status:", "CONCLUÍDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE", "Microbacia:", str(record.microbacia or "")],
+        ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
+        ["End. Ocorrência:", str(record.endereco or ""), "", ""],
+        ["End. Plantio:", str(record.endereco_plantio or ""), "", ""],
+        ["Coordenadas:", f"{record.latitude or ''}, {record.longitude or ''}", "", ""]
+    ]
+
+    t = Table(data, colWidths=[120, 150, 100, 140])
+    t.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor("#2C3E50")),
+        ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor("#2C3E50")),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ('SPAN', (1, 3), (3, 3)), # Volume
+        ('SPAN', (1, 4), (3, 4)), # End. Ocorrência
+        ('SPAN', (1, 5), (3, 5)), # End. Plantio
+        ('SPAN', (1, 6), (3, 6)), # Coordenadas
+    ]))
+    
+    elements.append(t)
+    elements.append(Spacer(1, 0.5 * inch))
+
+    # Área de Assinatura
+    elements.append(Spacer(1, 2 * inch))
+    elements.append(Paragraph("_" * 40, ParagraphStyle(name='Sig', alignment=1, fontSize=12)))
+    elements.append(Paragraph("Assinatura do Técnico Responsável", ParagraphStyle(name='SigSub', alignment=1, fontSize=10)))
+
+    doc.build(elements)
+
 
 def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict]:
     data_list = []

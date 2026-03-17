@@ -71,7 +71,8 @@ class GisService:
             raise ValueError(f"Campo '{name_field}' não existe nas microbacias.")
 
         self.sindex = self.gdf.sindex
-        self.gdf_metric = self.gdf.to_crs(epsg=31982)
+        self.metric_crs = self.gdf.estimate_utm_crs()
+        self.gdf_metric = self.gdf.to_crs(self.metric_crs)
         self._geojson_obj = None
         self._centroid_cache: Dict[str, tuple] = {}
         self._build_name_lookup_cache()
@@ -152,7 +153,7 @@ class GisService:
             val = hit.iloc[0][self.name_field]
             return "" if val is None else str(val)
 
-        pt_utm = gpd.GeoSeries([pt], crs="EPSG:4326").to_crs(epsg=31982).iloc[0]
+        pt_utm = gpd.GeoSeries([pt], crs="EPSG:4326").to_crs(self.metric_crs).iloc[0]
 
         distances = self.gdf_metric.distance(pt_utm)
         if distances.empty: return ""
@@ -201,7 +202,7 @@ class GisService:
             return None
 
         pt_metric = self.gdf_metric.loc[mask, "geometry"].centroid.iloc[0]
-        pt = gpd.GeoSeries([pt_metric], crs="EPSG:31982").to_crs(epsg=4326).iloc[0]
+        pt = gpd.GeoSeries([pt_metric], crs=self.metric_crs).to_crs(epsg=4326).iloc[0]
         centroid = (pt.y, pt.x)
         self._centroid_cache[nome_resolvido] = centroid
         return centroid

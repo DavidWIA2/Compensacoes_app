@@ -1,6 +1,7 @@
 ﻿from typing import Callable, Optional, Tuple
 
 import requests
+from app.services.geocode_cache import geocode_cache
 
 ARCGIS_GEOCODE_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"
 
@@ -26,6 +27,10 @@ def geocode_address_arcgis(
     clean_addr = normalize_address(address)
     if not clean_addr:
         return None
+
+    cached = geocode_cache.get(clean_addr)
+    if cached:
+        return cached
 
     params = {
         "SingleLine": clean_addr,
@@ -55,6 +60,8 @@ def geocode_address_arcgis(
 
     loc = candidates[0].get("location") or {}
     try:
-        return float(loc["y"]), float(loc["x"])
+        lat, lon = float(loc["y"]), float(loc["x"])
+        geocode_cache.set(clean_addr, lat, lon)
+        return lat, lon
     except Exception:
         return None

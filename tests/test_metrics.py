@@ -1,11 +1,11 @@
 ﻿from app.models.compensacao import Compensacao
-from app.ui.main_window import MainWindow
+from app.services.records_service import to_float, row_is_compensado, compute_metrics
 
 
 class MetricsHarness:
-    _to_float = MainWindow._to_float
-    _row_is_compensado = MainWindow._row_is_compensado
-    _compute_metrics = MainWindow._compute_metrics
+    _to_float = staticmethod(to_float)
+    _row_is_compensado = staticmethod(row_is_compensado)
+    _compute_metrics = staticmethod(compute_metrics)
 
 
 def make_record(**overrides) -> Compensacao:

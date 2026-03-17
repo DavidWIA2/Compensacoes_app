@@ -1,4 +1,6 @@
-﻿from app.services.geocode_service import geocode_address_arcgis, normalize_address
+import pytest
+from app.services.geocode_service import geocode_address_arcgis, normalize_address
+from app.services.geocode_cache import geocode_cache
 
 
 class FakeResponse:
@@ -8,6 +10,13 @@ class FakeResponse:
 
     def json(self):
         return self._payload
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    geocode_cache.clear()
+    yield
+    geocode_cache.clear()
 
 
 def test_normalize_address_appends_city_when_missing():

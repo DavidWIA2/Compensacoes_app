@@ -16,7 +16,8 @@ from PySide6.QtWidgets import QApplication, QSplashScreen, QLabel
 from PySide6.QtGui import QMovie, QPixmap, QFont
 from PySide6.QtCore import Qt, QSize, QTimer
 from app.services.tile_scheme_handler import install_tile_scheme, register_tile_scheme
-from app.ui.main_window import MainWindow, resource_path
+from app.ui.main_window import MainWindow
+from app.ui.components.ui_utils import resource_path
 
 
 # =====================================================================
@@ -60,44 +61,9 @@ class AnimatedSplashScreen(QSplashScreen):
 # =====================================================================
 def main() -> int:
     register_tile_scheme()
-
-    if sys.platform == 'win32':
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u'pmsc.compensacoes.v1')
-
     app = QApplication(sys.argv)
     install_tile_scheme()
-
-    splash_img = resource_path("assets", "splash.png")
-    loading_gif = resource_path("assets", "loading.gif")
-
-    splash = None
-    start_time = time.time()
-
-    if os.path.exists(splash_img) and os.path.exists(loading_gif):
-        splash = AnimatedSplashScreen(loading_gif, splash_img)
-        splash.show()
-
-    # Processa eventos iniciais
-    QApplication.processEvents()
-
-    if splash: splash.update_status("Carregando base de dados...", 0.2)
-
-    # --- CARREGAMENTO REAL ---
-    # Criamos a window. Se o carregamento no __init__ da MainWindow for muito longo,
-    # o GIF pode dar micro-travadas. Reduzimos o delay aqui para compensar.
     window = MainWindow()
-
-    if splash: splash.update_status("Sincronizando mapas...", 0.2)
-
-    # Garante que o usuário veja a animação por pelo menos 4 segundos
-    while time.time() - start_time < 4.0:
-        QApplication.processEvents()  # Mantém o GIF vivo enquanto espera
-        time.sleep(0.1)
-
-    if splash:
-        splash.finish(window)
-
     window.showMaximized()
     return app.exec()
 

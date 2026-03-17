@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import threading
@@ -40,6 +41,40 @@ class TileProxyService:
         self._thread: Optional[threading.Thread] = None
         self._cache: "OrderedDict[str, Tuple[bytes, str]]" = OrderedDict()
         self._cache_lock = threading.Lock()
+        
+        # Disk cache initialization
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self._disk_cache_dir = os.path.join(base_dir, "data", "tiles_cache")
+        os.makedirs(self._disk_cache_dir, exist_ok=True)
+
+    def _get_disk_cache_path(self, cache_key: str) -> str:
+        digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
+        safe_prefix = re.sub(r"[^A-Za-z0-9._-]+", "_", cache_key).strip("._")
+        if not safe_prefix:
+            safe_prefix = "tile"
+        safe_name = f"{safe_prefix[:80]}_{digest}.bin"
+        return os.path.join(self._disk_cache_dir, safe_name)
+
+    def _read_from_disk(self, cache_key: str) -> Optional[Tuple[bytes, str]]:
+        path = self._get_disk_cache_path(cache_key)
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    content_type = f.readline().decode('utf-8').strip()
+                    data = f.read()
+                    return data, content_type
+            except Exception:
+                return None
+        return None
+
+    def _write_to_disk(self, cache_key: str, data: bytes, content_type: str):
+        path = self._get_disk_cache_path(cache_key)
+        try:
+            with open(path, "wb") as f:
+                f.write((content_type + "\n").encode('utf-8'))
+                f.write(data)
+        except Exception:
+            pass
 
     def start(self) -> str:
         if self._server is not None:
@@ -159,10 +194,20 @@ class TileProxyService:
     def _cache_get(self, key: str) -> Optional[Tuple[bytes, str]]:
         with self._cache_lock:
             value = self._cache.get(key)
-            if value is None:
-                return None
-            self._cache.move_to_end(key)
-            return value
+            if value is not None:
+                self._cache.move_to_end(key)
+                return value
+                
+        # Fallback para o disco se nao estiver na memoria
+        disk_val = self._read_from_disk(key)
+        if disk_val:
+            with self._cache_lock:
+                self._cache[key] = disk_val
+                if len(self._cache) > self._cache_size:
+                    self._cache.popitem(last=False)
+            return disk_val
+            
+        return None
 
     def _cache_put(self, key: str, body: bytes, content_type: str) -> None:
         with self._cache_lock:
@@ -170,6 +215,7 @@ class TileProxyService:
             self._cache.move_to_end(key)
             while len(self._cache) > self._cache_size:
                 self._cache.popitem(last=False)
+        self._write_to_disk(key, body, content_type)
 
     @staticmethod
     def _send(

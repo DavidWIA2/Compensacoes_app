@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Dashboard</title>
+    <script src="vendor/echarts.min.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: transparent; /* Será alterado via JS se necessário */
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+        #pie_chart { width: 45%; height: 100%; }
+        #bar_chart { width: 55%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="pie_chart"></div>
+    <div id="bar_chart"></div>
+
+    <script>
+        var pieChart = echarts.init(document.getElementById('pie_chart'));
+        var barChart = echarts.init(document.getElementById('bar_chart'));
+        
+        window.addEventListener('resize', function() {
+            pieChart.resize();
+            barChart.resize();
+        });
+
+        window.updateDashboard = function(dataStr) {
+            var data = JSON.parse(dataStr);
+            var isDark = data.is_dark;
+            
+            // Ajuste de cores de texto baseadas no tema
+            var textColor = isDark ? '#e9e9ea' : '#333333';
+            var titleColor = isDark ? '#ffffff' : '#111111';
+            
+            // Pie Chart
+            var tot = data.m.total_pendente + data.m.total_compensado;
+            var pieData = [];
+            if (tot === 0) {
+                pieData.push({value: 1, name: 'Sem dados', itemStyle: {color: '#888'}});
+            } else {
+                pieData.push({value: data.m.total_pendente, name: 'PENDENTE', itemStyle: {color: '#FF4B2B'}});
+                pieData.push({value: data.m.total_compensado, name: 'REALIZADO', itemStyle: {color: '#00C853'}});
+            }
+
+            pieChart.setOption({
+                title: { text: 'Status Geral de Compensação', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
+                legend: { orient: 'horizontal', bottom: '5%', textStyle: {color: textColor, fontSize: 10} },
+                series: [
+                    {
+                        name: 'Status',
+                        type: 'pie',
+                        radius: ['35%', '65%'],
+                        avoidLabelOverlap: false,
+                        label: { show: false },
+                        data: pieData
+                    }
+                ]
+            });
+
+            // Bar Chart
+            var pend_sorted = data.m.pend_micro_sorted.slice(0, 10);
+            var categories = pend_sorted.map(function(item) { return item[0]; });
+            var values = pend_sorted.map(function(item) { return item[1]; });
+            
+            var paleta = ["#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4"];
+            var unique_micros = [...new Set(data.records_micros)].sort();
+            var map_c = {};
+            unique_micros.forEach((m, i) => map_c[m] = paleta[i % paleta.length]);
+            
+            var itemStyles = categories.map(c => map_c[c] || "#3388ff");
+
+            barChart.setOption({
+                title: { text: 'Top 10 - Mudas Pendentes por Microbacia', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { left: '5%', right: '5%', bottom: '15%', containLabel: true },
+                xAxis: [
+                    {
+                        type: 'category',
+                        data: categories,
+                        axisLabel: { color: textColor, interval: 0, rotate: 30, fontSize: 9 }
+                    }
+                ],
+                yAxis: [ { type: 'value', axisLabel: { color: textColor, fontSize: 9 }, splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } } } ],
+                series: [
+                    {
+                        name: 'Pendentes',
+                        type: 'bar',
+                        barWidth: '60%',
+                        data: values.map((v, i) => ({value: v, itemStyle: {color: itemStyles[i]}})),
+                        label: { show: true, position: 'top', color: textColor, fontSize: 10 }
+                    }
+                ]
+            });
+        };
+    </script>
+</body>
+</html>

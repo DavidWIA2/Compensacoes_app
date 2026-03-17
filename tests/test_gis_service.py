@@ -24,7 +24,8 @@ def test_find_microbacia_uses_cached_metric_projection():
         crs="EPSG:4326",
     )
     service.sindex = type("FakeSIndex", (), {"intersection": lambda self, bounds: [0]})()
-    service.gdf_metric = service.gdf.to_crs(epsg=31982)
+    service.metric_crs = "EPSG:31982"
+    service.gdf_metric = service.gdf.to_crs(service.metric_crs)
     service._geojson_obj = None
     service.gdf.to_crs = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("to_crs nao deve rodar por consulta"))
 
@@ -89,7 +90,8 @@ def test_get_microbacia_centroid_uses_cache_and_alias_resolution(monkeypatch):
         },
         crs="EPSG:4326",
     )
-    service.gdf_metric = service.gdf.to_crs(epsg=31982)
+    service.metric_crs = "EPSG:31982"
+    service.gdf_metric = service.gdf.to_crs(service.metric_crs)
     service._geojson_obj = None
     service._centroid_cache = {}
     service._build_name_lookup_cache()

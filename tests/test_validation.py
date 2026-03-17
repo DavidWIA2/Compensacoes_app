@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.models.compensacao import Compensacao
 from app.services.validation import validate_compensacao
 
@@ -44,6 +46,20 @@ def test_validate_compensacao_requires_compensacao():
 
 def test_validate_compensacao_accepts_complete_record():
     item = make_compensacao()
+
+    assert validate_compensacao(item) == ""
+
+
+def test_validate_compensacao_rejects_future_oficio_year():
+    next_year = date.today().year + 1
+    item = make_compensacao(oficio_processo=f"123/{next_year}")
+
+    assert validate_compensacao(item) == f"O ano de Ofício/Processo não pode ser maior que {date.today().year}."
+
+
+def test_validate_compensacao_accepts_current_oficio_year():
+    current_year = date.today().year
+    item = make_compensacao(oficio_processo=f"123/{current_year}")
 
     assert validate_compensacao(item) == ""
 

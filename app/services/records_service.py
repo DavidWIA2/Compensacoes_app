@@ -1,6 +1,16 @@
-﻿from typing import Dict, Iterable, List, Sequence
+import re
+import unicodedata
+from typing import Dict, Iterable, List, Sequence, Optional
 
 from app.models.compensacao import Compensacao
+
+
+def remove_accents(input_str: str) -> str:
+    """Remove acentos e caracteres especiais de uma string."""
+    if not input_str:
+        return ""
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
 
 def safe_upper(s: str) -> str:
@@ -37,6 +47,21 @@ def to_float(value) -> float:
         return float(s)
     except Exception:
         return 0.0
+
+
+def extract_year(text: str) -> Optional[str]:
+    """Tenta extrair um ano (4 digitos) de um texto, priorizando o final do padrão '.../YYYY'."""
+    if not text:
+        return None
+    # Procura por /20XX ou /19XX
+    match = re.search(r'/(20\d{2}|19\d{2})', text)
+    if match:
+        return match.group(1)
+    # Fallback: qualquer sequencia de 4 digitos que pareça um ano razoavel
+    match = re.search(r'\b(20\d{2}|19\d{2})\b', text)
+    if match:
+        return match.group(1)
+    return None
 
 
 def compute_metrics(records: Sequence[Compensacao]) -> Dict[str, object]:
@@ -88,16 +113,27 @@ def filter_records(
     selected_eletronicos: Sequence[str],
     micro_all_selected: bool,
     eletronico_all_selected: bool,
+    selected_year: str = "Todos",
 ) -> List[Compensacao]:
-    normalized_text = (text or "").strip().lower()
-    selected_micros_set = set(selected_micros or [])
-    selected_ele_set = set(selected_eletronicos or [])
+    # Normaliza o texto de busca: remove acentos e deixa em minúsculo
+    search_query = remove_accents(text or "").lower()
+    
+    selected_micros_set = {m.strip().upper() for m in (selected_micros or [])}
+    selected_ele_set = {e.strip().upper() for e in (selected_eletronicos or [])}
 
     filtered = []
     for r in records:
+        # Normaliza o blob de dados do registro para comparação
         blob = f"{r.oficio_processo} {r.endereco} {r.microbacia} {r.av_tec} {r.caixa} {r.eletronico}".lower()
-        if normalized_text and normalized_text not in blob:
+        blob_normalized = remove_accents(blob)
+        
+        if search_query and search_query not in blob_normalized:
             continue
+
+        if selected_year != "Todos":
+            row_year = extract_year(r.oficio_processo)
+            if row_year != selected_year:
+                continue
 
         is_comp = row_is_compensado(r)
         if status == "Compensados" and not is_comp:
@@ -105,11 +141,16 @@ def filter_records(
         if status == "Pendentes" and is_comp:
             continue
 
-        if not micro_all_selected and r.microbacia not in selected_micros_set:
-            continue
+        # Só filtra se "Todos" não estiver marcado
+        if not micro_all_selected:
+            row_micro = (r.microbacia or "").strip().upper()
+            if row_micro not in selected_micros_set:
+                continue
 
-        if not eletronico_all_selected and r.eletronico not in selected_ele_set:
-            continue
+        if not eletronico_all_selected:
+            row_ele = (r.eletronico or "").strip().upper()
+            if row_ele not in selected_ele_set:
+                continue
 
         filtered.append(r)
 

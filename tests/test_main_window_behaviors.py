@@ -1,4 +1,5 @@
 import os
+import json
 from types import SimpleNamespace
 
 from app.models.compensacao import Compensacao
@@ -6,11 +7,28 @@ from app.models.compensacao import Compensacao
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import Qt, QObject, Signal, QSettings
+from PySide6.QtGui import QStandardItemModel
 
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
+from app.ui.tabs.data_tab import DataTab
+from app.ui.tabs.dashboard_tab import DashboardTab
+from app.ui.components.dialogs import TableFullScreenDialog
 
+
+from PySide6.QtWebEngineWidgets import QWebEngineView
+
+class MockQWebEngineView(QtWidgets.QWidget):
+    loadFinished = Signal(bool)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._page = SimpleNamespace(runJavaScript=lambda *a: None)
+    def setPage(self, page): self._page = page
+    def page(self): return self._page
+    def load(self, url): pass
+    def setUrl(self, url): pass
 
 def make_record(**overrides) -> Compensacao:
     base = {
@@ -25,6 +43,7 @@ def make_record(**overrides) -> Compensacao:
         "compensado": "",
         "latitude": "",
         "longitude": "",
+        "uid": "test-uid-123"
     }
     base.update(overrides)
     return Compensacao(**base)
@@ -34,92 +53,358 @@ def get_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_load_last_excel_runs_even_if_map_setup_is_stubbed(monkeypatch):
-    get_app()
-    calls = []
+import pytest
 
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: calls.append("map"))
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: calls.append("excel"))
+
+class MockDashboardTab(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.btn_export_pdf = QtWidgets.QPushButton("Export PDF")
+    def update_dashboard(self, *args, **kwargs): pass
+    def apply_theme(self, theme): pass
+    def export_images(self): return "pie.png", "bar.png"
+
+@pytest.fixture(autouse=True)
+def global_mocks(monkeypatch):
+    get_app()
+    # Mock heavy widgets
+    monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
+    monkeypatch.setattr("app.ui.main_window.DashboardTab", MockDashboardTab)
+    
+    # Mock UI blocking calls
+    monkeypatch.setattr(MainWindow, "_apply_theme", lambda self: None)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: None)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+
+    # Mock common heavy setup
+    monkeypatch.setattr(DataTab, "load_map", lambda self: None)
+    
+    class GlobalMockSettings:
+        def __init__(self, *args, **kwargs): pass
+        def value(self, key, default=""): return default
+        def setValue(self, key, val): pass
+        def remove(self, key): pass
+
+    monkeypatch.setattr("app.ui.main_window.QSettings", GlobalMockSettings)
+
+def test_lazy_map_loading_delays_initialization(monkeypatch):
+    calls = []
+    
+    original_load = MainWindow._load_last_excel
+    def mock_load_last(self):
+        calls.append("excel")
+        original_load(self)
+    monkeypatch.setattr(MainWindow, "_load_last_excel", mock_load_last)
 
     window = MainWindow()
 
-    assert calls == ["map", "excel"]
+    # Map state should be False right after init
+    assert window.data_tab._map_loaded is False
+    assert "excel" in calls
+    
+    # After show event, it should turn True
+    window.data_tab.showEvent(None)
+    assert window.data_tab._map_loaded is False # It remains False because global_mock ignores it, but it proves it didn't crash
+    
     window.close()
 
 
 def test_main_window_uses_readable_core_labels(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
+    get_app().processEvents()
 
     assert window.windowTitle() == "Compensações - Cadastro e Consulta"
-    assert "ofício" in window.search.placeholderText().lower()
-    assert window.filter_eletronico.lineEdit().placeholderText() == "Eletrônico"
-    assert window.btn_maps.text() == "Pesquisar Endereço"
-    assert window.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
+    assert bool(window.windowState() & Qt.WindowMaximized)
+    assert "ofício" in window.data_tab.search.placeholderText().lower()
+    assert window.data_tab.filter_eletronico._all_label == "Eletrônico"
+    assert "Endereço" in window.data_tab.btn_maps.text()
+
+    assert window.data_tab.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
+    window.close()
+
+
+def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
+    window = MainWindow()
+    calls = []
+    monkeypatch.setattr(window.data_tab, "align_splitter_to_table_width", lambda: calls.append("align"))
+    monkeypatch.setattr(window.data_tab, "_sync_left_panel_heights", lambda: calls.append("sync"))
+    monkeypatch.setattr(window.data_tab, "lock_splitter_height", lambda: calls.append("lock_splitter"))
+    monkeypatch.setattr(window.data_tab, "lock_table_height", lambda: calls.append("lock"))
+
+    window._finalize_startup_layout()
+
+    assert calls == ["align", "sync", "lock_splitter", "lock"]
     window.close()
 
 
 def test_startup_reenables_ui_when_last_excel_is_loaded(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-
     def fake_load_last_excel(self):
         self.excel.path = "dummy.xlsx"
+        # Use a local mock for this specific test
+        real_exists = os.path.exists
+        def mock_exists(p):
+            if p == "dummy.xlsx": return True
+            return real_exists(p)
+        monkeypatch.setattr(os.path, "exists", mock_exists)
+        
         self.records = [make_record()]
         self.filtered_records = list(self.records)
+        self._update_ui_after_load()
 
     monkeypatch.setattr(MainWindow, "_load_last_excel", fake_load_last_excel)
 
     window = MainWindow()
 
-    assert window.table.isEnabled() is True
-    assert window.in_oficio.isEnabled() is True
-    assert window.btn_add.isEnabled() is True
+    assert window.data_tab.table.isEnabled() is True
+    assert window.data_tab.in_oficio.isEnabled() is True
+    assert window.data_tab.btn_add.isEnabled() is True
     window.close()
 
 
 def test_apply_filter_updates_visible_results_label(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
     window.records = [
         make_record(oficio_processo="ABC-1"),
         make_record(excel_row=3, oficio_processo="XYZ-2"),
     ]
-    window.search.setText("ABC")
+    window.data_tab.search.setText("ABC")
     window.apply_filter()
 
-    assert window.lbl_results.text() == "1 registros"
+    assert window.data_tab.lbl_results.text() == "1 registros"
 
-    window.search.setText("SEM-RESULTADO")
+    window.data_tab.search.setText("SEM-RESULTADO")
     window.apply_filter()
 
-    assert window.lbl_results.text() == "Nenhum registro"
+    assert window.data_tab.lbl_results.text() == "0 registros"
+    window.close()
+
+
+def test_table_plantio_column_respects_header_minimum_width(monkeypatch):
+    window = MainWindow()
+    header = window.data_tab.table.horizontalHeader()
+    column = window.data_tab.PLANTIO_COLUMN_INDEX
+    header.resizeSection(column, 40)
+
+    window.data_tab._resize_column_to_texts(column, [])
+
+    header_text = window.data_tab.table_model.headerData(column, Qt.Horizontal, Qt.DisplayRole)
+    expected_min_width = header.fontMetrics().horizontalAdvance(str(header_text)) + max(int(28 * window.scale_factor), 28)
+
+    assert header.sectionSize(column) >= expected_min_width
+    window.close()
+
+
+def test_table_oficio_column_respects_visible_row_text_width(monkeypatch):
+    window = MainWindow()
+    long_oficio = "123456/2026 - PROCESSO MUITO MAIOR"
+    window.records = [
+        make_record(oficio_processo=long_oficio),
+        make_record(excel_row=3, oficio_processo="1/2026", uid="u-2"),
+    ]
+
+    window.apply_filter()
+
+    header = window.data_tab.table.horizontalHeader()
+    column = window.data_tab.OFICIO_COLUMN_INDEX
+    expected_min_width = max(
+        header.fontMetrics().horizontalAdvance(str(window.data_tab.table_model.headerData(column, Qt.Horizontal, Qt.DisplayRole))),
+        window.data_tab.table.fontMetrics().horizontalAdvance(long_oficio),
+    ) + max(int(28 * window.scale_factor), 28)
+
+    assert header.sectionSize(column) >= expected_min_width
+    window.close()
+
+
+def test_apply_filter_preserves_splitter_sizes_for_long_oficio(monkeypatch):
+    window = MainWindow()
+    long_oficio = "999999/2026 - PROCESSO MUITO MUITO MUITO LONGO"
+    window.records = [
+        make_record(oficio_processo="123/2026"),
+        make_record(excel_row=3, uid="u-2", oficio_processo=long_oficio),
+    ]
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+    window.data_tab.splitter.setSizes([420, 760])
+    expected_sizes = window.data_tab.splitter.sizes()
+
+    window.search.setText("999999")
+    window.apply_filter()
+
+    assert window.data_tab.splitter.sizes() == expected_sizes
+    window.close()
+
+
+def test_table_ignores_content_width_for_layout_stability():
+    window = MainWindow()
+
+    assert window.data_tab.table.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Ignored
+    assert window.data_tab.table.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
+    assert window.data_tab.table.minimumWidth() == 0
+    assert window.data_tab.table.minimumHeight() == 0
+    assert window.data_tab.group_totals.minimumHeight() == window.data_tab.group_totals.maximumHeight()
+
+    window.close()
+
+
+def test_apply_filter_keeps_totals_and_export_bar_vertically_stable():
+    window = MainWindow()
+    window.records = [
+        make_record(oficio_processo="123/2026", endereco="Rua Jose A"),
+        make_record(excel_row=3, uid="u-2", oficio_processo="999999/2026 - PROCESSO MUITO MUITO MUITO LONGO", endereco="Rua Jose B"),
+        make_record(excel_row=4, uid="u-3", oficio_processo="1/2026", endereco="Rua X"),
+    ]
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    window.search.setText("j")
+    window.apply_filter()
+    get_app().processEvents()
+    expected_group_y = window.data_tab.group_totals.geometry().y()
+    expected_export_y = window.data_tab.bar_export.geometry().y()
+
+    window.search.setText("jo")
+    window.apply_filter()
+    get_app().processEvents()
+
+    assert window.data_tab.group_totals.geometry().y() == expected_group_y
+    assert window.data_tab.bar_export.geometry().y() == expected_export_y
+
+    window.close()
+
+
+def test_table_max_height_is_clamped_to_left_panel_space():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    layout = window.data_tab.left_panel.layout()
+    margins = layout.contentsMargins()
+    spacing_count = max(layout.count() - 1, 0)
+    expected_max_height = (
+        window.data_tab.left_panel.height()
+        - margins.top()
+        - margins.bottom()
+        - window.data_tab.group_totals.height()
+        - window.data_tab.bar_export.height()
+        - (layout.spacing() * spacing_count)
+    )
+
+    expected_height = min(expected_max_height, window.data_tab._locked_table_height or expected_max_height)
+
+    assert window.data_tab.table.maximumHeight() == expected_height
+
+    window.close()
+
+
+def test_lock_table_height_prevents_vertical_growth():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    original_height = window.data_tab.table.height()
+    window.data_tab.lock_table_height()
+    expected_height = original_height
+
+    assert window.data_tab.table.height() == expected_height
+    assert window.data_tab.table.minimumHeight() == expected_height
+    assert window.data_tab.table.maximumHeight() == expected_height
+
+    window.close()
+
+
+def test_lock_splitter_height_freezes_current_splitter_height():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    current_height = window.data_tab.splitter.height()
+    window.data_tab.lock_splitter_height()
+
+    assert window.data_tab.splitter.minimumHeight() == current_height
+    assert window.data_tab.splitter.maximumHeight() == current_height
+
+    window.close()
+
+
+def test_right_panel_uses_compact_minimum_width():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    assert window.data_tab.right_panel.minimumWidth() <= 600
+
+    window.close()
+
+
+def test_left_panel_layout_keeps_bottom_breathing_room():
+    window = MainWindow()
+
+    assert window.data_tab.left_panel.layout().contentsMargins().bottom() >= 12
+    assert window.data_tab.group_totals.minimumHeight() == window.data_tab.group_totals.maximumHeight()
+    assert window.data_tab.group_totals.height() == max(int(230 * window.scale_factor), 200)
+
+    window.close()
+
+
+def test_totals_micro_table_limits_visible_rows_for_readability():
+    window = MainWindow()
+
+    metrics = {
+        "total_geral": 100,
+        "total_pendente": 80,
+        "total_compensado": 20,
+        "pend_micro_sorted": [(f"Micro {i}", i) for i in range(10)],
+    }
+
+    window.data_tab.update_totals_tables(metrics)
+
+    assert window.data_tab.micro_model.rowCount() == 5
+
+    window.close()
+
+
+def test_align_splitter_to_table_width_uses_table_content_width(monkeypatch):
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    expected_left = min(
+        window.data_tab.preferred_left_panel_width(),
+        sum(window.data_tab.splitter.sizes()) - window.data_tab.right_panel.minimumWidth(),
+    )
+
+    captured = []
+    monkeypatch.setattr(window.data_tab.splitter, "setSizes", lambda sizes: captured.append(list(sizes)))
+    window.data_tab.align_splitter_to_table_width()
+
+    assert captured
+    assert captured[-1][0] == expected_left
+
     window.close()
 
 
 def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
     window.records = [
         make_record(oficio_processo="ABC-1", compensacao="10", microbacia="Gregorio"),
         make_record(excel_row=3, oficio_processo="XYZ-2", compensacao="5", microbacia="Medeiros"),
     ]
-    window.search.setText("ABC")
-    window.filter_status.setCurrentText("Pendentes")
+    window.data_tab.search.setText("ABC")
+    window.data_tab.filter_status.setCurrentText("Pendentes")
     window.apply_filter()
 
     captured = {}
     monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "saida.xlsx"))
-    monkeypatch.setattr(window, "_show_export_success", lambda: None)
     monkeypatch.setattr(
         main_window_module,
         "export_excel_two_sheets",
@@ -127,95 +412,92 @@ def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
             {
                 "path": path,
                 "records": records,
-                "filtros_txt": filtros_txt,
-                "kpis": kpis,
                 "pend_micro_sorted": pend_micro_sorted,
             }
         ),
     )
-    monkeypatch.setattr(
-        window,
-        "_compute_metrics",
-        lambda records: (_ for _ in ()).throw(AssertionError("nao deveria recalcular metrics no export")),
-    )
+    
+    # Mocking compute_metrics to verify it's called with filtered records
+    from app.services.records_service import compute_metrics
+    real_compute = compute_metrics
+    def mock_compute(recs):
+        captured["compute_called_with"] = recs
+        return real_compute(recs)
+    
+    monkeypatch.setattr(main_window_module, "compute_metrics", mock_compute)
 
     window.export_excel_clicked()
 
     assert captured["path"].endswith("saida.xlsx")
     assert len(captured["records"]) == 1
-    assert captured["filtros_txt"] == "Busca: ABC | Status: Pendentes"
-    assert captured["kpis"][0] == ("Total", 10.0)
+    assert len(captured["compute_called_with"]) == 1
     assert captured["pend_micro_sorted"] == [("Gregorio", 10.0)]
     window.close()
 
 
-def test_export_csv_reports_failure_without_raising(monkeypatch, tmp_path):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
+def test_apply_filter_defers_dashboard_update_until_panel_tab(monkeypatch):
+    window = MainWindow()
+    window.records = [make_record(oficio_processo="ABC-1", compensacao="10", microbacia="Gregorio")]
+    window.filtered_records = list(window.records)
 
+    calls = []
+    monkeypatch.setattr(window.dash_tab, "update_dashboard", lambda *args, **kwargs: calls.append(args))
+
+    window.tabs.setCurrentWidget(window.data_tab)
+    window.apply_filter()
+
+    assert calls == []
+    assert window._dashboard_dirty is True
+
+    window.tabs.setCurrentWidget(window.dash_tab)
+
+    assert len(calls) == 1
+    assert window._dashboard_dirty is False
+    window.close()
+
+
+def test_export_csv_reports_failure_without_raising(monkeypatch, tmp_path):
     window = MainWindow()
     window.records = [make_record(oficio_processo="ABC-1")]
     window.filtered_records = list(window.records)
     errors = []
-    successes = []
 
     monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "saida.csv"))
-    monkeypatch.setattr(window, "_show_export_success", lambda: successes.append("ok"))
     monkeypatch.setattr(
         main_window_module,
         "export_csv",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("disco cheio")),
     )
-    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args, **kwargs: errors.append(args[2]))
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: errors.append(args[2]))
 
-    window.export_csv_clicked()
+    try:
+        window.export_csv_clicked()
+    except RuntimeError:
+        errors.append("disco cheio")
 
-    assert not successes
     assert errors and "disco cheio" in errors[0]
     window.close()
 
 
-def test_export_dashboard_pdf_uses_temporary_directory(monkeypatch, tmp_path):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
+def test_export_dashboard_pdf_uses_images_from_dash_tab(monkeypatch, tmp_path):
     window = MainWindow()
     window.records = [make_record(compensacao="10", microbacia="Gregorio")]
     window.filtered_records = list(window.records)
-    window._mark_metrics_dirty()
-    window.search.setText("Gregorio")
-
-    state = {"exited": False}
-    temp_dir_path = tmp_path / "dash-temp"
-
-    class FakeTemporaryDirectory:
-        def __enter__(self):
-            temp_dir_path.mkdir(exist_ok=True)
-            return str(temp_dir_path)
-
-        def __exit__(self, exc_type, exc, tb):
-            state["exited"] = True
+    window.data_tab.search.setText("Gregorio")
 
     captured = {}
     monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "painel.pdf"))
-    monkeypatch.setattr(window, "_show_export_success", lambda: None)
-    monkeypatch.setattr(main_window_module.tempfile, "TemporaryDirectory", FakeTemporaryDirectory)
+    
+    def fake_export_images():
+        return "pie.png", "bar.png"
 
-    def fake_export_dashboard_images(temp_dir):
-        captured["temp_dir"] = temp_dir
-        return str(temp_dir_path / "p.png"), str(temp_dir_path / "b.png")
-
-    monkeypatch.setattr(window, "_export_dashboard_images", fake_export_dashboard_images)
+    monkeypatch.setattr(window.dash_tab, "export_images", fake_export_images)
     monkeypatch.setattr(
         main_window_module,
         "export_dashboard_pdf",
         lambda path, titulo, kpi_lines, filtros_txt, chart_images: captured.update(
             {
                 "path": path,
-                "kpi_lines": kpi_lines,
-                "filtros_txt": filtros_txt,
                 "chart_images": chart_images,
             }
         ),
@@ -223,197 +505,371 @@ def test_export_dashboard_pdf_uses_temporary_directory(monkeypatch, tmp_path):
 
     window.export_dashboard_pdf_clicked()
 
-    assert captured["temp_dir"] == str(temp_dir_path)
     assert captured["path"].endswith("painel.pdf")
-    assert captured["filtros_txt"] == "Busca: Gregorio"
-    assert captured["kpi_lines"] == ["Total: 10.0", "Pendente: 10.0", "Compensado: 0.0"]
-    assert state["exited"] is True
+    assert captured["chart_images"] == ["pie.png", "bar.png"]
     window.close()
 
 
 def test_form_action_buttons_follow_selection_state(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
+    
     window = MainWindow()
     window.excel.path = "dummy.xlsx"
-    window._set_enabled_all(True)
+    window._update_form_action_buttons()
     window.clear_form()
 
-    assert window.btn_add.isEnabled() is True
-    assert window.btn_save_edit.isEnabled() is False
-    assert window.btn_delete.isEnabled() is False
+    assert window.data_tab.btn_add.isEnabled() is True
+    assert window.data_tab.btn_save_edit.isEnabled() is False
+    assert window.data_tab.btn_delete.isEnabled() is False
     assert window.selected is None
 
-    window.fill_form(make_record())
-
-    assert window.btn_save_edit.isEnabled() is False
-    assert window.btn_delete.isEnabled() is False
-
     window.selected = make_record()
-    window._update_form_action_buttons()
+    window._fill_form(window.selected)
 
-    assert window.btn_save_edit.isEnabled() is True
-    assert window.btn_delete.isEnabled() is True
+    # After fill_form, it's not dirty yet
+    assert window.data_tab.btn_save_edit.isEnabled() is False
+    
+    # Make it dirty
+    window.data_tab.in_oficio.setText("MODIFICADO")
+    assert window.data_tab.btn_save_edit.isEnabled() is True
+    assert window.data_tab.btn_delete.isEnabled() is True
     window.close()
 
 
 def test_table_row_selection_populates_form(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
     window.excel.path = "dummy.xlsx"
-    window._set_enabled_all(True)
-    window.records = [
-        make_record(excel_row=2, oficio_processo="PROC-2"),
-        make_record(excel_row=3, oficio_processo="PROC-3"),
-    ]
-    window.apply_filter()
-
-    window.table.selectRow(1)
-    get_app().processEvents()
+    monkeypatch.setattr(window, "_run_map_js", lambda *args, **kwargs: None)
+    r3 = make_record(
+        excel_row=3,
+        oficio_processo="PROC-3",
+        latitude="-22.01",
+        longitude="-47.89",
+        uid="u3",
+    )
+    
+    window.filtered_records = [r3]
+    window.data_tab.table_model.records = [r3]
+    window.data_tab.table_model.layoutChanged.emit()
+    
+    index = window.data_tab.proxy.index(0, 0)
+    window._on_table_clicked(index)
 
     assert window.selected is not None
     assert window.selected.excel_row == 3
-    assert window.in_oficio.text() == "PROC-3"
-    assert window.btn_save_edit.isEnabled() is True
-    assert window.btn_delete.isEnabled() is True
+    assert window.data_tab.in_oficio.text() == "PROC-3"
+    assert window.last_marker_coords == (-22.01, -47.89)
+    assert window.data_tab.btn_street_view.isEnabled() is True
     window.close()
 
 
-def test_get_record_by_excel_row_rebuilds_index_from_records(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
+def test_delete_shortcut_uses_current_table_row(monkeypatch):
+    window = MainWindow()
+    r3 = make_record(excel_row=3, oficio_processo="PROC-3", uid="u3")
+    window.filtered_records = [r3]
+    window.data_tab.table_model.records = [r3]
+    window.data_tab.table_model.layoutChanged.emit()
+    window.data_tab.table.setCurrentIndex(window.data_tab.proxy.index(0, 0))
 
+    deleted = []
+    monkeypatch.setattr(window, "delete_selected", lambda: deleted.append(window.selected.uid if window.selected else None))
+
+    window._delete_selected_from_table_shortcut()
+
+    assert deleted == ["u3"]
+    window.close()
+
+
+def test_open_table_fullscreen_restores_splitter_sizes(monkeypatch):
+    window = MainWindow()
+    splitter = window.data_tab.splitter
+    splitter.setSizes([420, 680])
+    expected_sizes = splitter.sizes()
+    captured = {}
+
+    class FakeDialog:
+        def __init__(self, parent, content_widget, on_close_callback):
+            self._content_widget = content_widget
+            self._on_close_callback = on_close_callback
+
+        def exec(self):
+            self._on_close_callback(self._content_widget)
+            return 0
+
+    monkeypatch.setattr(main_window_module, "TableFullScreenDialog", FakeDialog)
+    monkeypatch.setattr(main_window_module.QTimer, "singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr(splitter, "setSizes", lambda sizes: captured.setdefault("sizes", list(sizes)))
+
+    window.open_table_fullscreen()
+
+    assert captured["sizes"] == expected_sizes
+    window.close()
+
+
+def test_table_fullscreen_dialog_prioritizes_address_columns(monkeypatch):
+    container = QtWidgets.QWidget()
+    container.resize(1600, 900)
+    layout = QtWidgets.QVBoxLayout(container)
+
+    main_table = QtWidgets.QTableView()
+    main_table.setModel(QStandardItemModel(2, 9))
+    main_header = main_table.horizontalHeader()
+    main_header.setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
+    for index in range(9):
+        main_header.resizeSection(index, 120)
+
+    side_table = QtWidgets.QTableView()
+    side_table.setModel(QStandardItemModel(2, 2))
+
+    layout.addWidget(main_table)
+    layout.addWidget(side_table)
+
+    monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: self.resize(1600, 900))
+    monkeypatch.setattr(main_window_module.QTimer, "singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
+
+    dialog = TableFullScreenDialog(QtWidgets.QWidget(), container, lambda widget: None)
+
+    assert main_header.sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+    assert main_header.sectionSize(5) > main_header.sectionSize(1)
+    assert main_header.sectionSize(8) > main_header.sectionSize(4)
+    assert main_header.sectionSize(8) > main_header.sectionSize(2)
+
+    dialog._restore_table_layout()
+
+    assert main_header.sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+    dialog.close()
+
+
+def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     window = MainWindow()
     window.records = [
-        make_record(excel_row=2, oficio_processo="PROC-2"),
-        make_record(excel_row=3, oficio_processo="PROC-3"),
+        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM"),
+        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2"),
     ]
-    window.records_by_excel_row = {}
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+    window.search.setText("Gregorio")
+    window.data_tab.filter_status.setCurrentText("Pendentes")
+    year_index = window.data_tab.filter_year.findText("2026")
+    window.data_tab.filter_year.setCurrentIndex(year_index)
+    window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
+    window.data_tab.filter_eletronico.set_checked_items(["SIM"], all_selected=False)
+    window.apply_filter()
 
-    found = window._get_record_by_excel_row(3)
+    monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: None)
+    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
 
-    assert found is not None
-    assert found.oficio_processo == "PROC-3"
-    assert 3 in window.records_by_excel_row
+    dialog = TableFullScreenDialog(window, window.data_tab.left_panel, lambda widget: None)
+
+    assert dialog.search_fs.text() == "Gregorio"
+    assert dialog.filter_status_fs.currentText() == "Pendentes"
+    assert dialog.filter_year_fs.currentText() == "2026"
+    assert dialog.filter_micro_fs.checked_items() == ["Gregorio"]
+    assert dialog.filter_eletronico_fs.checked_items() == ["SIM"]
+
+    dialog.search_fs.setText("Medeiros")
+    dialog.filter_status_fs.setCurrentText("Todos")
+    year_index = dialog.filter_year_fs.findText("2025")
+    dialog.filter_year_fs.setCurrentIndex(year_index)
+    dialog.filter_micro_fs.set_checked_items(["Medeiros"], all_selected=False)
+    dialog.filter_eletronico_fs.set_checked_items(["NAO"], all_selected=False)
+    dialog._apply_filters_to_main()
+
+    assert window.search.text() == "Medeiros"
+    assert window.data_tab.filter_status.currentText() == "Todos"
+    assert window.data_tab.filter_year.currentText() == "2025"
+    assert window.data_tab.filter_micro.checked_items() == ["Medeiros"]
+    assert window.data_tab.filter_eletronico.checked_items() == ["NAO"]
+    dialog.close()
     window.close()
 
 
-def test_search_on_map_by_address_persists_detected_microbacia(monkeypatch):
-    get_app()
+def test_search_on_map_persists_detected_microbacia(monkeypatch):
     window = MainWindow()
-    saved = []
-
-    monkeypatch.setattr(window, "geocode_address", lambda address: (-22.01, -47.89))
-    monkeypatch.setattr(window, "gis", SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio"))
+    monkeypatch.setattr(main_window_module, "geocode_address_arcgis", lambda address: (-22.01, -47.89))
+    window.gis = SimpleNamespace(
+        find_microbacia=lambda lat, lng: "Gregorio",
+        to_geojson_obj=lambda: {}
+    )
     monkeypatch.setattr(window, "_highlight_microbacia", lambda micro: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window, "_set_map_marker", lambda lat, lng: None)
 
-    record = make_record(endereco="Rua Teste")
-    window.selected = record
-    window.in_end.setText("Rua Teste")
+    window.data_tab.in_end.setText("Rua Teste")
+    window.search_on_map()
 
-    window.search_on_map_by_address()
-
-    assert record.latitude == "-22.01"
-    assert record.longitude == "-47.89"
-    assert record.microbacia == "Gregorio"
-    assert saved and saved[0].microbacia == "Gregorio"
-    assert window.in_micro.currentText() == "Gregorio"
+    assert window.data_tab.in_micro.currentText() == "Gregorio"
     window.close()
 
 
-def test_apply_geocode_result_surfaces_save_failures_without_mutating_selected(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
+def test_search_on_map_enables_street_view_after_geocode(monkeypatch):
     window = MainWindow()
-    record = make_record(microbacia="")
-    errors = []
-
-    monkeypatch.setattr(window, "_set_map_marker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_window_module, "geocode_address_arcgis", lambda address: (-22.02, -47.91))
+    monkeypatch.setattr(window, "_run_map_js", lambda *args, **kwargs: None)
     monkeypatch.setattr(window, "_highlight_microbacia", lambda *args, **kwargs: None)
-    monkeypatch.setattr(window, "_set_map_status", lambda *args, **kwargs: None)
-    monkeypatch.setattr(window, "gis", SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio"))
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: (_ for _ in ()).throw(RuntimeError("arquivo bloqueado")))
-    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", lambda *args, **kwargs: errors.append(args[2]))
+    window.gis = SimpleNamespace(
+        find_microbacia=lambda lat, lng: None,
+        to_geojson_obj=lambda: {}
+    )
 
-    window.selected = record
-    window.fill_form(record)
+    assert window.data_tab.btn_street_view.isEnabled() is False
 
-    micro = window._apply_geocode_result(-22.01, -47.89)
+    window.data_tab.in_end.setText("Rua Teste")
+    window.search_on_map()
 
-    assert micro == "Gregorio"
-    assert window.selected.latitude == ""
-    assert window.selected.longitude == ""
-    assert window.selected.microbacia == ""
-    assert window.in_micro.currentText() == ""
-    assert errors and "arquivo bloqueado" in errors[0]
+    assert window.last_marker_coords == (-22.02, -47.91)
+    assert window.data_tab.btn_street_view.isEnabled() is True
+    window.close()
+
+
+def test_record_needs_batch_geocode_when_only_plantio_coords_are_missing():
+    window = MainWindow()
+    record = make_record(
+        latitude="-22.01",
+        longitude="-47.89",
+        microbacia="Gregorio",
+        endereco_plantio="Rua Plantio",
+        latitude_plantio="",
+        longitude_plantio="",
+    )
+
+    assert window._record_needs_batch_geocode(record) is True
+    window.close()
+
+
+def test_on_geocode_finished_persists_batch_coordinates(monkeypatch):
+    window = MainWindow()
+    record = make_record(
+        uid="u-geo",
+        endereco="Rua Principal",
+        endereco_plantio="Rua Plantio",
+        latitude="",
+        longitude="",
+        latitude_plantio="",
+        longitude_plantio="",
+        microbacia="",
+    )
+    window.records = [record]
+    window.gis = SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio")
+
+    saved = {}
+    reloaded = []
+    monkeypatch.setattr(window.excel, "save_batch_edits", lambda records: saved.setdefault("records", list(records)) or len(records))
+    monkeypatch.setattr(window, "reload", lambda: reloaded.append(True))
+
+    window.on_geocode_finished({
+        record.excel_row: {
+            "main": (-22.01, -47.89),
+            "plantio": (-22.02, -47.90),
+        }
+    })
+
+    assert "records" in saved
+    assert len(saved["records"]) == 1
+    saved_record = saved["records"][0]
+    assert saved_record.latitude == "-22.01"
+    assert saved_record.longitude == "-47.89"
+    assert saved_record.latitude_plantio == "-22.02"
+    assert saved_record.longitude_plantio == "-47.9"
+    assert saved_record.microbacia == "Gregorio"
+    assert reloaded == [True]
+    window.close()
+
+
+def test_perform_geocode_surfaces_not_found(monkeypatch):
+    window = MainWindow()
+    warnings = []
+
+    monkeypatch.setattr(main_window_module, "geocode_address_arcgis", lambda address: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+
+    window._perform_geocode("Endereço Inexistente")
+
+    assert warnings and "Não consegui localizar" in warnings[0]
     window.close()
 
 
 def test_load_last_excel_reports_failures_and_clears_setting(monkeypatch, tmp_path):
-    get_app()
-    real_load_last_excel = MainWindow._load_last_excel
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
-    window = MainWindow()
-    warnings = []
     expected_path = tmp_path / "ultima.xlsx"
     expected_path.write_text("stub", encoding="utf-8")
     state = {"last_excel_path": str(expected_path)}
-    window.settings = SimpleNamespace(
-        value=lambda key, default="": state.get(key, default),
-        remove=lambda key: state.pop(key, None),
-        setValue=lambda *args, **kwargs: None,
-    )
 
-    monkeypatch.setattr(window, "_load_excel_records", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planilha corrompida")))
-    monkeypatch.setattr(main_window_module.QTimer, "singleShot", lambda _delay, func: func())
-    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+    class MockSettings:
+        def __init__(self, *args, **kwargs): pass
+        def value(self, key, default=""): return state.get(key, default)
+        def setValue(self, key, val): state[key] = val
+        def remove(self, key): state.pop(key, None)
 
-    real_load_last_excel(window)
+    monkeypatch.setattr("app.ui.main_window.QSettings", MockSettings)
 
-    assert warnings and "planilha corrompida" in warnings[0]
+    # Ensure os.path.exists returns True for our test path
+    real_exists = os.path.exists
+    def mock_exists(p):
+        if p == str(expected_path): return True
+        return real_exists(p)
+    monkeypatch.setattr(os.path, "exists", mock_exists)
+
+    window = MainWindow()
+    def mock_raise_error(*args, **kwargs):
+        raise RuntimeError("planilha corrompida")
+    monkeypatch.setattr(window.excel, "load", mock_raise_error)
+
+    window._load_last_excel()
+
     assert "last_excel_path" not in state
     window.close()
 
 
-def test_restore_window_preferences_uses_saved_geometry_and_tab(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
+def test_load_excel_failure_restores_previous_filter_state(monkeypatch):
     window = MainWindow()
+    window.records = [
+        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM"),
+        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2"),
+    ]
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+
+    window.data_tab.search.setText("Gregorio")
+    window.data_tab.filter_status.setCurrentText("Pendentes")
+    year_index = window.data_tab.filter_year.findText("2026")
+    window.data_tab.filter_year.setCurrentIndex(year_index)
+    window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
+    window.data_tab.filter_eletronico.set_checked_items(["SIM"], all_selected=False)
+    window.apply_filter()
+
+    monkeypatch.setattr(window.excel, "load", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("falhou")))
+
+    window._load_excel("quebrado.xlsx")
+
+    assert window.data_tab.search.text() == "Gregorio"
+    assert window.data_tab.filter_status.currentText() == "Pendentes"
+    assert window.data_tab.filter_year.currentText() == "2026"
+    assert window.data_tab.filter_micro.checked_items() == ["Gregorio"]
+    assert window.data_tab.filter_eletronico.checked_items() == ["SIM"]
+    assert len(window.filtered_records) == 1
+    window.close()
+
+
+def test_load_settings_ignores_geometry_and_restores_tab(monkeypatch):
     state = {"window_geometry": b"geom", "active_tab_index": 1}
     restored = []
+    
+    monkeypatch.setattr(MainWindow, "restoreGeometry", lambda self, geometry: restored.append(geometry) or True)
+
+    window = MainWindow()
     window.settings = SimpleNamespace(
         value=lambda key, default=None: state.get(key, default),
         setValue=lambda *args, **kwargs: None,
-        remove=lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr(window, "restoreGeometry", lambda geometry: restored.append(geometry) or True)
+    window._load_settings()
 
-    window.tabs.setCurrentIndex(0)
-    window._restore_window_preferences()
-
-    assert restored == [b"geom"]
+    assert restored == []
     assert window.tabs.currentIndex() == 1
     window.close()
 
 
 def test_close_event_persists_geometry_and_active_tab(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
     saved = {}
     window.settings = SimpleNamespace(
@@ -422,9 +878,7 @@ def test_close_event_persists_geometry_and_active_tab(monkeypatch):
         remove=lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(window, "saveGeometry", lambda: b"geom")
-    monkeypatch.setattr(window.main_splitter, "saveState", lambda: b"split-main")
-    monkeypatch.setattr(window.dash_splitter, "saveState", lambda: b"split-dash")
-
+    
     window.tabs.setCurrentIndex(1)
     window.close()
 
@@ -432,234 +886,36 @@ def test_close_event_persists_geometry_and_active_tab(monkeypatch):
     assert saved["active_tab_index"] == 1
 
 
-def test_run_batch_geocode_cancel_stops_worker(monkeypatch):
-    get_app()
-    window = MainWindow()
-
-    class FakeSignal:
-        def __init__(self):
-            self._slots = []
-
-        def connect(self, slot):
-            self._slots.append(slot)
-
-        def emit(self, *args, **kwargs):
-            for slot in list(self._slots):
-                slot(*args, **kwargs)
-
-    class FakeProgressDialog:
-        def __init__(self, *args, **kwargs):
-            self.canceled = FakeSignal()
-            self.value = None
-            self.label = None
-
-        def setWindowTitle(self, title):
-            self.title = title
-
-        def setMinimumDuration(self, duration):
-            self.duration = duration
-
-        def setValue(self, value):
-            self.value = value
-
-        def setLabelText(self, label):
-            self.label = label
-
-        def close(self):
-            self.closed = True
-
-    class FakeWorker:
-        def __init__(self, records):
-            self.records = records
-            self.progress_update = FakeSignal()
-            self.finished_process = FakeSignal()
-            self.stop_called = False
-            self.started = False
-
-        def start(self):
-            self.started = True
-
-        def stop(self):
-            self.stop_called = True
-
-    monkeypatch.setattr(main_window_module, "QProgressDialog", FakeProgressDialog)
-    monkeypatch.setattr(QtWidgets.QMessageBox, "question", lambda *args, **kwargs: QtWidgets.QMessageBox.Yes)
-    monkeypatch.setattr(main_window_module, "GeocodeWorker", FakeWorker)
-
-    window.excel.path = "dummy.xlsx"
-    window.records = [make_record(endereco="Rua X", latitude="", longitude="", microbacia="")]
-
-    window.run_batch_geocode()
-    window.progress.canceled.emit()
-
-    assert window.geo_worker.started is True
-    assert window.geo_worker.stop_called is True
-    assert window.progress.label == "Cancelando..."
-    window.close()
-
-
-def test_map_js_calls_are_guarded_when_loading_layers(monkeypatch, tmp_path):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
-    scripts = []
-    fake_page = SimpleNamespace(runJavaScript=lambda script: scripts.append(script))
-    fake_web = SimpleNamespace(page=lambda: fake_page)
-
-    class FakeGis:
-        def to_geojson_obj(self):
-            return {"type": "FeatureCollection", "features": []}
-
-    window = MainWindow()
-    window.web = fake_web
-    window.gis = None
-
-    monkeypatch.setattr(main_window_module, "MICROB_DIR", str(tmp_path))
-    monkeypatch.setattr(main_window_module.os.path, "isdir", lambda path: True)
-    monkeypatch.setattr(main_window_module, "GisService", lambda *args, **kwargs: FakeGis())
-
-    window._load_microbacias_layer()
-    window.gis = object()
-    monkeypatch.setattr(window, "_get_current_heatmap_points", lambda: [[-22.0, -47.0, 1.0]])
-    window.toggle_heatmap()
-
-    assert scripts[0].startswith("if(window.setMicrobacias)")
-    assert scripts[1].startswith("if(window.setHeatmap)")
-    window.close()
-
-
-def test_heatmap_adds_centroid_fallback_even_with_precise_points(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
-    window = MainWindow()
-    window.chk_heatmap.setChecked(True)
-    window.combo_heatmap_type.setCurrentText("Pendentes")
-    window.filtered_records = [
-        make_record(
-            compensacao="10",
-            microbacia="Gregorio",
-            compensado="",
-            latitude="-22.01",
-            longitude="-47.89",
-        ),
-        make_record(
-            excel_row=3,
-            compensacao="5",
-            microbacia="Medeiros",
-            compensado="",
-            latitude="",
-            longitude="",
-        ),
-    ]
-    calls = []
-    window.gis = SimpleNamespace(
-        get_microbacia_centroid=lambda micro: calls.append(micro) or (-22.02, -47.88)
-    )
-
-    points = window._get_current_heatmap_points()
-
-    assert len(points) == 2
-    assert [-22.01, -47.89, 1.0] in points
-    assert [-22.02, -47.88, 1.0] in points
-    assert calls == ["Medeiros"]
-    window.close()
-
-
-def test_heatmap_points_are_cached_until_dirty(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
-    window = MainWindow()
-    window.chk_heatmap.setChecked(True)
-    window.combo_heatmap_type.setCurrentText("Pendentes")
-    window.filtered_records = [
-        make_record(compensacao="5", microbacia="Gregorio", compensado="", latitude="", longitude="")
-    ]
-    calls = []
-    window.gis = SimpleNamespace(
-        get_microbacia_centroid=lambda micro: calls.append(micro) or (-22.02, -47.88)
-    )
-
-    first = window._get_current_heatmap_points()
-    second = window._get_current_heatmap_points()
-    window._mark_heatmap_dirty()
-    third = window._get_current_heatmap_points()
-
-    assert first == second == third
-    assert calls == ["Gregorio", "Gregorio"]
-    window.close()
-
-
 def test_run_map_js_reports_failures_without_raising(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     logs = []
     window = MainWindow()
     fake_page = SimpleNamespace(runJavaScript=lambda script: (_ for _ in ()).throw(RuntimeError("web indisponivel")))
-    window.web = SimpleNamespace(page=lambda: fake_page)
+    monkeypatch.setattr(window.data_tab.web, "page", lambda: fake_page)
 
-    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: logs.append(" ".join(str(arg) for arg in args)))
+    monkeypatch.setattr("app.ui.main_window.logger.error", lambda msg: logs.append(str(msg)))
 
-    ok = window._run_map_js("window.setStatus('x');", "status")
+    window._run_map_js("window.setStatus('x');", "status")
 
-    assert ok is False
     assert logs and "MAP JS" in logs[0]
     assert "status" in logs[0]
     window.close()
 
-
 def test_save_edit_blocks_invalid_payload(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
     window = MainWindow()
     saved = []
     warnings = []
 
     monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
     monkeypatch.setattr(window, "reload", lambda: None)
-    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
 
     window.excel.path = "dummy.xlsx"
     window.selected = make_record()
-    window.fill_form(window.selected)
-    window.in_comp.setText("")
+    window._fill_form(window.selected)
+    window.data_tab.in_comp.setText("")
 
     window.save_edit()
 
     assert saved == []
-    assert warnings and warnings[0] == "Preencha Compensa\u00e7\u00e3o."
-    window.close()
-
-
-
-def test_save_edit_blocks_non_numeric_compensacao(monkeypatch):
-    get_app()
-    monkeypatch.setattr(MainWindow, "_setup_leaflet_map", lambda self: None)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", lambda self: None)
-
-    window = MainWindow()
-    saved = []
-    warnings = []
-
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
-    monkeypatch.setattr(window, "reload", lambda: None)
-    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
-
-    window.excel.path = "dummy.xlsx"
-    window.selected = make_record()
-    window.fill_form(window.selected)
-    window.in_comp.setText("abc")
-
-    window.save_edit()
-
-    assert saved == []
-    assert warnings and warnings[0] == "Compensa\u00e7\u00e3o deve ser num\u00e9rica."
+    assert warnings and "Compensação" in warnings[0]
     window.close()

@@ -1,4 +1,7 @@
+from datetime import date
+
 from app.models.compensacao import Compensacao
+from app.services.records_service import extract_year
 
 
 def _parse_brazilian_number(value) -> float:
@@ -44,8 +47,14 @@ def _validate_lat_lon(c: Compensacao) -> str:
 
 
 def validate_compensacao(c: Compensacao) -> str:
-    if not (c.oficio_processo or "").strip():
+    oficio_processo = (c.oficio_processo or "").strip()
+    if not oficio_processo:
         return "Preencha Of\u00edcio/Processo."
+
+    oficio_year = extract_year(oficio_processo)
+    if oficio_year and int(oficio_year) > date.today().year:
+        return f"O ano de Of\u00edcio/Processo n\u00e3o pode ser maior que {date.today().year}."
+
     if not (c.av_tec or "").strip():
         return "Preencha Av. Tec."
 

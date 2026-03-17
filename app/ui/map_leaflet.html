@@ -481,7 +481,10 @@
     if(marker) map.removeLayer(marker);
     marker = L.marker([lat, lng], { riseOnHover:true }).addTo(map);
     marker.setZIndexOffset(1000);
-    map.setView([lat, lng], Math.min(map.getZoom(), 17));
+    // Faz uma transiÃ§Ã£o suave para o ponto com um zoom de detalhe (16)
+    map.flyTo([lat, lng], 16, {
+      duration: 1.5 // segundos
+    });
   }
 
   /* ===========================

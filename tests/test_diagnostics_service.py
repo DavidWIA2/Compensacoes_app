@@ -30,6 +30,7 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
     snapshot = build_diagnostics_snapshot(window)
 
     assert snapshot["app"]["version"]
+    assert snapshot["paths"]["app_data_dir"]
     assert snapshot["session"]["excel_path"] == "C:/dados/base.xlsx"
     assert snapshot["session"]["records_total"] == 3
     assert snapshot["session"]["filtered_total"] == 1

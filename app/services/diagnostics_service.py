@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from app import __version__ as APP_VERSION
 from app.config import APP_NAME
+from app.utils.app_paths import resolve_app_data_dir
 from app.utils.logger import LOG_DIR, LOG_FILE
 
 
@@ -30,6 +31,7 @@ def build_diagnostics_snapshot(window=None) -> Dict[str, Any]:
         },
         "paths": {
             "cwd": os.getcwd(),
+            "app_data_dir": str(resolve_app_data_dir()),
             "logs_dir": LOG_DIR,
             "log_file": LOG_FILE,
         },

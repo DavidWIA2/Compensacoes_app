@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from app.utils.app_paths import ensure_dir, resolve_data_path
+
 
 class TileProxyService:
     _PROVIDERS: Dict[str, str] = {
@@ -41,11 +43,8 @@ class TileProxyService:
         self._thread: Optional[threading.Thread] = None
         self._cache: "OrderedDict[str, Tuple[bytes, str]]" = OrderedDict()
         self._cache_lock = threading.Lock()
-        
-        # Disk cache initialization
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self._disk_cache_dir = os.path.join(base_dir, "data", "tiles_cache")
-        os.makedirs(self._disk_cache_dir, exist_ok=True)
+
+        self._disk_cache_dir = str(ensure_dir(resolve_data_path("tiles_cache")))
 
     def _get_disk_cache_path(self, cache_key: str) -> str:
         digest = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]

@@ -2,11 +2,11 @@ import json
 import os
 import time
 from typing import Dict, Optional, Tuple, Any
+
+from app.utils.app_paths import resolve_data_path
 from app.utils.logger import logger
 
-# Resolve o caminho para o arquivo de cache na pasta data
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CACHE_FILE = os.path.join(BASE_DIR, "data", "geocode_cache.json")
+CACHE_FILE = str(resolve_data_path("geocode_cache.json"))
 
 # Expiração de 30 dias (30 * 24 * 60 * 60 segundos)
 EXPIRATION_SECONDS = 2592000

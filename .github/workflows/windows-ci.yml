@@ -97,19 +97,19 @@ jobs:
       - name: Build release package
         shell: pwsh
         run: |
-          $args = @(
-            "-PythonExe", "python",
-            "-SkipTests",
-            "-Clean",
-            "-BuildInstaller",
-            "-InstallerCompiler", $env:INNO_SETUP_COMPILER,
-            "-RequireInstallerCompiler",
-            "-HomepageUrl", "https://github.com/${{ github.repository }}"
-          )
-          if ($env:COMPENSACOES_CERT_PFX) {
-            $args += "-SignArtifacts"
+          $params = @{
+            PythonExe = "python"
+            SkipTests = $true
+            Clean = $true
+            BuildInstaller = $true
+            InstallerCompiler = $env:INNO_SETUP_COMPILER
+            RequireInstallerCompiler = $true
+            HomepageUrl = "https://github.com/${{ github.repository }}"
           }
-          .\scripts\build_release.ps1 @args
+          if ($env:COMPENSACOES_CERT_PFX) {
+            $params.SignArtifacts = $true
+          }
+          .\scripts\build_release.ps1 @params
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

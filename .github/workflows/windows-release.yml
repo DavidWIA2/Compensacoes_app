@@ -97,19 +97,19 @@ jobs:
         shell: pwsh
         run: |
           $releaseBaseUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}"
-          $args = @(
-            "-PythonExe", "python",
-            "-Clean",
-            "-BuildInstaller",
-            "-InstallerCompiler", $env:INNO_SETUP_COMPILER,
-            "-RequireInstallerCompiler",
-            "-ReleaseBaseUrl", $releaseBaseUrl,
-            "-HomepageUrl", $env:HOMEPAGE_URL
-          )
-          if ($env:COMPENSACOES_CERT_PFX) {
-            $args += "-SignArtifacts"
+          $params = @{
+            PythonExe = "python"
+            Clean = $true
+            BuildInstaller = $true
+            InstallerCompiler = $env:INNO_SETUP_COMPILER
+            RequireInstallerCompiler = $true
+            ReleaseBaseUrl = $releaseBaseUrl
+            HomepageUrl = $env:HOMEPAGE_URL
           }
-          .\scripts\build_release.ps1 @args
+          if ($env:COMPENSACOES_CERT_PFX) {
+            $params.SignArtifacts = $true
+          }
+          .\scripts\build_release.ps1 @params
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

@@ -35,6 +35,22 @@ def row_is_compensado(c: Compensacao) -> bool:
     return safe_upper(c.compensado) == "SIM"
 
 
+def build_search_blob(record: Compensacao) -> str:
+    blob = (
+        f"{record.oficio_processo} {record.endereco} {record.endereco_plantio} "
+        f"{record.microbacia} {record.av_tec} {record.caixa} {record.eletronico}"
+    ).lower()
+    return remove_accents(blob)
+
+
+def build_record_search_index(records: Sequence[Compensacao]) -> Dict[str, str]:
+    index: Dict[str, str] = {}
+    for record in records:
+        key = record.uid or str(record.excel_row)
+        index[key] = build_search_blob(record)
+    return index
+
+
 def to_float(value) -> float:
     if value is None:
         return 0.0
@@ -114,6 +130,7 @@ def filter_records(
     micro_all_selected: bool,
     eletronico_all_selected: bool,
     selected_year: str = "Todos",
+    search_index: Optional[Dict[str, str]] = None,
 ) -> List[Compensacao]:
     # Normaliza o texto de busca: remove acentos e deixa em minúsculo
     search_query = remove_accents(text or "").lower()
@@ -123,9 +140,10 @@ def filter_records(
 
     filtered = []
     for r in records:
-        # Normaliza o blob de dados do registro para comparação
-        blob = f"{r.oficio_processo} {r.endereco} {r.microbacia} {r.av_tec} {r.caixa} {r.eletronico}".lower()
-        blob_normalized = remove_accents(blob)
+        key = r.uid or str(r.excel_row)
+        blob_normalized = search_index.get(key) if search_index is not None else None
+        if blob_normalized is None:
+            blob_normalized = build_search_blob(r)
         
         if search_query and search_query not in blob_normalized:
             continue

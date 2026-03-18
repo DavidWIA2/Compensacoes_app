@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
+from app.models.display_columns import display_column_index
+from app.services.coordinates import build_heatmap_point
 from app.ui.components.widgets import CheckableComboBox, MapBridge, DebugPage
 from app.services.geocode_service import geocode_address_arcgis
 
@@ -119,14 +121,10 @@ class MapFullScreenDialog(QDialog):
     def _get_current_points_fs(self) -> list:
         pts = []
         typ = self.combo_fs_heatmap.currentText()
-        from app.services.records_service import safe_upper
         for r in self.parent_window.filtered_records:
-            try:
-                lat, lon = float(r.latitude), float(r.longitude)
-                is_comp = safe_upper(r.compensado) == "SIM"
-                if typ == "Tudo" or (typ == "Pendentes" and not is_comp) or (typ == "Realizadas" and is_comp):
-                    pts.append([lat, lon])
-            except: continue
+            point = build_heatmap_point(r, typ)
+            if point:
+                pts.append(point)
         return pts
 
     def _on_map_click_fs(self, lat, lng):
@@ -169,26 +167,26 @@ class MapFullScreenDialog(QDialog):
 
 class TableFullScreenDialog(QDialog):
     _FULLSCREEN_COLUMN_BASE_WIDTHS = {
-        0: 180,  # Oficio/Processo
-        1: 115,  # Eletronico
-        2: 110,  # Caixa
-        3: 120,  # Av. Tec.
-        4: 110,  # Compensacao
-        5: 300,  # Endereco
-        6: 150,  # Microbacia
-        7: 120,  # Compensado
-        8: 330,  # Endereco do Plantio
+        display_column_index("oficio_processo"): 180,
+        display_column_index("eletronico"): 115,
+        display_column_index("caixa"): 110,
+        display_column_index("av_tec"): 120,
+        display_column_index("compensacao"): 110,
+        display_column_index("endereco"): 300,
+        display_column_index("microbacia"): 150,
+        display_column_index("compensado"): 120,
+        display_column_index("endereco_plantio"): 330,
     }
     _FULLSCREEN_COLUMN_EXTRA_WEIGHTS = {
-        0: 0.9,
-        1: 0.3,
-        2: 0.25,
-        3: 0.35,
-        4: 0.25,
-        5: 1.8,
-        6: 0.5,
-        7: 0.3,
-        8: 2.1,
+        display_column_index("oficio_processo"): 0.9,
+        display_column_index("eletronico"): 0.3,
+        display_column_index("caixa"): 0.25,
+        display_column_index("av_tec"): 0.35,
+        display_column_index("compensacao"): 0.25,
+        display_column_index("endereco"): 1.8,
+        display_column_index("microbacia"): 0.5,
+        display_column_index("compensado"): 0.3,
+        display_column_index("endereco_plantio"): 2.1,
     }
 
     def __init__(self, parent, content_widget, on_close_callback):

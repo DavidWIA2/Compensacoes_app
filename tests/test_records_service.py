@@ -1,5 +1,6 @@
 ﻿from app.models.compensacao import Compensacao
 from app.services.records_service import (
+    build_record_search_index,
     compute_metrics,
     filter_records,
     to_float,
@@ -67,3 +68,22 @@ def test_filter_records_applies_text_status_and_micro_filters():
 
     assert len(filtered) == 1
     assert filtered[0].oficio_processo == "ABC-1"
+
+
+def test_filter_records_uses_precomputed_search_index_for_endereco_plantio():
+    records = [
+        make_record(oficio_processo="ABC-1", endereco="", endereco_plantio="Rua do Plantio", uid="u-1"),
+    ]
+
+    filtered = filter_records(
+        records,
+        text="plantio",
+        status="Todos",
+        selected_micros=[],
+        selected_eletronicos=[],
+        micro_all_selected=True,
+        eletronico_all_selected=True,
+        search_index=build_record_search_index(records),
+    )
+
+    assert filtered == records

@@ -1,8 +1,12 @@
-from typing import List, Optional, Tuple
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
+from typing import List
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor
+
 from app.models.compensacao import Compensacao
-from app.ui.components.themes import COLS
+from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
+from app.services.coordinates import format_coordinate_pair
+
 
 class CompensacoesTableModel(QAbstractTableModel):
     def __init__(self, records: List[Compensacao] = None):
@@ -18,19 +22,18 @@ class CompensacoesTableModel(QAbstractTableModel):
         return len(self.records)
 
     def columnCount(self, parent=QModelIndex()) -> int:
-        return len(COLS)
+        return len(DISPLAY_COLUMN_LABELS)
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):
         if role != Qt.DisplayRole:
             return None
-            
+
         if orientation == Qt.Horizontal:
-            return COLS[section]
-            
+            return DISPLAY_COLUMN_LABELS[section]
+
         if orientation == Qt.Vertical:
-            # Retorna o número da linha (1, 2, 3...)
             return str(section + 1)
-            
+
         return None
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
@@ -38,48 +41,46 @@ class CompensacoesTableModel(QAbstractTableModel):
             return None
 
         record = self.records[index.row()]
-        col = index.column()
+        attr = DISPLAY_COLUMN_ATTRS[index.column()]
 
         if role == Qt.DisplayRole:
-            mapping = {
-                0: record.oficio_processo,
-                1: record.eletronico,
-                2: record.caixa,
-                3: record.av_tec,
-                4: str(record.compensacao) if record.compensacao is not None else "",
-                5: record.endereco,
-                6: record.microbacia,
-                7: "SIM" if str(record.compensado).strip().upper() == "SIM" else record.compensado,
-                8: record.endereco_plantio
-            }
-            return mapping.get(col, "")
+            value = getattr(record, attr)
+            if attr == "compensacao":
+                return str(value) if value is not None else ""
+            if attr == "compensado" and str(value).strip().upper() == "SIM":
+                return "SIM"
+            return value
 
         if role == Qt.TextAlignmentRole:
-            if col == 4: return Qt.AlignRight | Qt.AlignVCenter
-            if col == 7: return Qt.AlignCenter | Qt.AlignVCenter
+            if attr == "compensacao":
+                return Qt.AlignRight | Qt.AlignVCenter
+            if attr == "compensado":
+                return Qt.AlignCenter | Qt.AlignVCenter
             return Qt.AlignLeft | Qt.AlignVCenter
 
-        if role == Qt.BackgroundRole and col == 7:
+        if role == Qt.BackgroundRole and attr == "compensado":
             if str(record.compensado).strip().upper() == "SIM":
                 return QColor("#1f6f3a") if self._is_dark else QColor("#c6efce")
             return QColor("#3a3f4c") if self._is_dark else QColor("#e9edf3")
 
-        if role == Qt.ForegroundRole and col == 7:
+        if role == Qt.ForegroundRole and attr == "compensado":
             if str(record.compensado).strip().upper() == "SIM":
                 return QColor("#eafff1") if self._is_dark else QColor("#1d4b2a")
             return QColor("#e9e9ea") if self._is_dark else QColor("#1f2328")
 
         if role == Qt.ToolTipRole:
-            lat = getattr(record, "latitude", "")
-            lon = getattr(record, "longitude", "")
-            if str(lat).strip() and str(lon).strip():
-                return f"Lat/Lon: {lat}, {lon}"
+            coords = format_coordinate_pair(record.latitude, record.longitude)
+            if coords:
+                return f"Lat/Lon: {coords}"
 
-        if role == Qt.UserRole: # Usado para ordenação numérica na coluna de compensação
-            if col == 4:
-                try: return float(record.compensacao)
-                except: return 0.0
-            if col == 0: return record.excel_row
+        if role == Qt.UserRole:
+            if attr == "compensacao":
+                try:
+                    return float(record.compensacao)
+                except Exception:
+                    return 0.0
+            if attr == "oficio_processo":
+                return record.excel_row
             return self.data(index, Qt.DisplayRole)
 
         return None

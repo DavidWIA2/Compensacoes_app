@@ -11,6 +11,7 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models.compensacao import Compensacao
+from app.models.display_columns import DISPLAY_COLUMNS
 
 MAX_BACKUPS = 10
 BACKUP_FOLDER_NAME = "backups_historico"
@@ -18,15 +19,7 @@ SHEET_NAME = "Compensa\u00e7\u00f5es"
 
 # Mapeamento de nomes de colunas esperados para facilitar a localiza\u00e7\u00e3o din\u00e2mica
 EXPECTED_HEADERS = {
-    "oficio_processo": "Of\u00edcio/ Processo",
-    "eletronico": "Eletr\u00f4nico",
-    "caixa": "Caixa",
-    "av_tec": "Av. Tec.",
-    "compensacao": "Compensa\u00e7\u00e3o",
-    "endereco": "Endere\u00e7o",
-    "microbacia": "Microbacia",
-    "compensado": "Compensado",
-    "endereco_plantio": "Endere\u00e7o do Plantio",
+    **{attr: label for label, attr in DISPLAY_COLUMNS},
     "latitude_plantio": "Lat_Plantio",
     "longitude_plantio": "Lon_Plantio",
     "latitude": "Latitude",

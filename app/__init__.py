@@ -1,1 +1,3 @@
-# Arquivo gerado para o Python reconhecer esta pasta oficial do app
+"""Pacote principal do aplicativo."""
+
+__version__ = "1.0.0"

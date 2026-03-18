@@ -1,3 +1,6 @@
+from app.models.display_columns import DISPLAY_COLUMN_LABELS
+
+
 # --- TEMAS VISUAIS ---
 THEME_LIGHT = {
     "bg_main": "#f5f6f8",
@@ -69,11 +72,18 @@ THEME_DARK = {
     "shadow": "rgba(0,0,0,0.35)",
 }
 
-COLS = [
-    "Ofício/ Processo", "Eletrônico", "Caixa", "Av. Tec.",
-    "Compensação", "Endereço", "Microbacia", "Compensado",
-    "Endereço do Plantio"
-]
+COLS = DISPLAY_COLUMN_LABELS
+
+def _svg_data_uri(svg: str) -> str:
+    encoded = (
+        svg.replace("%", "%25")
+        .replace("#", "%23")
+        .replace("<", "%3C")
+        .replace(">", "%3E")
+        .replace('"', "'")
+        .replace("\n", "")
+    )
+    return f"data:image/svg+xml;utf8,{encoded}"
 
 def get_app_qss(t: dict, sf: float = 1.0) -> str:
     """Gera o código CSS (QSS) completo, escalado e com suporte total a temas."""
@@ -83,6 +93,20 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
     radius = int(8 * sf)
     min_h_input = int(24 * sf)
     min_h_btn = int(30 * sf)
+    checkbox_mark = _svg_data_uri(
+        f"""
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+            <path d="M2.2 6.1 4.7 8.5 9.7 3.4" fill="none" stroke="{t['btn_primary']}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+        </svg>
+        """
+    )
+    radio_dot = _svg_data_uri(
+        f"""
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
+            <circle cx="6" cy="6" r="2.35" fill="{t['btn_primary']}"/>
+        </svg>
+        """
+    )
     
     return f"""
         /* ===== Base ===== */
@@ -99,6 +123,21 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
 
         QLabel {{ color: {t['text']}; }}
         QCheckBox, QRadioButton {{ color: {t['text']}; background: transparent; }}
+        QCheckBox::indicator:checked {{
+            background-color: {t['btn_secondary_hover']};
+            border: 1px solid {t['btn_primary_hover']};
+            border-radius: {max(int(3 * sf), 3)}px;
+            image: url("{checkbox_mark}");
+        }}
+        QRadioButton::indicator:checked {{
+            background-color: {t['btn_secondary_hover']};
+            border: 1px solid {t['btn_primary_hover']};
+            border-radius: {max(int(6 * sf), 6)}px;
+            image: url("{radio_dot}");
+        }}
+        QCheckBox::indicator:checked:hover, QRadioButton::indicator:checked:hover {{
+            background-color: {t['btn_secondary_pressed']};
+        }}
 
         QGroupBox {{
             font-weight: 800;

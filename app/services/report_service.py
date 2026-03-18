@@ -7,21 +7,20 @@ from openpyxl.utils import get_column_letter
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.compensacao import Compensacao
+from app.models.display_columns import (
+    DISPLAY_COLUMNS,
+    DISPLAY_COLUMN_LABEL_BY_ATTR,
+    display_column_label,
+)
+from app.services.coordinates import format_coordinate_pair
 
-ALL_COLUMNS = [
-    ("Of\u00edcio/ Processo", "oficio_processo"),
-    ("Eletr\u00f4nico", "eletronico"),
-    ("Caixa", "caixa"),
-    ("Av. Tec.", "av_tec"),
-    ("Compensa\u00e7\u00e3o", "compensacao"),
-    ("Endere\u00e7o", "endereco"),
-    ("Microbacia", "microbacia"),
-    ("Compensado", "compensado"),
-]
+
+ALL_COLUMNS = DISPLAY_COLUMNS
 
 HEADER_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 COMPENSADO_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -34,76 +33,43 @@ BORDER_STYLE = Border(
 FONT_BOLD = Font(bold=True)
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch
 
-def export_individual_pdf(filepath: str, record: Compensacao):
-    doc = SimpleDocTemplate(filepath, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'MainTitle',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=18,
-        textColor=colors.HexColor("#2C3E50"),
-        alignment=1,
-        spaceAfter=20
-    )
+def _selected_headers(selected_cols: List[str]) -> List[str]:
+    return [display_column_label(column) for column in selected_cols]
 
-    elements = []
-    
-    # Cabeçalho
-    elements.append(Paragraph("Ficha de Compensação Ambiental", title_style))
-    elements.append(Spacer(1, 0.2 * inch))
 
-    # Dados
-    data = [
+def _format_individual_status(record: Compensacao) -> str:
+    return "CONCLUÍDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE"
+
+
+def _build_individual_pdf_rows(record: Compensacao) -> List[List[str]]:
+    rows = [
         ["Ofício/Processo:", str(record.oficio_processo or ""), "Eletrônico:", str(record.eletronico or "")],
         ["Av. Técnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
-        ["Status:", "CONCLUÍDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE", "Microbacia:", str(record.microbacia or "")],
+        ["Status:", _format_individual_status(record), "Microbacia:", str(record.microbacia or "")],
         ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
         ["End. Ocorrência:", str(record.endereco or ""), "", ""],
         ["End. Plantio:", str(record.endereco_plantio or ""), "", ""],
-        ["Coordenadas:", f"{record.latitude or ''}, {record.longitude or ''}", "", ""]
     ]
 
-    t = Table(data, colWidths=[120, 150, 100, 140])
-    t.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor("#2C3E50")),
-        ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor("#2C3E50")),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-        ('SPAN', (1, 3), (3, 3)), # Volume
-        ('SPAN', (1, 4), (3, 4)), # End. Ocorrência
-        ('SPAN', (1, 5), (3, 5)), # End. Plantio
-        ('SPAN', (1, 6), (3, 6)), # Coordenadas
-    ]))
-    
-    elements.append(t)
-    elements.append(Spacer(1, 0.5 * inch))
+    main_coords = format_coordinate_pair(record.latitude, record.longitude)
+    plantio_coords = format_coordinate_pair(record.latitude_plantio, record.longitude_plantio)
+    if main_coords:
+        rows.append(["Coord. Ocorrência:", main_coords, "", ""])
+    if plantio_coords:
+        rows.append(["Coord. Plantio:", plantio_coords, "", ""])
+    if not main_coords and not plantio_coords:
+        rows.append(["Coordenadas:", "", "", ""])
 
-    # Área de Assinatura
-    elements.append(Spacer(1, 2 * inch))
-    elements.append(Paragraph("_" * 40, ParagraphStyle(name='Sig', alignment=1, fontSize=12)))
-    elements.append(Paragraph("Assinatura do Técnico Responsável", ParagraphStyle(name='SigSub', alignment=1, fontSize=10)))
-
-    doc.build(elements)
+    return rows
 
 
 def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict]:
     data_list = []
-    col_map = {attr: name for name, attr in ALL_COLUMNS}
     for record in records:
         row = {}
         for attr in selected_cols:
-            header_name = col_map.get(attr, attr)
+            header_name = DISPLAY_COLUMN_LABEL_BY_ATTR.get(attr, attr)
             value = getattr(record, attr)
             row[header_name] = "" if value is None else str(value)
         data_list.append(row)
@@ -151,9 +117,12 @@ def _style_worksheet(ws, highlight_compensado: bool = False):
 def export_csv(path: str, records: List[Compensacao], selected_cols: List[str]):
     data = _records_to_dict_list(records, selected_cols)
     if not data:
-        col_map = {attr: name for name, attr in ALL_COLUMNS}
-        headers = [col_map.get(column, column) for column in selected_cols]
-        pd.DataFrame(columns=headers).to_csv(path, index=False, encoding="utf-8-sig", sep=";")
+        pd.DataFrame(columns=_selected_headers(selected_cols)).to_csv(
+            path,
+            index=False,
+            encoding="utf-8-sig",
+            sep=";",
+        )
         return
 
     pd.DataFrame(data).to_csv(path, index=False, encoding="utf-8-sig", sep=";")
@@ -172,19 +141,16 @@ def export_excel_two_sheets(
     if data:
         df_dados = pd.DataFrame(data)
     else:
-        col_map = {attr: name for name, attr in ALL_COLUMNS}
-        headers = [col_map.get(column, column) for column in selected_cols]
-        df_dados = pd.DataFrame(columns=headers)
+        df_dados = pd.DataFrame(columns=_selected_headers(selected_cols))
 
-    df_kpis = pd.DataFrame(kpis, columns=["M\u00e9trica", "Valor"])
+    df_kpis = pd.DataFrame(kpis, columns=["Métrica", "Valor"])
     df_micro = pd.DataFrame(pend_micro_sorted, columns=["Microbacia", "Mudas Pendentes"])
-    df_ele = pd.DataFrame(pend_ele_sorted, columns=["Processo Eletr\u00f4nico", "Mudas Pendentes"])
+    df_ele = pd.DataFrame(pend_ele_sorted, columns=["Processo Eletrônico", "Mudas Pendentes"])
 
     try:
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             df_dados.to_excel(writer, sheet_name="Dados", index=False)
-            workbook = writer.book
-            worksheet = workbook.create_sheet("Resumo Gerencial")
+            worksheet = writer.book.create_sheet("Resumo Gerencial")
             writer.sheets["Resumo Gerencial"] = worksheet
 
             worksheet.cell(row=1, column=1, value="Filtros Aplicados:")
@@ -193,30 +159,30 @@ def export_excel_two_sheets(
 
             worksheet.cell(row=3, column=1, value="INDICADORES GERAIS").font = FONT_BOLD
             start_row = 4
-            worksheet.cell(row=start_row, column=1, value="M\u00e9trica").font = FONT_BOLD
+            worksheet.cell(row=start_row, column=1, value="Métrica").font = FONT_BOLD
             worksheet.cell(row=start_row, column=2, value="Valor").font = FONT_BOLD
             for index, row in df_kpis.iterrows():
-                worksheet.cell(row=start_row + 1 + index, column=1, value=row["M\u00e9trica"])
+                worksheet.cell(row=start_row + 1 + index, column=1, value=row["Métrica"])
                 worksheet.cell(row=start_row + 1 + index, column=2, value=row["Valor"])
 
-            worksheet.cell(row=3, column=5, value="PEND\u00caNCIAS POR MICROBACIA").font = FONT_BOLD
+            worksheet.cell(row=3, column=5, value="PENDÊNCIAS POR MICROBACIA").font = FONT_BOLD
             worksheet.cell(row=4, column=5, value="Microbacia").font = FONT_BOLD
             worksheet.cell(row=4, column=6, value="Mudas").font = FONT_BOLD
             for index, row in df_micro.iterrows():
                 worksheet.cell(row=5 + index, column=5, value=row["Microbacia"])
                 worksheet.cell(row=5 + index, column=6, value=row["Mudas Pendentes"])
 
-            worksheet.cell(row=3, column=9, value="PEND\u00caNCIAS POR PROCESSO").font = FONT_BOLD
-            worksheet.cell(row=4, column=9, value="Eletr\u00f4nico").font = FONT_BOLD
+            worksheet.cell(row=3, column=9, value="PENDÊNCIAS POR PROCESSO").font = FONT_BOLD
+            worksheet.cell(row=4, column=9, value="Eletrônico").font = FONT_BOLD
             worksheet.cell(row=4, column=10, value="Mudas").font = FONT_BOLD
             for index, row in df_ele.iterrows():
-                worksheet.cell(row=5 + index, column=9, value=row["Processo Eletr\u00f4nico"])
+                worksheet.cell(row=5 + index, column=9, value=row["Processo Eletrônico"])
                 worksheet.cell(row=5 + index, column=10, value=row["Mudas Pendentes"])
 
             _style_worksheet(writer.sheets["Dados"], highlight_compensado=True)
             _style_worksheet(writer.sheets["Resumo Gerencial"], highlight_compensado=False)
     except Exception as exc:
-        raise RuntimeError(f"Erro ao salvar Excel: {exc}")
+        raise RuntimeError(f"Erro ao salvar Excel: {exc}") from exc
 
 
 def export_pdf(
@@ -242,12 +208,12 @@ def export_pdf(
     normal_style = styles["Normal"]
     normal_style.fontSize = 9
 
-    elements.append(Paragraph("Relat\u00f3rio de Compensa\u00e7\u00f5es", title_style))
+    elements.append(Paragraph("Relatório de Compensações", title_style))
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(f"<b>Filtros:</b> {filtros_txt}", normal_style))
     elements.append(Spacer(1, 10))
 
-    kpi_data = [["M\u00e9trica", "Valor"]] + [[str(k), str(v)] for k, v in kpis]
+    kpi_data = [["Métrica", "Valor"]] + [[str(key), str(value)] for key, value in kpis]
     t_kpi = Table(kpi_data, colWidths=[200, 100])
     t_kpi.setStyle(
         TableStyle(
@@ -259,16 +225,15 @@ def export_pdf(
             ]
         )
     )
-    elements.append(Paragraph("<b>Resumo do Relat\u00f3rio:</b>", normal_style))
+    elements.append(Paragraph("<b>Resumo do Relatório:</b>", normal_style))
     elements.append(t_kpi)
     elements.append(Spacer(1, 15))
 
-    col_map = {attr: name for name, attr in ALL_COLUMNS}
-    headers = [col_map.get(column, column) for column in selected_cols]
+    headers = _selected_headers(selected_cols)
 
-    def wrap_text(text, limit: int = 25):
-        text = str(text)
-        return text[:limit] + "..." if len(text) > limit else text
+    def wrap_text(text: Any, limit: int = 25) -> str:
+        value = str(text)
+        return value[:limit] + "..." if len(value) > limit else value
 
     table_data = [headers]
     raw_data = _records_to_dict_list(records, selected_cols)
@@ -339,5 +304,65 @@ def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_t
             )
         )
         elements.append(t_charts)
+
+    doc.build(elements)
+
+
+def export_individual_pdf(filepath: str, record: Compensacao):
+    doc = SimpleDocTemplate(
+        filepath,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40,
+    )
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "MainTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        textColor=colors.HexColor("#2C3E50"),
+        alignment=1,
+        spaceAfter=20,
+    )
+
+    elements = [
+        Paragraph("Ficha de Compensação Ambiental", title_style),
+        Spacer(1, 0.2 * inch),
+    ]
+
+    data = _build_individual_pdf_rows(record)
+    table = Table(data, colWidths=[120, 150, 100, 140])
+    table_style = [
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2C3E50")),
+        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#2C3E50")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+    ]
+
+    for row_index, row in enumerate(data):
+        if row[2] == "" and row[3] == "":
+            table_style.append(("SPAN", (1, row_index), (3, row_index)))
+    table.setStyle(TableStyle(table_style))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.5 * inch))
+    elements.append(Spacer(1, 2 * inch))
+    elements.append(Paragraph("_" * 40, ParagraphStyle(name="Sig", alignment=1, fontSize=12)))
+    elements.append(
+        Paragraph(
+            "Assinatura do Técnico Responsável",
+            ParagraphStyle(name="SigSub", alignment=1, fontSize=10),
+        )
+    )
 
     doc.build(elements)

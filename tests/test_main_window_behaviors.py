@@ -15,7 +15,7 @@ from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.tabs.data_tab import DataTab
 from app.ui.tabs.dashboard_tab import DashboardTab
-from app.ui.components.dialogs import TableFullScreenDialog
+from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -67,6 +67,11 @@ class MockDashboardTab(QtWidgets.QWidget):
 @pytest.fixture(autouse=True)
 def global_mocks(monkeypatch):
     get_app()
+    import app.ui.components.ui_utils as ui_utils_module
+    import app.ui.controllers.data_controller as data_controller_module
+    import app.ui.controllers.form_controller as form_controller_module
+    import app.ui.controllers.map_controller as map_controller_module
+
     # Mock heavy widgets
     monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
     monkeypatch.setattr("app.ui.main_window.DashboardTab", MockDashboardTab)
@@ -77,6 +82,11 @@ def global_mocks(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)
     monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: None)
     monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.Yes)
+    monkeypatch.setattr(ui_utils_module, "msg_confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr(data_controller_module, "msg_confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr(form_controller_module, "msg_confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr(map_controller_module, "msg_confirm", lambda *args, **kwargs: True)
+    monkeypatch.setattr(main_window_module, "msg_confirm", lambda *args, **kwargs: True)
 
     # Mock common heavy setup
     monkeypatch.setattr(DataTab, "load_map", lambda self: None)
@@ -334,13 +344,17 @@ def test_lock_splitter_height_freezes_current_splitter_height():
     window.close()
 
 
-def test_right_panel_uses_compact_minimum_width():
+def test_right_panel_reserves_width_for_original_form_layout():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
     get_app().processEvents()
 
-    assert window.data_tab.right_panel.minimumWidth() <= 600
+    assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.form_group.minimumSizeHint().width()
+    assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.map_group.minimumSizeHint().width()
+    assert window.data_tab.right_panel.minimumWidth() >= 560
+    assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
+    assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
 
     window.close()
 
@@ -355,7 +369,7 @@ def test_left_panel_layout_keeps_bottom_breathing_room():
     window.close()
 
 
-def test_totals_micro_table_limits_visible_rows_for_readability():
+def test_totals_micro_table_shows_all_microbasins_with_scroll_when_needed():
     window = MainWindow()
 
     metrics = {
@@ -367,7 +381,8 @@ def test_totals_micro_table_limits_visible_rows_for_readability():
 
     window.data_tab.update_totals_tables(metrics)
 
-    assert window.data_tab.micro_model.rowCount() == 5
+    assert window.data_tab.micro_model.rowCount() == 10
+    assert window.data_tab.micro_table.verticalScrollBarPolicy() == Qt.ScrollBarAsNeeded
 
     window.close()
 
@@ -413,6 +428,7 @@ def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
                 "path": path,
                 "records": records,
                 "pend_micro_sorted": pend_micro_sorted,
+                "selected_cols": selected_cols,
             }
         ),
     )
@@ -432,6 +448,7 @@ def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
     assert len(captured["records"]) == 1
     assert len(captured["compute_called_with"]) == 1
     assert captured["pend_micro_sorted"] == [("Gregorio", 10.0)]
+    assert "endereco_plantio" in captured["selected_cols"]
     window.close()
 
 
@@ -534,6 +551,43 @@ def test_form_action_buttons_follow_selection_state(monkeypatch):
     window.data_tab.in_oficio.setText("MODIFICADO")
     assert window.data_tab.btn_save_edit.isEnabled() is True
     assert window.data_tab.btn_delete.isEnabled() is True
+    window.close()
+
+
+def test_sn_keeps_add_enabled_for_new_record(monkeypatch):
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
+
+    window = MainWindow()
+    window.excel.path = "dummy.xlsx"
+    window.clear_form()
+
+    window.data_tab.chk_sn.setChecked(True)
+
+    assert window.data_tab.in_oficio.text() == "S/N"
+    assert window.data_tab.in_oficio.isEnabled() is False
+    assert window.data_tab.btn_add.isEnabled() is True
+
+    window.close()
+
+
+def test_sn_marks_existing_record_as_dirty_and_keeps_save_enabled(monkeypatch):
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
+
+    window = MainWindow()
+    window.excel.path = "dummy.xlsx"
+    window.selected = make_record(oficio_processo="123/2026")
+    window._fill_form(window.selected)
+
+    assert window.data_tab.btn_save_edit.isEnabled() is False
+
+    window.data_tab.chk_sn.setChecked(True)
+
+    assert window.data_tab.in_oficio.text() == "S/N"
+    assert window._is_form_dirty() is True
+    assert window.data_tab.btn_save_edit.isEnabled() is True
+
     window.close()
 
 
@@ -720,6 +774,72 @@ def test_search_on_map_enables_street_view_after_geocode(monkeypatch):
 
     assert window.last_marker_coords == (-22.02, -47.91)
     assert window.data_tab.btn_street_view.isEnabled() is True
+    window.close()
+
+
+def test_heatmap_realizadas_uses_plantio_coordinates():
+    window = MainWindow()
+    record = make_record(
+        compensado="SIM",
+        latitude="-22.01",
+        longitude="-47.89",
+        latitude_plantio="-22.05",
+        longitude_plantio="-47.95",
+    )
+
+    assert window._build_heatmap_point(record, "Realizadas") == [-22.05, -47.95]
+
+    window.close()
+
+
+def test_heatmap_pendentes_keeps_main_coordinates():
+    window = MainWindow()
+    record = make_record(
+        compensado="",
+        latitude="-22.01",
+        longitude="-47.89",
+        latitude_plantio="-22.05",
+        longitude_plantio="-47.95",
+    )
+
+    assert window._build_heatmap_point(record, "Pendentes") == [-22.01, -47.89]
+
+    window.close()
+
+
+def test_heatmap_tudo_preserves_main_coordinates_for_compensated_records():
+    window = MainWindow()
+    record = make_record(
+        compensado="SIM",
+        latitude="-22.01",
+        longitude="-47.89",
+        latitude_plantio="-22.05",
+        longitude_plantio="-47.95",
+    )
+
+    assert window._build_heatmap_point(record, "Tudo") == [-22.01, -47.89]
+
+    window.close()
+
+
+def test_fullscreen_heatmap_realizadas_uses_same_plantio_coordinates():
+    window = MainWindow()
+    window.filtered_records = [
+        make_record(
+            compensado="SIM",
+            latitude="-22.01",
+            longitude="-47.89",
+            latitude_plantio="-22.05",
+            longitude_plantio="-47.95",
+        )
+    ]
+    fake_dialog = SimpleNamespace(
+        combo_fs_heatmap=SimpleNamespace(currentText=lambda: "Realizadas"),
+        parent_window=window,
+    )
+
+    assert MapFullScreenDialog._get_current_points_fs(fake_dialog) == [[-22.05, -47.95]]
+
     window.close()
 
 

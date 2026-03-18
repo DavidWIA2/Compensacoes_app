@@ -11,31 +11,40 @@ from PySide6.QtCore import Qt, QSettings, QTimer, QUrl, Slot
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QLineEdit, QTabWidget, QMessageBox, QFileDialog, QProgressBar,
+    QPushButton, QLineEdit, QTabWidget, QMessageBox, QFileDialog, QProgressBar, QLabel,
     QRadioButton, QSizePolicy, QMenu, QInputDialog
 )
 
 # --- Imports do Projeto ---
+from app.config import APP_WINDOW_TITLE, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.models.compensacao import Compensacao
+from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
 from app.services.excel_service import ExcelService
 from app.services.geocode_service import geocode_address_arcgis
 from app.services.geocode_update_service import apply_geocode_to_record, build_cached_microbacia_finder
 from app.services.geocode_update_service import find_record_by_excel_row
+from app.services.app_settings import AppSettings
 from app.services.validation import validate_compensacao
 from app.services.report_service import (
     export_csv, export_pdf, export_dashboard_pdf, export_individual_pdf,
-    export_excel_two_sheets, ALL_COLUMNS
+    export_excel_two_sheets
 )
+from app.services.coordinates import build_heatmap_point
 from app.services.gis_service import GisService
 from app.services.records_service import (
     compute_metrics, filter_records, extract_year, safe_upper, unique_non_empty
 )
 
 # --- Componentes Modularizados ---
+from app.ui.controllers.data_controller import DataController
+from app.ui.controllers.export_controller import ExportController
+from app.ui.controllers.form_controller import FormController
+from app.ui.controllers.map_controller import MapController
+from app.ui.controllers.settings_controller import SettingsController
 from app.ui.components.ui_utils import resource_path, _setup_i18n, msg_confirm, _ajustar_ambiente_pyinstaller
 from app.ui.components.widgets import ColumnsDialog, MapBridge
 from app.ui.components.workers import GeocodeWorker, UpdaterWorker
-from app.ui.components.themes import THEME_LIGHT, THEME_DARK, COLS, get_app_qss
+from app.ui.components.themes import THEME_LIGHT, THEME_DARK, get_app_qss
 from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 from app.ui.tabs.data_tab import DataTab
 from app.ui.tabs.dashboard_tab import DashboardTab
@@ -49,7 +58,9 @@ MICROB_DIR = resource_path("data", "microbacias")
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Compensações - Cadastro e Consulta")
+        self.setWindowTitle(APP_WINDOW_TITLE)
+        self.MICROB_NAME_FIELD = MICROB_NAME_FIELD
+        self.MICROB_DIR = MICROB_DIR
         
         # Cálculo de Escala Proporcional baseada na resolução
         screen = QApplication.primaryScreen().geometry()
@@ -70,22 +81,42 @@ class MainWindow(QMainWindow):
         self.filtered_records: List[Compensacao] = []
         self.selected: Optional[Compensacao] = None
         self.is_dark_mode = False
-        self.settings = QSettings("CompensacoesApp", "CompensacoesDesktop")
+        self.settings = AppSettings(QSettings(APP_SETTINGS_ORG, APP_SETTINGS_NAME))
         self.gis: Optional[GisService] = None
         self.last_marker_coords: Optional[Tuple[float, float]] = None
         self.geo_worker = None
         self.recent_files: List[str] = []
+        self._record_search_index: Dict[str, str] = {}
         self._startup_window_state_applied = False
         self._startup_layout_pending = False
         self._dashboard_dirty = True
         self._pending_dashboard_metrics: Optional[Dict[str, object]] = None
+        self._startup_window_timer = QTimer(self)
+        self._startup_window_timer.setSingleShot(True)
+        self._startup_window_timer.timeout.connect(self._apply_startup_window_state)
+        self._initial_map_sync_timer = QTimer(self)
+        self._initial_map_sync_timer.setSingleShot(True)
+        self._initial_map_sync_timer.timeout.connect(self._initial_map_sync)
 
         self._setup_ui()
+        self.settings_controller = SettingsController(self)
+        self.export_controller = ExportController(self)
+        self.form_controller = FormController(self)
+        self.data_controller = DataController(self)
+        self.map_controller = MapController(self)
+        self._bind_controller_methods()
+        self._startup_window_timer.timeout.disconnect()
+        self._startup_window_timer.timeout.connect(self._apply_startup_window_state)
+        self._initial_map_sync_timer.timeout.disconnect()
+        self._initial_map_sync_timer.timeout.connect(self._initial_map_sync)
+        self.data_tab.bridge._on_clicked = self._on_map_click
+        self.data_tab.bridge._on_layer_changed = self.save_map_layer_preference
         self._setup_menus()
         self._load_settings()
         self._connect_signals()
         self._setup_shortcuts()
-        QTimer.singleShot(0, self._apply_startup_window_state)
+        self.form_controller.setup_form_state_ui()
+        self._startup_window_timer.start(0)
         
         # Inicialização
         _setup_i18n()
@@ -95,6 +126,7 @@ class MainWindow(QMainWindow):
         # Estado Inicial
         self._update_form_action_buttons()
         self._update_address_search_enabled()
+        self.setWindowModified(False)
         self.statusBar().showMessage("Pronto")
         
         # Iniciar verificação de atualizações em segundo plano
@@ -107,6 +139,71 @@ class MainWindow(QMainWindow):
         if self._startup_layout_pending and not self.isMinimized():
             self._startup_layout_pending = False
             self._finalize_startup_layout()
+
+    def _bind_controller_methods(self):
+        self.schedule_apply_filter = self.data_controller.schedule_apply_filter
+        self._update_recent_files_menu = self.settings_controller.update_recent_files_menu
+        self._snapshot_excel_service_state = self.data_controller.snapshot_excel_service_state
+        self._restore_excel_service_state = self.data_controller.restore_excel_service_state
+        self._snapshot_filter_state = self.data_controller.snapshot_filter_state
+        self._restore_filter_state = self.data_controller.restore_filter_state
+        self._clear_loaded_data_state = self.data_controller.clear_loaded_data_state
+        self._restore_previous_state = self.data_controller.restore_previous_state
+        self._metrics_to_kpi_rows = self.export_controller.metrics_to_kpi_rows
+        self._build_filter_summary = self.export_controller.build_filter_summary
+        self.show_rollback_dialog = self.data_controller.show_rollback_dialog
+        self.import_excel_data = self.data_controller.import_excel_data
+        self._update_form_action_buttons = self.form_controller.update_form_action_buttons
+        self._on_map_loaded = self.map_controller.on_map_loaded
+        self._initial_map_sync = self.map_controller.initial_map_sync
+        self._load_settings = self.settings_controller.load_settings
+        self._apply_startup_window_state = self.settings_controller.apply_startup_window_state
+        self.toggle_theme = self.settings_controller.toggle_theme
+        self._load_excel = self.data_controller.load_excel
+        self.open_excel = self.data_controller.open_excel
+        self._load_sort_settings = self.settings_controller.load_sort_settings
+        self._save_sort_settings = self.settings_controller.save_sort_settings
+        self._update_ui_after_load = self.data_controller.update_ui_after_load
+        self._load_gis = self.data_controller.load_gis
+        self._update_dashboard_view = self.data_controller.update_dashboard_view
+        self._on_tab_changed = self.data_controller.on_tab_changed
+        self._load_microbacias_layer = self.map_controller.load_microbacias_layer
+        self._run_map_js = self.map_controller.run_map_js
+        self.apply_filter = self.data_controller.apply_filter
+        self.clear_filters = self.data_controller.clear_filters
+        self.reset_sorting = self.settings_controller.reset_sorting
+        self._on_map_click = self.map_controller.on_map_click
+        self._set_map_marker = self.map_controller.set_map_marker
+        self._highlight_microbacia = self.map_controller.highlight_microbacia
+        self._set_map_status = self.map_controller.set_map_status
+        self._fill_form = self.form_controller.fill_form
+        self._check_duplicate_av_tec = self.form_controller.check_duplicate_av_tec
+        self._read_form = self.form_controller.read_form
+        self.add_new = self.form_controller.add_new
+        self.save_edit = self.form_controller.save_edit
+        self.delete_selected = self.form_controller.delete_selected
+        self.reload = self.data_controller.reload
+        self.clear_form = self.form_controller.clear_form
+        self.search_on_map = self.map_controller.search_on_map
+        self.search_on_map_plantio = self.map_controller.search_on_map_plantio
+        self._perform_geocode = self.map_controller.perform_geocode
+        self.open_street_view = self.map_controller.open_street_view
+        self.load_custom_layer = self.map_controller.load_custom_layer
+        self.open_map_fullscreen = self.map_controller.open_map_fullscreen
+        self.open_table_fullscreen = self.map_controller.open_table_fullscreen
+        self._record_needs_batch_geocode = self.map_controller.record_needs_batch_geocode
+        self._persist_batch_geocode_results = self.map_controller.persist_batch_geocode_results
+        self.run_batch_geocode = self.map_controller.run_batch_geocode
+        self.on_geocode_finished = self.map_controller.on_geocode_finished
+        self.toggle_heatmap = self.map_controller.toggle_heatmap
+        self._build_heatmap_point = build_heatmap_point
+        self.save_map_layer_preference = self.settings_controller.save_map_layer_preference
+        self.export_csv_clicked = self.export_controller.export_csv_clicked
+        self.export_excel_clicked = self.export_controller.export_excel_clicked
+        self.export_pdf_clicked = self.export_controller.export_pdf_clicked
+        self.export_ficha_pdf = self.export_controller.export_ficha_pdf
+        self.export_dashboard_pdf_clicked = self.export_controller.export_dashboard_pdf_clicked
+        self._get_save_path = self.export_controller.get_save_path
 
     def _prompt_update(self, version: str, notes: str):
         msg = f"Uma nova versão do aplicativo ({version}) está disponível!\n\nNovidades:\n{notes}\n\nDeseja atualizar agora?"
@@ -153,7 +250,10 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumWidth(200)
         self.progress_bar.setVisible(False)
+        self.form_state_label = QLabel("Sem alterações")
+        self.form_state_label.setObjectName("FormStateLabel")
         self.statusBar().addPermanentWidget(self.progress_bar)
+        self.statusBar().addPermanentWidget(self.form_state_label)
 
     def _setup_menus(self):
         menubar = self.menuBar()
@@ -328,13 +428,13 @@ class MainWindow(QMainWindow):
         self.btn_theme.clicked.connect(self.toggle_theme)
         
         # Conexão da busca restaurada
-        self.search.textChanged.connect(self.apply_filter)
+        self.search.textChanged.connect(self.schedule_apply_filter)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         
-        self.data_tab.filter_micro.currentTextChanged.connect(self.apply_filter)
-        self.data_tab.filter_eletronico.currentTextChanged.connect(self.apply_filter)
-        self.data_tab.filter_status.currentTextChanged.connect(self.apply_filter)
-        self.data_tab.filter_year.currentTextChanged.connect(self.apply_filter)
+        self.data_tab.filter_micro.currentTextChanged.connect(self.schedule_apply_filter)
+        self.data_tab.filter_eletronico.currentTextChanged.connect(self.schedule_apply_filter)
+        self.data_tab.filter_status.currentTextChanged.connect(self.schedule_apply_filter)
+        self.data_tab.filter_year.currentTextChanged.connect(self.schedule_apply_filter)
         
         self.data_tab.btn_clear_filters.clicked.connect(self.clear_filters)
         self.data_tab.btn_reset_sort.clicked.connect(self.reset_sorting)
@@ -362,14 +462,14 @@ class MainWindow(QMainWindow):
         
         # Monitoramento de Mudanças (DIRTY CHECK e AS-YOU-TYPE)
         self.data_tab.in_oficio.textChanged.connect(self._validate_as_you_type)
-        self.data_tab.in_oficio.textChanged.connect(self._update_form_action_buttons)
-        self.data_tab.in_caixa.textChanged.connect(self._update_form_action_buttons)
+        self.data_tab.in_oficio.textChanged.connect(self._on_form_field_changed)
+        self.data_tab.in_caixa.textChanged.connect(self._on_form_field_changed)
         self.data_tab.in_avtec.textChanged.connect(self._validate_as_you_type)
-        self.data_tab.in_avtec.textChanged.connect(self._update_form_action_buttons)
-        self.data_tab.in_comp.textChanged.connect(self._update_form_action_buttons)
+        self.data_tab.in_avtec.textChanged.connect(self._on_form_field_changed)
+        self.data_tab.in_comp.textChanged.connect(self._on_form_field_changed)
         self.data_tab.in_end.textChanged.connect(self._on_form_field_changed)
         self.data_tab.in_end_plantio.textChanged.connect(self._on_form_field_changed)
-        self.data_tab.in_micro.currentTextChanged.connect(self._update_form_action_buttons)
+        self.data_tab.in_micro.currentTextChanged.connect(self._on_form_field_changed)
         
         self.data_tab.chk_compensado.toggled.connect(self.data_tab.in_end_plantio.setEnabled)
         self.data_tab.chk_compensado.toggled.connect(self._on_form_field_changed)
@@ -382,44 +482,18 @@ class MainWindow(QMainWindow):
         self.dash_tab.btn_export_pdf.clicked.connect(self.export_dashboard_pdf_clicked)
 
     def _on_form_field_changed(self):
+        self.form_controller.remember_current_state()
         self._update_form_action_buttons()
         self._update_address_search_enabled()
 
     def _validate_as_you_type(self):
-        # Validação visual da Av. Técnica (Duplicatas)
-        av_tec = self.data_tab.in_avtec.text().strip()
-        uid = self.selected.uid if self.selected else ""
-        dup = self._check_duplicate_av_tec(av_tec, uid)
-        
-        if dup:
-            self.data_tab.in_avtec.setStyleSheet("QLineEdit { border: 2px solid #e74c3c; background-color: #fdf0ed; }")
-            self.data_tab.in_avtec.setToolTip(f"⚠️ Esta Av. Técnica já existe na linha {dup-1}.")
-        else:
-            self.data_tab.in_avtec.setStyleSheet("")
-            self.data_tab.in_avtec.setToolTip("")
+        self.form_controller.validate_as_you_type()
 
     def _is_form_dirty(self) -> bool:
-        if not self.selected: return False
-        current = self._read_form()
-        orig = self.selected
-        return (current.oficio_processo != orig.oficio_processo or 
-                current.caixa != orig.caixa or 
-                current.av_tec != orig.av_tec or 
-                current.compensacao != orig.compensacao or 
-                current.endereco != orig.endereco or 
-                current.endereco_plantio != orig.endereco_plantio or 
-                current.microbacia != orig.microbacia or 
-                safe_upper(current.compensado) != safe_upper(orig.compensado) or 
-                safe_upper(current.eletronico) != safe_upper(orig.eletronico))
+        return self.form_controller.has_pending_changes()
 
     def _update_address_search_enabled(self):
-        has_end = bool(self.data_tab.in_end.text().strip())
-        has_plantio = bool(self.data_tab.in_end_plantio.text().strip())
-        self.data_tab.btn_maps.setEnabled(self.data_tab.in_end.isEnabled() and has_end)
-        self.data_tab.btn_maps_plantio.setEnabled(self.data_tab.in_end_plantio.isEnabled() and has_plantio)
-        
-        # Street View só é ativado se houver uma coordenada no marcador do mapa
-        self.data_tab.btn_street_view.setEnabled(self.last_marker_coords is not None)
+        self.map_controller.update_address_search_enabled()
 
     def open_street_view(self):
         if not self.last_marker_coords:
@@ -587,14 +661,14 @@ class MainWindow(QMainWindow):
         has_excel = bool(self.excel.path and os.path.exists(self.excel.path))
         has_selected = self.selected is not None
         is_dirty = self._is_form_dirty()
-        self.data_tab.btn_add.setEnabled(has_excel and self.data_tab.in_oficio.isEnabled())
+        self.data_tab.btn_add.setEnabled(has_excel)
         self.data_tab.btn_save_edit.setEnabled(has_excel and has_selected and is_dirty)
         self.data_tab.btn_delete.setEnabled(has_excel and has_selected)
         self.data_tab.btn_ficha_pdf.setEnabled(has_excel and has_selected)
 
     def _on_map_loaded(self, ok):
         if ok:
-            QTimer.singleShot(500, self._initial_map_sync)
+            self._initial_map_sync_timer.start(500)
 
     def _initial_map_sync(self):
         self._apply_theme_to_map() 
@@ -615,6 +689,7 @@ class MainWindow(QMainWindow):
             self.data_tab.in_oficio.setEnabled(True)
             self.data_tab.in_oficio.setFocus()
         self.data_tab.in_oficio.blockSignals(False)
+        self.form_controller.remember_current_state()
         self._update_form_action_buttons()
 
     def _on_chk_arquivado_toggled(self, checked):
@@ -628,6 +703,7 @@ class MainWindow(QMainWindow):
             self.data_tab.in_caixa.setEnabled(True)
             self.data_tab.in_caixa.setFocus()
         self.data_tab.in_caixa.blockSignals(False)
+        self.form_controller.remember_current_state()
         self._update_form_action_buttons()
 
     def _load_settings(self):
@@ -738,15 +814,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Sucesso", f"Carregado: {len(self.records)} registros.")
 
     def _load_last_excel(self):
-        path = self.settings.value("last_excel_path")
-        logger.info(f"Path recuperado do QSettings: {path}")
-        if path and os.path.exists(path):
-            if not self._load_excel(path):
-                self.settings.remove("last_excel_path")
-        else:
-            if path:
-                self.settings.remove("last_excel_path")
-            logger.warning("Nenhum path anterior encontrado ou arquivo inexistente.")
+        return self.data_controller.load_last_excel()
 
     def _load_sort_settings(self):
         col = int(self.settings.value("sort_column", -1))
@@ -847,7 +915,7 @@ class MainWindow(QMainWindow):
             index: not self.data_tab.table.isColumnHidden(index)
             for index in range(self.data_tab.table_model.columnCount())
         }
-        dialog = ColumnsDialog(self, COLS, visible_map)
+        dialog = ColumnsDialog(self, list(DISPLAY_COLUMN_LABELS), visible_map)
         if not dialog.exec():
             return
 
@@ -862,6 +930,9 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.data_tab.align_splitter_to_table_width)
 
     def _on_table_clicked(self, index):
+        if self.selected is not None and self.form_controller.has_pending_changes():
+            if not self.form_controller.confirm_discard_changes("trocar de registro"):
+                return
         src_index = self.data_tab.proxy.mapToSource(index)
         self.selected = self.filtered_records[src_index.row()]
         self._fill_form(self.selected)
@@ -1198,13 +1269,13 @@ class MainWindow(QMainWindow):
         typ = self.data_tab.combo_heatmap_type.currentText()
         pts = []
         for r in self.filtered_records:
-            try:
-                lat, lon = float(r.latitude), float(r.longitude)
-                is_comp = safe_upper(r.compensado) == "SIM"
-                if typ == "Tudo" or (typ == "Pendentes" and not is_comp) or (typ == "Realizadas" and is_comp):
-                    pts.append([lat, lon])
-            except: continue
+            point = self._build_heatmap_point(r, typ)
+            if point:
+                pts.append(point)
         self._run_map_js(f"if(window.setHeatmap) window.setHeatmap({json.dumps(pts)});", "update-heatmap")
+
+    def _build_heatmap_point(self, record: Compensacao, heatmap_type: str) -> Optional[List[float]]:
+        return build_heatmap_point(record, heatmap_type)
 
     def _update_filters_from_records(self):
         micros = unique_non_empty([r.microbacia for r in self.records])
@@ -1225,7 +1296,8 @@ class MainWindow(QMainWindow):
         if cur_micro:
             self.data_tab.in_micro.setCurrentText(cur_micro)
         opcoes = unique_non_empty([r.eletronico for r in self.records])
-        if not opcoes: opcoes = ["SIM", "NÃO"]
+        if not opcoes:
+            opcoes = ["SIM", "NÃO"]
         while self.data_tab.eletronico_layout.count():
             item = self.data_tab.eletronico_layout.takeAt(0)
             if item.widget():
@@ -1236,7 +1308,7 @@ class MainWindow(QMainWindow):
             rb.setMinimumHeight(24)
             rb.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self.data_tab.eletronico_group.addButton(rb)
-            rb.clicked.connect(self._update_form_action_buttons)
+            rb.clicked.connect(self._on_form_field_changed)
             self.data_tab.eletronico_layout.addWidget(rb)
         self.data_tab.eletronico_layout.addStretch(1)
 
@@ -1248,6 +1320,14 @@ class MainWindow(QMainWindow):
         act_save.setShortcut("Ctrl+S")
         act_save.triggered.connect(self.save_edit)
         self.addAction(act_save)
+        act_undo = QAction(self)
+        act_undo.setShortcut(QKeySequence.Undo)
+        act_undo.triggered.connect(self.form_controller.undo)
+        self.addAction(act_undo)
+        act_redo = QAction(self)
+        act_redo.setShortcut(QKeySequence.Redo)
+        act_redo.triggered.connect(self.form_controller.redo)
+        self.addAction(act_redo)
         act_new = QAction(self)
         act_new.setShortcut("Ctrl+N")
         act_new.triggered.connect(self.clear_form)
@@ -1262,7 +1342,7 @@ class MainWindow(QMainWindow):
         path = self._get_save_path("Salvar CSV", "CSV (*.csv)")
         if path:
             try:
-                export_csv(path, self.filtered_records, [a for _, a in ALL_COLUMNS])
+                export_csv(path, self.filtered_records, list(DISPLAY_COLUMN_ATTRS))
             except Exception as exc:
                 logger.error(f"Falha ao exportar CSV para {path}: {exc}", exc_info=True)
                 QMessageBox.critical(self, "Erro", f"Falha ao exportar CSV: {exc}")
@@ -1278,7 +1358,7 @@ class MainWindow(QMainWindow):
                     path,
                     self.filtered_records,
                     self._build_filter_summary(),
-                    [a for _, a in ALL_COLUMNS],
+                    list(DISPLAY_COLUMN_ATTRS),
                     self._metrics_to_kpi_rows(metrics),
                     metrics["pend_micro_sorted"],
                     metrics["pend_ele_sorted"],
@@ -1298,7 +1378,7 @@ class MainWindow(QMainWindow):
                     path,
                     self.filtered_records,
                     self._build_filter_summary(),
-                    [a for _, a in ALL_COLUMNS],
+                    list(DISPLAY_COLUMN_ATTRS),
                     self._metrics_to_kpi_rows(metrics),
                     metrics["pend_micro_sorted"],
                 )
@@ -1351,9 +1431,16 @@ class MainWindow(QMainWindow):
         return path
 
     def closeEvent(self, event):
-        self._save_sort_settings() # Salva ordenação ao fechar
-        self.settings.setValue("active_tab_index", self.tabs.currentIndex()) # Salva aba ativa
-        self.settings.setValue("window_geometry", self.saveGeometry())
+        if not self.form_controller.confirm_discard_changes("fechar a janela"):
+            event.ignore()
+            return
+
+        if self._startup_window_timer.isActive():
+            self._startup_window_timer.stop()
+        if self._initial_map_sync_timer.isActive():
+            self._initial_map_sync_timer.stop()
+
+        self.settings_controller.save_before_close()
         
         # Graceful shutdown da thread do atualizador
         if hasattr(self, "_updater") and self._updater.isRunning():

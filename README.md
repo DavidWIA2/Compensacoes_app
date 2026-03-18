@@ -1,86 +1,124 @@
-# Compensacoes_app
+# Compensações
 
-Sistema desenvolvido em Python para controle e gerenciamento dos plantios de compensações ambientais referentes às árvores suprimidas no município de São Carlos - SP.
+Aplicativo desktop em Python para cadastro, consulta e acompanhamento de compensações ambientais ligadas à supressão de árvores no município de São Carlos - SP.
 
----
+O projeto foi evoluído para um fluxo mais completo de operação: leitura e edição de planilhas Excel, filtros e métricas, mapa com apoio geoespacial, exportações em vários formatos, diagnósticos, logs e pipeline de release para distribuição no Windows.
 
-## 📌 Contexto do Problema
+## O que o app faz
 
-A supressão de árvores exige compensação ambiental conforme legislação vigente. O controle manual dessas informações pode gerar inconsistências, dificuldade de rastreamento e perda de dados ao longo do tempo.
+- Abre uma planilha padrão de compensações e transforma as linhas em registros editáveis.
+- Permite cadastrar, alterar, excluir, filtrar e pesquisar registros com interface gráfica.
+- Exibe métricas consolidadas, pendências e visão analítica por filtros.
+- Trabalha com mapa, microbacias e apoio geoespacial.
+- Faz geocodificação em lote para apoiar o preenchimento de coordenadas.
+- Exporta dados em `CSV`, `Excel` e `PDF`, incluindo ficha individual e relatório de painel.
+- Mantém backups da planilha e permite restaurar versões anteriores.
+- Gera logs e diagnóstico para suporte.
+- Suporta verificação de atualização por `latest.json`.
 
-O Compensacoes_app foi desenvolvido para organizar, estruturar e facilitar a gestão dessas compensações por meio de uma aplicação com interface gráfica e leitura de planilha padronizada.
+## Stack principal
 
----
+- Python 3.12
+- PySide6
+- openpyxl
+- pandas
+- reportlab
+- geopandas
+- shapely
+- pyogrio
+- fiona
+- pyproj
+- requests
+- PyInstaller
+- pytest
 
-## 🚀 Funcionalidades
+## Estrutura do projeto
 
-- Leitura automatizada de planilha de compensações
-- Organização estruturada dos registros
-- Controle de plantios realizados e pendentes
-- Interface gráfica desenvolvida com PySide6
-- Estrutura modular preparada para expansão
-- Separação entre dados, lógica e interface
-
----
-
-## 🛠 Tecnologias Utilizadas
-
-- Python
-- PySide6 (Interface gráfica)
-- Manipulação de planilhas Excel
-- Estrutura modular de aplicação
-- Controle de dependências via requirements.txt
-
----
-
-## 📊 Planilha Modelo
-
-O sistema utiliza uma planilha padrão para leitura e organização dos dados.
-
-Um arquivo modelo com dados fictícios está disponível na pasta:
-
-data/modelo_planilha_compensacoes.xlsx
-
-A estrutura da planilha deve manter os mesmos cabeçalhos presentes no modelo para que o sistema funcione corretamente.
-
----
-
-## 📂 Estrutura do Projeto
-
+```text
 Compensacoes_app/
-│
-├── app/                     → Código principal da aplicação
-├── assets/                  → Recursos visuais
-├── data/                    → Planilha modelo e arquivos de dados
-├── run.py                   → Arquivo principal de execução
-└── requirements.txt         → Dependências do projeto
+|-- app/           Codigo principal da aplicacao
+|-- assets/        Icones e recursos visuais
+|-- data/          Planilha modelo, microbacias e cache local
+|-- docs/          Documentacao de operacao e release
+|-- scripts/       Automacoes de validacao, build e release
+|-- tests/         Suite automatizada
+|-- run.py         Ponto de entrada da aplicacao
+|-- README.md
+`-- requirements.txt
+```
 
----
+## Planilha modelo
 
-## ▶️ Como Executar
+O arquivo de referência está em [data/modelo_planilha_compensacoes.xlsx](data/modelo_planilha_compensacoes.xlsx).
 
-Clone o repositório:
+Para o app funcionar corretamente, a estrutura da planilha deve manter os cabeçalhos esperados pelo sistema.
 
+## Como executar localmente
+
+No Windows PowerShell:
+
+```powershell
 git clone https://github.com/DavidWIA2/Compensacoes_app.git
 cd Compensacoes_app
-
-Crie e ative um ambiente virtual:
-
 python -m venv .venv
-.venv\Scripts\activate
-
-Instale as dependências:
-
+.\.venv\Scripts\activate
 pip install -r requirements.txt
-
-Execute a aplicação:
-
 python run.py
+```
 
----
+Se você já usa a venv do projeto em Python 3.12:
 
-## 👨‍💻 Autor
+```powershell
+.\.venv312\Scripts\activate
+python run.py
+```
 
-David Wiliam Pinheiro de Oliveira  
-Estudante de Tecnologia da Informação (3º semestre)  
-Foco em Desenvolvimento de Software e Dados
+## Testes e validação
+
+Rodar a suíte completa:
+
+```powershell
+.\.venv312\Scripts\python.exe -m pytest -q
+```
+
+Validação rápida do app e do ambiente:
+
+```powershell
+.\scripts\validate.ps1 -PythonExe .\.venv312\Scripts\python.exe
+```
+
+## Build e distribuição
+
+Build local de release:
+
+```powershell
+.\scripts\build_release.ps1 -PythonExe .\.venv312\Scripts\python.exe -Clean
+```
+
+O fluxo de release atual gera:
+
+- pacote `.zip`
+- checksum `.sha256`
+- notas de release
+- guia de distribuição
+- `latest.json` para o atualizador
+- script de verificação de checksum
+- script do instalador Inno Setup
+
+Para detalhes de empacotamento, instalador, publicação e assinatura de código, veja [docs/release.md](docs/release.md).
+
+## Distribuição sem assinatura
+
+O app pode ser usado normalmente sem assinatura digital, o que é suficiente para uso interno ou distribuição restrita. Nesse cenário, o recomendado é publicar o artefato com o `.sha256` e orientar a validação com:
+
+```powershell
+.\verify_release_checksum.ps1 -ArtifactPath .\Compensacoes-vX.Y.Z-win64.zip
+```
+
+## Releases
+
+As versões publicadas ficam em [GitHub Releases](https://github.com/DavidWIA2/Compensacoes_app/releases).
+
+## Autor
+
+David Wiliam Pinheiro de Oliveira

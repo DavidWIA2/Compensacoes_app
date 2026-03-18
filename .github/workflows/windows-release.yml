@@ -116,7 +116,6 @@ jobs:
         with:
           name: ${{ steps.metadata.outputs.release_name }}
           tag_name: ${{ env.RELEASE_TAG }}
-          target_commitish: ${{ env.RELEASE_REF }}
           body_path: ${{ steps.metadata.outputs.notes_md }}
           fail_on_unmatched_files: true
           files: |

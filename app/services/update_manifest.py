@@ -25,6 +25,8 @@ def build_release_manifest(
     homepage_url: str = "",
     filename: str = "",
     channel: str = "stable",
+    signed: Optional[bool] = None,
+    signature_mode: str = "",
 ) -> Dict[str, Any]:
     clean_version = str(version or "").strip()
     if not clean_version:
@@ -45,6 +47,10 @@ def build_release_manifest(
         payload["filename"] = str(filename).strip()
     if sha256:
         payload["sha256"] = str(sha256).strip().lower()
+    if signed is not None:
+        payload["signed"] = bool(signed)
+    if signature_mode:
+        payload["signature_mode"] = str(signature_mode).strip()
 
     return payload
 

@@ -15,6 +15,17 @@ from app.services.update_manifest import (
 )
 
 
+def _parse_optional_bool(value: str):
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text in {"1", "true", "yes", "y", "sim"}:
+        return True
+    if text in {"0", "false", "no", "n", "nao"}:
+        return False
+    raise SystemExit(f"Valor invalido para --signed: {value}")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Gera o manifest JSON da release.")
     parser.add_argument("--output", default=str(PROJECT_ROOT / "release" / "latest.json"))
@@ -28,6 +39,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--notes-file", default="")
     parser.add_argument("--published-at", default="")
     parser.add_argument("--channel", default="stable")
+    parser.add_argument("--signed", default="")
+    parser.add_argument("--signature-mode", default="")
     return parser.parse_args()
 
 
@@ -50,6 +63,8 @@ def main() -> int:
         homepage_url=args.homepage_url,
         filename=args.filename,
         channel=args.channel,
+        signed=_parse_optional_bool(args.signed),
+        signature_mode=args.signature_mode,
     )
     target = write_release_manifest(args.output, payload)
     print(f"Manifest de release gerado em: {target}")

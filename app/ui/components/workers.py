@@ -108,7 +108,7 @@ class UpdaterWorker(QThread):
         self,
         update_url: Optional[str] = None,
         current_version: str = APP_VERSION,
-        fetch_json: Optional[Callable[[str], Dict[str, str]]] = None,
+        fetch_json: Optional[Callable[[str], Dict[str, object]]] = None,
     ):
         super().__init__()
         self.update_url = (update_url or os.getenv("COMPENSACOES_UPDATE_URL", "")).strip()
@@ -151,7 +151,7 @@ class UpdaterWorker(QThread):
             self.no_update.emit(self.current_version)
 
     @staticmethod
-    def _extract_update_details(payload: Dict[str, str]) -> Dict[str, str]:
+    def _extract_update_details(payload: Dict[str, object]) -> Dict[str, object]:
         version = str(
             payload.get("version")
             or payload.get("tag_name")
@@ -174,6 +174,18 @@ class UpdaterWorker(QThread):
         published_at = str(payload.get("published_at") or payload.get("created_at") or "").strip()
         sha256 = str(payload.get("sha256") or "").strip().lower()
         filename = str(payload.get("filename") or "").strip()
+        signed_value = payload.get("signed")
+        if isinstance(signed_value, bool):
+            signed = signed_value
+        else:
+            signed_text = str(signed_value or "").strip().lower()
+            if signed_text in {"1", "true", "yes", "y", "sim"}:
+                signed = True
+            elif signed_text in {"0", "false", "no", "n", "nao"}:
+                signed = False
+            else:
+                signed = None
+        signature_mode = str(payload.get("signature_mode") or "").strip()
         return {
             "version": version,
             "notes": notes,
@@ -182,6 +194,8 @@ class UpdaterWorker(QThread):
             "published_at": published_at,
             "sha256": sha256,
             "filename": filename,
+            "signed": signed,
+            "signature_mode": signature_mode,
         }
 
     @staticmethod
@@ -223,7 +237,7 @@ class UpdaterWorker(QThread):
         return latest_number > current_number
 
     @staticmethod
-    def _default_fetch_json(url: str) -> Dict[str, str]:
+    def _default_fetch_json(url: str) -> Dict[str, object]:
         request = Request(url, headers={"User-Agent": "CompensacoesAppUpdater/1.0"})
         try:
             with urlopen(request, timeout=5) as response:

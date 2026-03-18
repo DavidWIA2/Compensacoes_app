@@ -23,8 +23,10 @@ O script:
 - executa o `PyInstaller` com o `Compensacoes.spec`
 - cria um pacote versionado em `release/`
 - gera `Compensacoes-v<versao>-win64-notes.md` e `Compensacoes-v<versao>-win64-notes.txt`
+- gera `Compensacoes-v<versao>-win64-guide.txt` com instrucoes de distribuicao
 - gera um arquivo `.sha256` para conferencia do artefato
 - gera um `latest.json` com metadados da release para o atualizador
+- publica `verify_release_checksum.ps1` na pasta `release/` para facilitar a validacao do arquivo baixado
 
 ## Saidas esperadas
 
@@ -32,8 +34,10 @@ Ao final do processo, a pasta `release/` recebe:
 
 - `Compensacoes-v<versao>-win64.zip`
 - `Compensacoes-v<versao>-win64.sha256`
+- `Compensacoes-v<versao>-win64-guide.txt`
 - `Compensacoes-v<versao>-win64-notes.md`
 - `Compensacoes-v<versao>-win64-notes.txt`
+- `verify_release_checksum.ps1`
 - `latest.json`
 
 ## Manifest de atualizacao
@@ -73,6 +77,16 @@ Se o comando `ISCC.exe` estiver no `PATH`, o build tambem produz:
 
 Se o Inno Setup nao estiver instalado, o build continua com ZIP + manifest e avisa que o `.iss` foi gerado, pronto para compilar depois.
 
+## Distribuicao restrita sem assinatura
+
+Para uso interno ou distribuicao com publico pequeno, voce pode operar sem code signing:
+
+- publique o artefato principal junto do `.sha256`
+- inclua o `Compensacoes-v<versao>-win64-guide.txt`
+- oriente o usuario a rodar `.\verify_release_checksum.ps1 -ArtifactPath .\arquivo-baixado`
+
+Isso nao remove avisos do Windows, mas ajuda a validar integridade e a reduzir risco operacional enquanto a distribuicao ainda eh controlada.
+
 ## Assinatura de codigo
 
 O build suporta assinatura opcional dos binarios com `signtool.exe`:
@@ -87,6 +101,53 @@ O build suporta assinatura opcional dos binarios com `signtool.exe`:
 ```
 
 Tambem e possivel deixar o caminho do certificado em `COMPENSACOES_CERT_PFX` e a senha em `COMPENSACOES_CERT_PASSWORD`.
+
+Para assinatura local futura com certificado no store do Windows, o build tambem aceita:
+
+```powershell
+.\scripts\build_release.ps1 `
+  -PythonExe .\.venv312\Scripts\python.exe `
+  -BuildInstaller `
+  -SignArtifacts `
+  -CertificateThumbprint "SEU_THUMBPRINT" `
+  -CertificateStoreLocation "CurrentUser" `
+  -CertificateStoreName "My" `
+  -Clean
+```
+
+Ou, se preferir selecao por assunto do certificado:
+
+```powershell
+.\scripts\build_release.ps1 `
+  -PythonExe .\.venv312\Scripts\python.exe `
+  -BuildInstaller `
+  -SignArtifacts `
+  -CertificateSubjectName "Seu Nome ou Razao Social" `
+  -Clean
+```
+
+As variaveis de ambiente equivalentes sao:
+
+- `COMPENSACOES_CERT_THUMBPRINT`
+- `COMPENSACOES_CERT_SUBJECT`
+- `COMPENSACOES_CERT_STORE_LOCATION`
+- `COMPENSACOES_CERT_STORE_NAME`
+
+Se o `signtool.exe` nao estiver no `PATH`, o build agora tenta localizar automaticamente o executavel no Windows SDK. Depois da assinatura, o pipeline valida os binarios com `signtool verify /pa /v` para falhar cedo se a assinatura ou o timestamp estiverem incorretos.
+
+Para verificar um binario manualmente:
+
+```powershell
+.\scripts\verify_signature.ps1 -Path .\release\Compensacoes-Setup-v1.0.0-win64.exe
+```
+
+Checklist para assinatura real:
+
+- ter um certificado valido para code signing, via `.pfx` ou store do Windows
+- configurar `COMPENSACOES_CERT_PFX` e `COMPENSACOES_CERT_PASSWORD` localmente, se usar `.pfx`
+- ou configurar `COMPENSACOES_CERT_THUMBPRINT`/`COMPENSACOES_CERT_SUBJECT` para assinatura via store
+- ou definir `WINDOWS_SIGN_CERT_PFX_B64` e `WINDOWS_SIGN_CERT_PASSWORD` no GitHub
+- garantir que o runner/maquina tenha `signtool.exe` disponivel no Windows SDK
 
 ## Publicacao automatizada
 

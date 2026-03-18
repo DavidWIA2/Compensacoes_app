@@ -38,6 +38,8 @@ def test_updater_worker_emits_when_endpoint_reports_newer_version():
         "published_at": "",
         "sha256": "abc123",
         "filename": "",
+        "signed": None,
+        "signature_mode": "",
     }]
 
 

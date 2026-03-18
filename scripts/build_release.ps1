@@ -11,8 +11,12 @@ param(
     [switch]$SignArtifacts,
     [string]$SignToolPath = "signtool.exe",
     [string]$CertificatePfxPath = "",
+    [string]$CertificateThumbprint = "",
+    [string]$CertificateSubjectName = "",
+    [string]$CertificateStoreLocation = "CurrentUser",
+    [string]$CertificateStoreName = "My",
     [string]$CertificatePasswordEnv = "COMPENSACOES_CERT_PASSWORD",
-    [string]$TimestampUrl = "http://timestamp.digicert.com",
+    [string]$TimestampUrl = "https://timestamp.digicert.com",
     [switch]$SkipTests,
     [switch]$Clean
 )
@@ -65,12 +69,99 @@ function Resolve-DefaultInstallerCompiler {
     return $null
 }
 
+function Resolve-DefaultSignTool {
+    $sdkRoots = @(
+        "C:\Program Files (x86)\Windows Kits\10\bin",
+        "C:\Program Files\Windows Kits\10\bin"
+    )
+
+    foreach ($root in $sdkRoots) {
+        if (-not (Test-Path $root)) {
+            continue
+        }
+
+        $candidate = Get-ChildItem -Path $root -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($candidate) {
+            return $candidate.FullName
+        }
+    }
+
+    return $null
+}
+
+function Resolve-SigningConfiguration {
+    param(
+        [string]$CertificatePath,
+        [string]$CertificatePassword,
+        [string]$CertificateThumbprint,
+        [string]$CertificateSubject,
+        [string]$CertificateStoreLocation,
+        [string]$CertificateStoreName
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($CertificatePath)) {
+        if (-not (Test-Path $CertificatePath)) {
+            throw "Certificado para assinatura nao encontrado: $CertificatePath"
+        }
+
+        return @{
+            Mode = "pfx"
+            CertificatePath = (Resolve-Path $CertificatePath).Path
+            CertificatePassword = $CertificatePassword
+            CertificateThumbprint = ""
+            CertificateSubject = ""
+            CertificateStoreLocation = ""
+            CertificateStoreName = ""
+        }
+    }
+
+    $normalizedThumbprint = (([string]$CertificateThumbprint -replace "\s", "").Trim()).ToUpperInvariant()
+    $normalizedSubject = ([string]$CertificateSubject).Trim()
+    $normalizedStoreName = ([string]$CertificateStoreName).Trim()
+    $storeLocationText = ([string]$CertificateStoreLocation).Trim().ToLowerInvariant()
+    if (-not $storeLocationText) {
+        $storeLocationText = "currentuser"
+    }
+    switch ($storeLocationText) {
+        "currentuser" { $normalizedStoreLocation = "CurrentUser" }
+        "localmachine" { $normalizedStoreLocation = "LocalMachine" }
+        default { throw "CertificateStoreLocation invalido: $CertificateStoreLocation" }
+    }
+
+    if ($normalizedThumbprint) {
+        return @{
+            Mode = "store-thumbprint"
+            CertificatePath = ""
+            CertificatePassword = ""
+            CertificateThumbprint = $normalizedThumbprint
+            CertificateSubject = ""
+            CertificateStoreLocation = $normalizedStoreLocation
+            CertificateStoreName = $normalizedStoreName
+        }
+    }
+
+    if ($normalizedSubject) {
+        return @{
+            Mode = "store-subject"
+            CertificatePath = ""
+            CertificatePassword = ""
+            CertificateThumbprint = ""
+            CertificateSubject = $normalizedSubject
+            CertificateStoreLocation = $normalizedStoreLocation
+            CertificateStoreName = $normalizedStoreName
+        }
+    }
+
+    throw "Nenhum certificado configurado para assinatura. Informe CertificatePfxPath, CertificateThumbprint ou CertificateSubjectName."
+}
+
 function Sign-ReleaseArtifact {
     param(
         [string]$ToolPath,
         [string]$TargetPath,
-        [string]$CertificatePath,
-        [string]$CertificatePassword,
+        [hashtable]$SigningConfiguration,
         [string]$TimestampServer
     )
 
@@ -81,12 +172,35 @@ function Sign-ReleaseArtifact {
     $args = @(
         "sign",
         "/fd", "SHA256",
-        "/td", "SHA256",
-        "/tr", $TimestampServer,
-        "/f", $CertificatePath
+        "/td", "SHA256"
     )
-    if (-not [string]::IsNullOrWhiteSpace($CertificatePassword)) {
-        $args += @("/p", $CertificatePassword)
+
+    if (-not [string]::IsNullOrWhiteSpace($TimestampServer)) {
+        $args += @("/tr", $TimestampServer)
+    }
+
+    if ($SigningConfiguration.Mode -eq "pfx") {
+        $args += @("/f", $SigningConfiguration.CertificatePath)
+        if (-not [string]::IsNullOrWhiteSpace($SigningConfiguration.CertificatePassword)) {
+            $args += @("/p", $SigningConfiguration.CertificatePassword)
+        }
+    }
+    else {
+        if (-not [string]::IsNullOrWhiteSpace($SigningConfiguration.CertificateStoreName)) {
+            $args += @("/s", $SigningConfiguration.CertificateStoreName)
+        }
+        if ($SigningConfiguration.CertificateStoreLocation -eq "LocalMachine") {
+            $args += "/sm"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SigningConfiguration.CertificateThumbprint)) {
+            $args += @("/sha1", $SigningConfiguration.CertificateThumbprint)
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($SigningConfiguration.CertificateSubject)) {
+            $args += @("/n", $SigningConfiguration.CertificateSubject)
+        }
+        else {
+            throw "Configuracao de assinatura sem certificado valido."
+        }
     }
     $args += $TargetPath
 
@@ -94,10 +208,36 @@ function Sign-ReleaseArtifact {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+function Verify-SignedArtifact {
+    param(
+        [string]$ToolPath,
+        [string]$TargetPath
+    )
+
+    if (-not (Test-Path $TargetPath)) {
+        throw "Artefato para verificacao nao encontrado: $TargetPath"
+    }
+
+    & $ToolPath verify /pa /v $TargetPath
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 Push-Location $RepoRoot
 try {
     if (-not $CertificatePfxPath -and $env:COMPENSACOES_CERT_PFX) {
         $CertificatePfxPath = $env:COMPENSACOES_CERT_PFX
+    }
+    if (-not $CertificateThumbprint -and $env:COMPENSACOES_CERT_THUMBPRINT) {
+        $CertificateThumbprint = $env:COMPENSACOES_CERT_THUMBPRINT
+    }
+    if (-not $CertificateSubjectName -and $env:COMPENSACOES_CERT_SUBJECT) {
+        $CertificateSubjectName = $env:COMPENSACOES_CERT_SUBJECT
+    }
+    if ($env:COMPENSACOES_CERT_STORE_LOCATION) {
+        $CertificateStoreLocation = $env:COMPENSACOES_CERT_STORE_LOCATION
+    }
+    if ($env:COMPENSACOES_CERT_STORE_NAME) {
+        $CertificateStoreName = $env:COMPENSACOES_CERT_STORE_NAME
     }
 
     if ($Clean) {
@@ -139,9 +279,12 @@ try {
     $artifactRoot = Join-Path $ReleaseDir "Compensacoes-v$version-win64"
     $zipPath = "$artifactRoot.zip"
     $hashPath = "$artifactRoot.sha256"
+    $guidePath = "$artifactRoot-guide.txt"
     $notesMarkdownPath = "$artifactRoot-notes.md"
     $notesTextPath = "$artifactRoot-notes.txt"
     $manifestPath = Join-Path $ReleaseDir "latest.json"
+    $checksumVerifierPath = Join-Path $ReleaseDir "verify_release_checksum.ps1"
+    $signatureVerifierPath = Join-Path $ReleaseDir "verify_signature.ps1"
     $installerScriptPath = Join-Path "build" "installer\CompensacoesInstaller.iss"
     $installerArtifactRoot = Join-Path $ReleaseDir "Compensacoes-Setup-v$version-win64"
     $installerExePath = "$installerArtifactRoot.exe"
@@ -156,6 +299,9 @@ try {
     $primaryFileName = $zipFileName
     $mainExePath = Join-Path "dist\Compensacoes" "Compensacoes.exe"
     $notesManifestSource = $notesTextPath
+    $signingConfiguration = $null
+    $releaseSigned = $false
+    $signatureMode = "unsigned"
 
     Run-Step "Preparando pasta de release" {
         New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
@@ -184,25 +330,36 @@ try {
 
     if ($SignArtifacts) {
         $resolvedSignTool = Resolve-CommandPath $SignToolPath
+        if (-not $resolvedSignTool -and $SignToolPath -eq "signtool.exe") {
+            $resolvedSignTool = Resolve-DefaultSignTool
+        }
         if (-not $resolvedSignTool) {
             throw "Ferramenta de assinatura nao encontrada: $SignToolPath"
         }
-        if (-not $CertificatePfxPath) {
-            throw "CertificatePfxPath nao informado e COMPENSACOES_CERT_PFX nao definido."
-        }
-        if (-not (Test-Path $CertificatePfxPath)) {
-            throw "Certificado para assinatura nao encontrado: $CertificatePfxPath"
-        }
 
         $certificatePassword = [Environment]::GetEnvironmentVariable($CertificatePasswordEnv)
+        $signingConfiguration = Resolve-SigningConfiguration `
+            -CertificatePath $CertificatePfxPath `
+            -CertificatePassword $certificatePassword `
+            -CertificateThumbprint $CertificateThumbprint `
+            -CertificateSubject $CertificateSubjectName `
+            -CertificateStoreLocation $CertificateStoreLocation `
+            -CertificateStoreName $CertificateStoreName
+        $releaseSigned = $true
+        $signatureMode = $signingConfiguration.Mode
 
         Run-Step "Assinando executavel principal" {
             Sign-ReleaseArtifact `
                 -ToolPath $resolvedSignTool `
                 -TargetPath $mainExePath `
-                -CertificatePath $CertificatePfxPath `
-                -CertificatePassword $certificatePassword `
+                -SigningConfiguration $signingConfiguration `
                 -TimestampServer $TimestampUrl
+        }
+
+        Run-Step "Verificando assinatura do executavel principal" {
+            Verify-SignedArtifact `
+                -ToolPath $resolvedSignTool `
+                -TargetPath $mainExePath
         }
     }
 
@@ -254,14 +411,18 @@ try {
 
             if (Test-Path $installerExePath) {
                 if ($SignArtifacts) {
-                    $certificatePassword = [Environment]::GetEnvironmentVariable($CertificatePasswordEnv)
                     Run-Step "Assinando instalador" {
                         Sign-ReleaseArtifact `
                             -ToolPath $resolvedSignTool `
                             -TargetPath $installerExePath `
-                            -CertificatePath $CertificatePfxPath `
-                            -CertificatePassword $certificatePassword `
+                            -SigningConfiguration $signingConfiguration `
                             -TimestampServer $TimestampUrl
+                    }
+
+                    Run-Step "Verificando assinatura do instalador" {
+                        Verify-SignedArtifact `
+                            -ToolPath $resolvedSignTool `
+                            -TargetPath $installerExePath
                     }
                 }
 
@@ -280,13 +441,22 @@ try {
         }
     }
 
+    Run-Step "Publicando scripts auxiliares de verificacao" {
+        Copy-Item -Force "scripts\verify_release_checksum.ps1" $checksumVerifierPath
+        if ($releaseSigned -and (Test-Path "scripts\verify_signature.ps1")) {
+            Copy-Item -Force "scripts\verify_signature.ps1" $signatureVerifierPath
+        }
+    }
+
     Run-Step "Gerando manifest de release" {
         $manifestArgs = @(
             "scripts/generate_release_manifest.py",
             "--output", $manifestPath,
             "--version", $version,
             "--filename", $primaryFileName,
-            "--sha256-file", $primaryHashPath
+            "--sha256-file", $primaryHashPath,
+            "--signed", $releaseSigned.ToString().ToLowerInvariant(),
+            "--signature-mode", $signatureMode
         )
         if ($downloadUrl) {
             $manifestArgs += @("--download-url", $downloadUrl)
@@ -301,10 +471,32 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
+    Run-Step "Gerando guia de distribuicao da release" {
+        $guideArgs = @(
+            "scripts/generate_release_guide.py",
+            "--output", $guidePath,
+            "--version", $version,
+            "--primary-filename", $primaryFileName,
+            "--hash-filename", (Split-Path $primaryHashPath -Leaf),
+            "--signed", $releaseSigned.ToString().ToLowerInvariant(),
+            "--signature-mode", $signatureMode,
+            "--checksum-script-name", (Split-Path $checksumVerifierPath -Leaf)
+        )
+        if ($releaseSigned -and (Test-Path $signatureVerifierPath)) {
+            $guideArgs += @("--signature-script-name", (Split-Path $signatureVerifierPath -Leaf))
+        }
+        if ($HomepageUrl) {
+            $guideArgs += @("--homepage-url", $HomepageUrl)
+        }
+        & $PythonExe @guideArgs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+
     Write-Host ""
     Write-Host "Release pronta:" -ForegroundColor Green
     Write-Host "  ZIP : $zipPath"
     Write-Host "  SHA : $hashPath"
+    Write-Host "  GUI : $guidePath"
     Write-Host "  NMD : $notesMarkdownPath"
     Write-Host "  NTX : $notesTextPath"
     Write-Host "  ISS : $installerScriptPath"

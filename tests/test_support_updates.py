@@ -1,6 +1,7 @@
 import os
 from types import SimpleNamespace
 
+from app import __version__ as APP_VERSION
 from app.ui.controllers.support_controller import SupportController
 
 
@@ -24,10 +25,11 @@ def test_present_update_offer_opens_download_url(monkeypatch):
     window = DummyWindow()
     controller = SupportController(window)
     opened = []
+    prompts = []
 
     monkeypatch.setattr(
         "app.ui.controllers.support_controller.QMessageBox.question",
-        lambda *args, **kwargs: 16384,
+        lambda *args, **kwargs: prompts.append(args[2]) or 16384,
     )
     monkeypatch.setattr(
         "app.ui.controllers.support_controller.QDesktopServices.openUrl",
@@ -40,10 +42,16 @@ def test_present_update_offer_opens_download_url(monkeypatch):
             "notes": "- Melhorias",
             "download_url": "https://example.com/app.zip",
             "published_at": "2026-03-18T12:00:00Z",
+            "filename": "Compensacoes-v1.1.0-win64.zip",
+            "sha256": "abc123",
+            "signed": False,
         }
     )
 
     assert opened == ["https://example.com/app.zip"]
+    assert "Arquivo: Compensacoes-v1.1.0-win64.zip" in prompts[0]
+    assert "SHA-256: abc123" in prompts[0]
+    assert "Assinatura digital: ausente nesta release." in prompts[0]
     assert window.statusBar().messages[-1] == "Link da atualizacao aberto no navegador."
 
 
@@ -109,6 +117,6 @@ def test_check_for_updates_wires_manual_worker(monkeypatch):
 
     controller.check_for_updates()
 
-    assert events[0] == ("start", "https://example.com/latest.json", "1.0.0")
+    assert events[0] == ("start", "https://example.com/latest.json", APP_VERSION)
     assert events[1][0] == "info"
     assert "versao mais recente" in events[1][2]

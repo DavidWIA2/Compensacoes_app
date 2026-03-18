@@ -82,10 +82,23 @@ class SupportController:
         notes = str(payload.get("notes") or "Sem notas de versao.").strip() or "Sem notas de versao."
         download_url = str(payload.get("download_url") or payload.get("homepage_url") or "").strip()
         published_at = str(payload.get("published_at") or "").strip()
+        filename = str(payload.get("filename") or "").strip()
+        sha256 = str(payload.get("sha256") or "").strip().lower()
+        signed = payload.get("signed")
+        signature_mode = str(payload.get("signature_mode") or "").strip()
 
         lines = [f"Uma nova versao ({version}) esta disponivel."]
         if published_at:
             lines.append(f"Publicado em: {published_at}")
+        if filename:
+            lines.append(f"Arquivo: {filename}")
+        if sha256:
+            lines.append(f"SHA-256: {sha256}")
+        if signed is True:
+            mode_text = f" ({signature_mode})" if signature_mode else ""
+            lines.append(f"Assinatura digital: presente{mode_text}.")
+        elif signed is False:
+            lines.append("Assinatura digital: ausente nesta release.")
         lines.extend(["", "Novidades:", notes])
         if download_url:
             lines.extend(["", "Deseja abrir o link da atualizacao agora?"])

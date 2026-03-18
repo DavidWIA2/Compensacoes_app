@@ -23,6 +23,8 @@ def test_build_release_manifest_includes_optional_metadata():
         published_at="2026-03-18T12:00:00Z",
         homepage_url="https://example.com/app",
         filename="download.zip",
+        signed=False,
+        signature_mode="unsigned",
     )
 
     assert payload == {
@@ -34,6 +36,8 @@ def test_build_release_manifest_includes_optional_metadata():
         "homepage_url": "https://example.com/app",
         "filename": "download.zip",
         "sha256": "abc123",
+        "signed": False,
+        "signature_mode": "unsigned",
     }
 
 
@@ -80,6 +84,10 @@ def test_generate_release_manifest_script_supports_direct_execution(tmp_path):
             "https://example.com/app",
             "--filename",
             "Compensacoes.zip",
+            "--signed",
+            "true",
+            "--signature-mode",
+            "store-thumbprint",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -93,3 +101,5 @@ def test_generate_release_manifest_script_supports_direct_execution(tmp_path):
     assert payload["sha256"] == "abc123"
     assert payload["notes"] == "Primeira linha\nSegunda linha"
     assert payload["download_url"] == "https://example.com/Compensacoes.zip"
+    assert payload["signed"] is True
+    assert payload["signature_mode"] == "store-thumbprint"

@@ -54,6 +54,25 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      - name: Resolve Inno Setup compiler
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $compiler = $candidates | Select-Object -First 1
+          if (-not $compiler) {
+            $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $compiler = $cmd.Source
+            }
+          }
+          if (-not $compiler) {
+            throw "ISCC.exe nao encontrado apos a instalacao do Inno Setup."
+          }
+          "INNO_SETUP_COMPILER=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Resolve release metadata
         id: metadata
         shell: pwsh
@@ -82,6 +101,7 @@ jobs:
             "-PythonExe", "python",
             "-Clean",
             "-BuildInstaller",
+            "-InstallerCompiler", $env:INNO_SETUP_COMPILER,
             "-RequireInstallerCompiler",
             "-ReleaseBaseUrl", $releaseBaseUrl,
             "-HomepageUrl", $env:HOMEPAGE_URL

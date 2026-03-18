@@ -50,6 +50,21 @@ function Resolve-CommandPath {
     return $null
 }
 
+function Resolve-DefaultInstallerCompiler {
+    $candidates = @(
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        "C:\Program Files\Inno Setup 6\ISCC.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    return $null
+}
+
 function Sign-ReleaseArtifact {
     param(
         [string]$ToolPath,
@@ -221,6 +236,9 @@ try {
 
     if ($BuildInstaller) {
         $resolvedInstallerCompiler = Resolve-CommandPath $InstallerCompiler
+        if (-not $resolvedInstallerCompiler -and $InstallerCompiler -eq "ISCC.exe") {
+            $resolvedInstallerCompiler = Resolve-DefaultInstallerCompiler
+        }
         if (-not $resolvedInstallerCompiler) {
             $message = "Compilador do instalador nao encontrado: $InstallerCompiler"
             if ($RequireInstallerCompiler) {

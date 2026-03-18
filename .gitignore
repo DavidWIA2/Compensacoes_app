@@ -1,11 +1,17 @@
 .venv/
+.venv312/
 
 # Build
 build/
 dist/
+release/
 .idea/
 
 # Python cache/test artifacts
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Logs and local diagnostics
+logs/
+tmp_debug*/

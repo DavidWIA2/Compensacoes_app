@@ -6,6 +6,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
 from app.config import SEARCH_FILTER_DEBOUNCE_MS
+from app.services.error_service import friendly_error_message
 from app.models.compensacao import Compensacao
 from app.services.excel_service import ExcelService
 from app.services.gis_service import GisService
@@ -111,6 +112,7 @@ class DataController:
         self.window._setup_dynamic_form_options_from_records()
         self.window.clear_form(force=True)
         self.window.statusBar().showMessage("Nenhuma planilha carregada")
+        self.window._refresh_window_chrome()
 
     def restore_previous_state(
         self,
@@ -130,6 +132,7 @@ class DataController:
             self.restore_filter_state(previous_filter_state)
             self.apply_filter()
             self.window._load_sort_settings()
+            self.window._refresh_window_chrome()
             if previous_selected is not None:
                 self.window.selected = previous_selected
                 self.window._fill_form(previous_selected)
@@ -176,11 +179,13 @@ class DataController:
                 previous_filter_state,
             )
             logger.error(f"Erro fatal ao carregar {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao carregar: {exc}")
+            title, message = friendly_error_message(exc, "abrir a planilha")
+            QMessageBox.critical(self.window, title, message)
             return False
 
     def open_excel(self):
-        path, _ = QFileDialog.getOpenFileName(self.window, "Abrir Excel", "", "Excel (*.xlsx)")
+        initial_dir = self.window.settings_controller.preferred_excel_dialog_dir()
+        path, _ = QFileDialog.getOpenFileName(self.window, "Abrir Excel", initial_dir, "Excel (*.xlsx)")
         if path and self.load_excel(path):
             QMessageBox.information(self.window, "Sucesso", f"Carregado: {len(self.window.records)} registros.")
 
@@ -249,6 +254,7 @@ class DataController:
         self.window.data_tab.update_totals_tables(metrics)
         self.window.data_tab.lbl_results.setText(f"{len(self.window.filtered_records)} registros")
         self.window.statusBar().showMessage(f"Filtro aplicado: {len(self.window.filtered_records)} registros")
+        self.window._refresh_window_chrome()
         self.window.toggle_heatmap()
         self.window.data_tab._sync_left_panel_heights()
         QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
@@ -273,7 +279,8 @@ class DataController:
             QMessageBox.warning(self.window, "Aviso", "Abra a planilha base primeiro.")
             return
 
-        path, _ = QFileDialog.getOpenFileName(self.window, "Importar Planilha", "", "Excel (*.xlsx)")
+        initial_dir = self.window.settings_controller.preferred_excel_dialog_dir()
+        path, _ = QFileDialog.getOpenFileName(self.window, "Importar Planilha", initial_dir, "Excel (*.xlsx)")
         if not path:
             return
 
@@ -320,8 +327,9 @@ class DataController:
             else:
                 self.window.statusBar().showMessage("Importação cancelada")
         except Exception as exc:
-            logger.error(f"Erro na importação de {path}: {exc}")
-            QMessageBox.critical(self.window, "Erro de Importação", f"Falha ao ler ou mesclar o arquivo: {exc}")
+            logger.error(f"Erro na importação de {path}: {exc}", exc_info=True)
+            title, message = friendly_error_message(exc, "importar a planilha")
+            QMessageBox.critical(self.window, title, message)
             self.window.statusBar().showMessage("Falha na importação")
 
     def show_rollback_dialog(self):
@@ -373,4 +381,6 @@ class DataController:
                     QMessageBox.information(self.window, "Sucesso", "Backup restaurado com sucesso!")
                     logger.info(f"Rollback executado usando arquivo {selected_file}")
                 except Exception as exc:
-                    QMessageBox.critical(self.window, "Erro", f"Falha ao restaurar backup: {exc}")
+                    logger.error(f"Falha ao restaurar backup {selected_file}: {exc}", exc_info=True)
+                    title, message = friendly_error_message(exc, "restaurar o backup")
+                    QMessageBox.critical(self.window, title, message)

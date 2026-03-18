@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 
 from app.models.compensacao import Compensacao
+from app.services.app_settings import AppSettings
+from app.utils.logger import LOG_DIR
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -989,6 +991,33 @@ def test_load_settings_ignores_geometry_and_restores_tab(monkeypatch):
     window.close()
 
 
+def test_load_settings_filters_missing_recent_files(monkeypatch, tmp_path):
+    existing = tmp_path / "base.xlsx"
+    existing.write_text("stub", encoding="utf-8")
+
+    class MemorySettings:
+        def __init__(self):
+            self._data = {"recent_files": [str(existing), str(existing), str(tmp_path / "missing.xlsx")]}
+
+        def value(self, key, default=None):
+            return self._data.get(key, default)
+
+        def setValue(self, key, value):
+            self._data[key] = value
+
+        def remove(self, key):
+            self._data.pop(key, None)
+
+    window = MainWindow()
+    window.settings = AppSettings(MemorySettings())
+
+    window._load_settings()
+
+    assert window.recent_files == [str(existing)]
+    assert window.settings.recent_files() == [str(existing)]
+    window.close()
+
+
 def test_close_event_persists_geometry_and_active_tab(monkeypatch):
     window = MainWindow()
     saved = {}
@@ -1006,6 +1035,85 @@ def test_close_event_persists_geometry_and_active_tab(monkeypatch):
     assert saved["active_tab_index"] == 1
 
 
+def test_help_menu_exposes_support_actions():
+    window = MainWindow()
+
+    assert window.action_export_diagnostics.text() == "Exportar Diagnóstico"
+    assert window.action_open_logs.text() == "Abrir Pasta de Logs"
+    assert window.action_about.text() == "Sobre"
+    window.close()
+
+
+def test_close_event_stops_geocode_worker(monkeypatch):
+    window = MainWindow()
+    calls = []
+
+    worker = SimpleNamespace(
+        progress_update=SimpleNamespace(disconnect=lambda: calls.append("disconnect_progress")),
+        finished_process=SimpleNamespace(disconnect=lambda: calls.append("disconnect_finished")),
+        isRunning=lambda: True,
+        stop=lambda: calls.append("stop"),
+        quit=lambda: calls.append("quit"),
+        wait=lambda timeout: calls.append(("wait", timeout)) or True,
+    )
+    window.geo_worker = worker
+
+    window.close()
+
+    assert "disconnect_progress" in calls
+    assert "disconnect_finished" in calls
+    assert "stop" in calls
+    assert "quit" in calls
+    assert ("wait", 10000) in calls
+
+
+def test_open_logs_folder_uses_log_directory(monkeypatch):
+    window = MainWindow()
+    opened = []
+
+    monkeypatch.setattr("app.ui.controllers.support_controller.QDesktopServices.openUrl", lambda url: opened.append(url.toLocalFile()))
+
+    window.open_logs_folder()
+
+    assert [os.path.normcase(os.path.normpath(path)) for path in opened] == [os.path.normcase(os.path.normpath(LOG_DIR))]
+    window.close()
+
+
+def test_export_diagnostics_writes_file_and_remembers_directory(monkeypatch, tmp_path):
+    class MemorySettings:
+        def __init__(self):
+            self._data = {}
+
+        def value(self, key, default=None):
+            return self._data.get(key, default)
+
+        def setValue(self, key, value):
+            self._data[key] = value
+
+        def remove(self, key):
+            self._data.pop(key, None)
+
+    window = MainWindow()
+    window.settings = AppSettings(MemorySettings())
+    target = tmp_path / "suporte" / "diag.json"
+    target.parent.mkdir()
+
+    monkeypatch.setattr(
+        "app.ui.controllers.support_controller.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(target), "JSON (*.json)"),
+    )
+
+    window.export_diagnostics()
+
+    assert target.exists()
+    with open(target, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    assert payload["app"]["version"]
+    assert "session" in payload
+    assert window.settings.last_export_dir() == str(target.parent)
+    window.close()
+
+
 def test_run_map_js_reports_failures_without_raising(monkeypatch):
     logs = []
     window = MainWindow()
@@ -1019,6 +1127,25 @@ def test_run_map_js_reports_failures_without_raising(monkeypatch):
     assert logs and "MAP JS" in logs[0]
     assert "status" in logs[0]
     window.close()
+
+
+def test_delete_selected_surfaces_lookup_errors(monkeypatch):
+    window = MainWindow()
+    errors = []
+    reloaded = []
+    window.excel.path = "dummy.xlsx"
+    window.selected = make_record(uid="u-delete")
+
+    monkeypatch.setattr(window.excel, "delete_record_shift_up", lambda *args, **kwargs: (_ for _ in ()).throw(LookupError("UID ausente")))
+    monkeypatch.setattr(window, "reload", lambda: reloaded.append(True))
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: errors.append(args[2]))
+
+    window.delete_selected()
+
+    assert reloaded == []
+    assert errors == ["Nao foi possivel excluir o registro: UID ausente"]
+    window.close()
+
 
 def test_save_edit_blocks_invalid_payload(monkeypatch):
     window = MainWindow()

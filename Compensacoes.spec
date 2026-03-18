@@ -7,6 +7,7 @@ from PyInstaller.utils.hooks import (
 )
 import importlib.util
 from PyInstaller.building.datastruct import Tree
+import os
 
 
 def has_module(modname: str) -> bool:
@@ -98,6 +99,8 @@ if has_module('pyogrio'):
 # --------------------------------------------------------------------
 # Build
 # --------------------------------------------------------------------
+version_file = os.path.join('build', 'windows_version_info.txt')
+
 a = Analysis(
     ['run.py'],
     pathex=[],
@@ -114,10 +117,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
+exe_kwargs = dict(
     exclude_binaries=True,
     name='Compensacoes',
     debug=False,
@@ -131,6 +131,15 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['assets\\app.ico'],
+)
+if os.path.exists(version_file):
+    exe_kwargs['version'] = version_file
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    **exe_kwargs,
 )
 
 coll = COLLECT(

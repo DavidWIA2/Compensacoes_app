@@ -139,6 +139,29 @@ def test_add_new_persists_record_and_creates_backup(tmp_path):
     assert (tmp_path / BACKUP_FOLDER_NAME).exists()
 
 
+def test_add_new_skips_partially_filled_rows(tmp_path):
+    path = tmp_path / "compensacoes_parcial.xlsx"
+    build_legacy_workbook(path)
+
+    wb = openpyxl.load_workbook(path)
+    ws = wb[SHEET_NAME]
+    ws.append(["", "NAO", "CX-2", "AT-2", 4, "Rua B", "Medeiros", ""])
+    wb.save(path)
+
+    service = ExcelService()
+    service.load(str(path))
+
+    new_row = service.add_new(make_record(av_tec="AT-3", oficio_processo="789/2026"))
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+
+    assert new_row == 4
+    assert ws.cell(row=3, column=4).value == "AT-2"
+    assert ws.cell(row=4, column=1).value == "789/2026"
+    assert ws.cell(row=4, column=4).value == "AT-3"
+
+
 def test_delete_record_shift_up_removes_row(tmp_path):
     path = tmp_path / "compensacoes.xlsx"
     build_workbook(path)
@@ -154,6 +177,43 @@ def test_delete_record_shift_up_removes_row(tmp_path):
 
     assert ws.max_row == 2
     assert ws.cell(row=2, column=1).value == "456/2026"
+
+
+def test_delete_record_shift_up_raises_when_uid_is_missing(tmp_path):
+    path = tmp_path / "compensacoes_uid.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+
+    with pytest.raises(LookupError, match="UID"):
+        service.delete_record_shift_up(records[0].excel_row, records[0].uid + "-missing")
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.max_row == 2
+    assert ws.cell(row=2, column=1).value == "123/2026"
+
+
+def test_save_workbook_cleans_temp_file_when_replace_fails(tmp_path, monkeypatch):
+    path = tmp_path / "compensacoes_locked.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+    records[0].caixa = "CX-ALTERADA"
+
+    monkeypatch.setattr("app.services.excel_service.os.replace", lambda src, dst: (_ for _ in ()).throw(PermissionError("locked")))
+
+    with pytest.raises(PermissionError):
+        service.save_edit(records[0])
+
+    temp_files = [candidate for candidate in tmp_path.glob("compensacoes_*.xlsx") if candidate.name != path.name]
+    assert temp_files == []
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.cell(row=2, column=3).value == "CX-1"
 
 
 def test_read_all_requires_loaded_path():

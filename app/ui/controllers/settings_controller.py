@@ -9,6 +9,13 @@ class SettingsController:
     def __init__(self, window):
         self.window = window
 
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        clean = str(path or "").strip()
+        if not clean:
+            return ""
+        return os.path.abspath(clean)
+
     def _value(self, key: str, default=None):
         return self.window.settings.value(key, default)
 
@@ -31,6 +38,19 @@ class SettingsController:
             action = menu_recent.addAction(os.path.basename(path))
             action.setToolTip(path)
             action.triggered.connect(lambda checked=False, p=path: self.window._load_excel(p))
+
+    def _sanitize_recent_files(self, recent_files: List[str]) -> List[str]:
+        cleaned = []
+        seen = set()
+        for path in recent_files:
+            normalized = self._normalize_path(path)
+            if not normalized or normalized in seen or not os.path.exists(normalized):
+                continue
+            cleaned.append(normalized)
+            seen.add(normalized)
+            if len(cleaned) >= 5:
+                break
+        return cleaned
 
     def load_settings(self):
         if hasattr(self.window.settings, "is_dark_mode"):
@@ -58,6 +78,11 @@ class SettingsController:
                 self.window.recent_files = list(recents)
             else:
                 self.window.recent_files = []
+        cleaned_recents = self._sanitize_recent_files(self.window.recent_files)
+        if cleaned_recents != self.window.recent_files:
+            self.restore_recent_files(cleaned_recents)
+        else:
+            self.window.recent_files = cleaned_recents
         self.update_recent_files_menu()
 
     def apply_startup_window_state(self):
@@ -121,10 +146,13 @@ class SettingsController:
             self._set_value("map_layer", layer_name)
 
     def update_recent_files(self, path: str):
-        if path in self.window.recent_files:
-            self.window.recent_files.remove(path)
-        self.window.recent_files.insert(0, path)
-        self.window.recent_files = self.window.recent_files[:5]
+        normalized = self._normalize_path(path)
+        if not normalized:
+            return
+
+        recents = [item for item in self.window.recent_files if self._normalize_path(item) != normalized]
+        recents.insert(0, normalized)
+        self.window.recent_files = recents[:5]
         if hasattr(self.window.settings, "set_recent_files"):
             self.window.settings.set_recent_files(self.window.recent_files)
         else:
@@ -132,7 +160,7 @@ class SettingsController:
         self.update_recent_files_menu()
 
     def restore_recent_files(self, recent_files: List[str]):
-        self.window.recent_files = list(recent_files)
+        self.window.recent_files = self._sanitize_recent_files(list(recent_files))
         if hasattr(self.window.settings, "set_recent_files"):
             self.window.settings.set_recent_files(self.window.recent_files)
         else:
@@ -166,3 +194,37 @@ class SettingsController:
             self.window.settings.clear_last_excel_path()
         else:
             self._remove("last_excel_path")
+
+    def preferred_excel_dialog_dir(self) -> str:
+        current_path = getattr(self.window.excel, "path", "") or self.restore_last_excel_path()
+        normalized = self._normalize_path(current_path)
+        if normalized:
+            return normalized if os.path.isdir(normalized) else os.path.dirname(normalized)
+        return ""
+
+    def preferred_export_dir(self) -> str:
+        export_dir = ""
+        if hasattr(self.window.settings, "last_export_dir"):
+            export_dir = self.window.settings.last_export_dir()
+        else:
+            export_dir = str(self._value("last_export_dir", "") or "")
+
+        normalized = self._normalize_path(export_dir)
+        if normalized and os.path.isdir(normalized):
+            return normalized
+
+        return self.preferred_excel_dialog_dir()
+
+    def save_last_export_dir(self, path: str):
+        normalized = self._normalize_path(path)
+        if not normalized:
+            return
+
+        export_dir = normalized if os.path.isdir(normalized) else os.path.dirname(normalized)
+        if not export_dir:
+            return
+
+        if hasattr(self.window.settings, "set_last_export_dir"):
+            self.window.settings.set_last_export_dir(export_dir)
+        else:
+            self._set_value("last_export_dir", export_dir)

@@ -121,7 +121,21 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             font-size: {font_size}px;
         }}
 
+        QStatusBar {{
+            background-color: {t['bg_panel']};
+            border-top: 1px solid {t['input_border']};
+        }}
+        QStatusBar::item {{
+            border: none;
+        }}
+
         QLabel {{ color: {t['text']}; }}
+        QLabel#StatusChip, QLabel#FormStateLabel {{
+            background-color: {t['btn_secondary_bg']};
+            border: 1px solid {t['input_border']};
+            border-radius: {max(int(7 * sf), 7)}px;
+            padding: {max(int(2 * sf), 2)}px {max(int(8 * sf), 8)}px;
+        }}
         QCheckBox, QRadioButton {{ color: {t['text']}; background: transparent; }}
         QCheckBox::indicator:checked {{
             background-color: {t['btn_secondary_hover']};
@@ -284,6 +298,19 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             background-color: {t['btn_disabled_bg']};
             color: {t['placeholder']};
             border: 1px solid {t['input_border']};
+        }}
+
+        QProgressBar {{
+            border: 1px solid {t['input_border']};
+            border-radius: {radius}px;
+            background-color: {t['btn_disabled_bg']};
+            color: {t['text']};
+            text-align: center;
+            min-height: {min_h_input}px;
+        }}
+        QProgressBar::chunk {{
+            background-color: {t['btn_primary']};
+            border-radius: {max(int(6 * sf), 6)}px;
         }}
 
         QTableView {{

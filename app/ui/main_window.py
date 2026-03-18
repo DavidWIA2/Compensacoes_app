@@ -41,6 +41,7 @@ from app.ui.controllers.export_controller import ExportController
 from app.ui.controllers.form_controller import FormController
 from app.ui.controllers.map_controller import MapController
 from app.ui.controllers.settings_controller import SettingsController
+from app.ui.controllers.support_controller import SupportController
 from app.ui.components.ui_utils import resource_path, _setup_i18n, msg_confirm, _ajustar_ambiente_pyinstaller
 from app.ui.components.widgets import ColumnsDialog, MapBridge
 from app.ui.components.workers import GeocodeWorker, UpdaterWorker
@@ -104,6 +105,7 @@ class MainWindow(QMainWindow):
         self.form_controller = FormController(self)
         self.data_controller = DataController(self)
         self.map_controller = MapController(self)
+        self.support_controller = SupportController(self)
         self._bind_controller_methods()
         self._startup_window_timer.timeout.disconnect()
         self._startup_window_timer.timeout.connect(self._apply_startup_window_state)
@@ -126,12 +128,16 @@ class MainWindow(QMainWindow):
         # Estado Inicial
         self._update_form_action_buttons()
         self._update_address_search_enabled()
+        self._refresh_window_chrome()
         self.setWindowModified(False)
         self.statusBar().showMessage("Pronto")
         
         # Iniciar verificação de atualizações em segundo plano
         self._updater = UpdaterWorker()
-        self._updater.update_available.connect(self._prompt_update)
+        if hasattr(self._updater, "update_ready"):
+            self._updater.update_ready.connect(self.present_update_offer)
+        elif hasattr(self._updater, "update_available"):
+            self._updater.update_available.connect(self._prompt_update)
         self._updater.start()
 
     def resizeEvent(self, event):
@@ -204,6 +210,11 @@ class MainWindow(QMainWindow):
         self.export_ficha_pdf = self.export_controller.export_ficha_pdf
         self.export_dashboard_pdf_clicked = self.export_controller.export_dashboard_pdf_clicked
         self._get_save_path = self.export_controller.get_save_path
+        self.show_about_dialog = self.support_controller.show_about_dialog
+        self.open_logs_folder = self.support_controller.open_logs_folder
+        self.export_diagnostics = self.support_controller.export_diagnostics
+        self.check_for_updates = self.support_controller.check_for_updates
+        self.present_update_offer = self.support_controller.present_update_offer
 
     def _prompt_update(self, version: str, notes: str):
         msg = f"Uma nova versão do aplicativo ({version}) está disponível!\n\nNovidades:\n{notes}\n\nDeseja atualizar agora?"
@@ -254,6 +265,70 @@ class MainWindow(QMainWindow):
         self.form_state_label.setObjectName("FormStateLabel")
         self.statusBar().addPermanentWidget(self.progress_bar)
         self.statusBar().addPermanentWidget(self.form_state_label)
+        self.session_file_label = QLabel("Planilha: nenhuma")
+        self.session_file_label.setObjectName("StatusChip")
+        self.session_file_label.setMinimumWidth(int(220 * self.scale_factor))
+        self.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.session_records_label = QLabel("Registros: 0")
+        self.session_records_label.setObjectName("StatusChip")
+        self.session_selection_label = QLabel("Modo: novo cadastro")
+        self.session_selection_label.setObjectName("StatusChip")
+        self.statusBar().addPermanentWidget(self.session_file_label)
+        self.statusBar().addPermanentWidget(self.session_records_label)
+        self.statusBar().addPermanentWidget(self.session_selection_label)
+        self.statusBar().setSizeGripEnabled(False)
+
+    def _current_file_label_text(self) -> str:
+        path = str(getattr(self.excel, "path", "") or "").strip()
+        if not path:
+            return "Planilha: nenhuma"
+        return f"Planilha: {os.path.basename(path) or path}"
+
+    def _current_records_label_text(self) -> str:
+        total = len(self.records)
+        filtered = len(self.filtered_records)
+        if total <= 0:
+            return "Registros: 0"
+        if filtered == total:
+            return f"Registros: {total}"
+        return f"Registros: {filtered} de {total}"
+
+    def _current_selection_label_text(self) -> str:
+        if self.selected is None:
+            return "Modo: novo cadastro"
+
+        summary = (self.selected.av_tec or "").strip()
+        if not summary:
+            summary = (self.selected.oficio_processo or "").strip()
+        if not summary:
+            row_number = max(int(getattr(self.selected, "excel_row", 0)) - 1, 0)
+            summary = f"linha {row_number}" if row_number else "registro ativo"
+        return f"Selecionado: {summary}"
+
+    def _refresh_window_chrome(self):
+        path = str(getattr(self.excel, "path", "") or "").strip()
+        title = APP_WINDOW_TITLE
+        if path:
+            title = f"{APP_WINDOW_TITLE}[*] - {os.path.basename(path) or path}"
+            if self.records:
+                title = f"{title} ({len(self.filtered_records)}/{len(self.records)})"
+        self.setWindowTitle(title)
+
+        self.session_file_label.setText(self._current_file_label_text())
+        self.session_file_label.setToolTip(path or "Nenhuma planilha carregada.")
+
+        self.session_records_label.setText(self._current_records_label_text())
+        search_text = self.search.text().strip()
+        if search_text:
+            self.session_records_label.setToolTip(f"Busca atual: {search_text}")
+        else:
+            self.session_records_label.setToolTip("Resumo do conjunto filtrado na tela.")
+
+        self.session_selection_label.setText(self._current_selection_label_text())
+        if self.selected is None:
+            self.session_selection_label.setToolTip("Formulario pronto para novo cadastro.")
+        else:
+            self.session_selection_label.setToolTip("Registro atualmente carregado no formulario.")
 
     def _setup_menus(self):
         menubar = self.menuBar()
@@ -271,6 +346,25 @@ class MainWindow(QMainWindow):
 
         self.menu_recent = file_menu.addMenu("Recentes")
         self._update_recent_files_menu()
+
+        help_menu = menubar.addMenu("Ajuda")
+        self.action_check_updates = QAction("Verificar Atualizacoes", self)
+        self.action_check_updates.triggered.connect(self.check_for_updates)
+        help_menu.addAction(self.action_check_updates)
+        help_menu.addSeparator()
+        self.action_export_diagnostics = QAction("Exportar Diagnóstico", self)
+        self.action_export_diagnostics.triggered.connect(self.export_diagnostics)
+        help_menu.addAction(self.action_export_diagnostics)
+
+        self.action_open_logs = QAction("Abrir Pasta de Logs", self)
+        self.action_open_logs.triggered.connect(self.open_logs_folder)
+        help_menu.addAction(self.action_open_logs)
+
+        help_menu.addSeparator()
+
+        self.action_about = QAction("Sobre", self)
+        self.action_about.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(self.action_about)
 
     def _update_recent_files_menu(self):
         self.menu_recent.clear()
@@ -1441,7 +1535,21 @@ class MainWindow(QMainWindow):
             self._initial_map_sync_timer.stop()
 
         self.settings_controller.save_before_close()
-        
+
+        if getattr(self, "geo_worker", None) is not None:
+            try:
+                self.geo_worker.progress_update.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                self.geo_worker.finished_process.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            if self.geo_worker.isRunning():
+                self.geo_worker.stop()
+                self.geo_worker.quit()
+                self.geo_worker.wait(10000)
+         
         # Graceful shutdown da thread do atualizador
         if hasattr(self, "_updater") and self._updater.isRunning():
             self._updater.requestInterruption()

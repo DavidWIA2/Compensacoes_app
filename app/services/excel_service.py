@@ -1,6 +1,7 @@
 import os
 import shutil
 import glob
+import tempfile
 import time
 import uuid
 from datetime import datetime
@@ -12,6 +13,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMNS
+from app.utils.logger import logger
 
 MAX_BACKUPS = 10
 BACKUP_FOLDER_NAME = "backups_historico"
@@ -50,6 +52,24 @@ class ExcelService:
                 return header == b'PK\x03\x04'
         except Exception:
             return False
+
+    def _save_workbook(self) -> None:
+        if not self.wb or not self.path:
+            raise ValueError("Nenhuma planilha carregada para salvar.")
+
+        target_dir = os.path.dirname(os.path.abspath(self.path)) or "."
+        fd, tmp_path = tempfile.mkstemp(prefix="compensacoes_", suffix=".xlsx", dir=target_dir)
+        os.close(fd)
+        try:
+            self.wb.save(tmp_path)
+            os.replace(tmp_path, self.path)
+        except Exception:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                logger.warning(f"[EXCEL] Nao foi possivel remover arquivo temporario: {tmp_path}")
+            raise
 
     def load(self, path: str) -> List[Compensacao]:
         if not os.path.exists(path):
@@ -131,9 +151,9 @@ class ExcelService:
         
         if needs_save:
             try:
-                self.wb.save(self.path)
+                self._save_workbook()
             except Exception as e:
-                print(f"[EXCEL] Aviso: Nao foi possivel salvar novos UIDs gerados na leitura (arquivo aberto?): {e}")
+                logger.warning(f"[EXCEL] Nao foi possivel salvar novos UIDs gerados na leitura: {e}")
 
         return records
 
@@ -166,7 +186,7 @@ class ExcelService:
                         found = True
                         break
                 if not found:
-                    print(f"[EXCEL] Aviso: Coluna '{expected_name}' não mapeada.")
+                    logger.warning(f"[EXCEL] Coluna '{expected_name}' nao mapeada.")
 
     def _create_rotating_backup(self):
         if not self.path:
@@ -187,7 +207,7 @@ class ExcelService:
         try:
             shutil.copy2(self.path, backup_path)
         except Exception as e:
-            print(f"Aviso: Nao foi possivel criar backup: {e}")
+            logger.warning(f"[EXCEL] Nao foi possivel criar backup: {e}")
 
         files = glob.glob(os.path.join(backup_dir, "*.xlsx"))
         files.sort(key=os.path.getmtime)
@@ -196,7 +216,7 @@ class ExcelService:
             try:
                 os.remove(oldest)
             except Exception as exc:
-                print(f"Aviso: Nao foi possivel remover backup antigo '{oldest}': {exc}")
+                logger.warning(f"[EXCEL] Nao foi possivel remover backup antigo '{oldest}': {exc}")
 
     def _find_row_by_uid(self, uid: str) -> Optional[int]:
         if not self.ws or not uid:
@@ -223,12 +243,24 @@ class ExcelService:
                 return row_idx
         return None
 
+    def _row_has_values(self, row_idx: int) -> bool:
+        if not self.ws:
+            return False
+
+        for col_idx in range(1, self.ws.max_column + 1):
+            value = self.ws.cell(row=row_idx, column=col_idx).value
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            return True
+        return False
+
     def add_new(self, c: Compensacao) -> int:
         self._create_rotating_backup()
-        # Encontra a primeira linha realmente vazia para evitar max_row "fantasma"
+        # Encontra a primeira linha realmente vazia para evitar sobrescrever linhas parciais.
         new_row = 2
-        col_check = self.col_map.get("oficio_processo", 1)
-        while self.ws.cell(row=new_row, column=col_check).value:
+        while self._row_has_values(new_row):
             new_row += 1
             
         if not c.uid:
@@ -236,14 +268,14 @@ class ExcelService:
         c.excel_row = new_row
         self._write_row(new_row, c)
         self.uid_to_row[c.uid] = new_row
-        self.wb.save(self.path)
+        self._save_workbook()
         return new_row
 
     def save_edit(self, c: Compensacao):
         self._create_rotating_backup()
         target_row = self._resolve_target_row(c)
         self._write_row(target_row, c)
-        self.wb.save(self.path)
+        self._save_workbook()
 
     def save_batch_edits(self, records: List[Compensacao]) -> int:
         if not records:
@@ -255,7 +287,7 @@ class ExcelService:
             target_row = self._resolve_target_row(record)
             self._write_row(target_row, record)
             updated += 1
-        self.wb.save(self.path)
+        self._save_workbook()
         return updated
 
     def delete_record_shift_up(self, row_idx: int, uid: str = ""):
@@ -263,15 +295,16 @@ class ExcelService:
         target_row = row_idx
         if uid:
             found_row = self._find_row_by_uid(uid)
-            if found_row:
-                target_row = found_row
-                if uid in self.uid_to_row:
-                    del self.uid_to_row[uid]
-                
+            if not found_row:
+                raise LookupError("Nao foi possivel localizar o registro pelo UID. Recarregue a planilha e tente novamente.")
+            target_row = found_row
+            if uid in self.uid_to_row:
+                del self.uid_to_row[uid]
+                 
         self.ws.delete_rows(target_row, 1)
         # Invalida o cache pois as linhas mudaram de posicao
         self.uid_to_row.clear()
-        self.wb.save(self.path)
+        self._save_workbook()
 
     def read_all(self) -> List[Compensacao]:
         if not self.path:

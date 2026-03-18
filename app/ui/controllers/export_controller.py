@@ -1,8 +1,10 @@
+import os
 from typing import Dict, List, Tuple
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS
+from app.services.error_service import friendly_error_message
 from app.services.records_service import compute_metrics
 from app.services.report_service import (
     export_csv,
@@ -51,7 +53,10 @@ class ExportController:
         return "Sem filtros aplicados" if not parts else " | ".join(parts)
 
     def get_save_path(self, title: str, file_filter: str) -> str:
-        path, _ = QFileDialog.getSaveFileName(self.window, title, "", file_filter)
+        initial_dir = self.window.settings_controller.preferred_export_dir()
+        path, _ = QFileDialog.getSaveFileName(self.window, title, initial_dir, file_filter)
+        if path:
+            self.window.settings_controller.save_last_export_dir(os.path.dirname(path))
         return path
 
     def _main_window_module(self):
@@ -68,7 +73,8 @@ class ExportController:
             main_window_module.export_csv(path, self.window.filtered_records, list(DISPLAY_COLUMN_ATTRS))
         except Exception as exc:
             logger.error(f"Falha ao exportar CSV para {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao exportar CSV: {exc}")
+            title, message = friendly_error_message(exc, "exportar o CSV")
+            QMessageBox.critical(self.window, title, message)
             return
         QMessageBox.information(self.window, "Sucesso", "CSV exportado com sucesso.")
 
@@ -90,7 +96,8 @@ class ExportController:
             )
         except Exception as exc:
             logger.error(f"Falha ao exportar Excel para {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao exportar Excel: {exc}")
+            title, message = friendly_error_message(exc, "exportar o Excel")
+            QMessageBox.critical(self.window, title, message)
             return
         QMessageBox.information(self.window, "Sucesso", "Excel exportado com sucesso.")
 
@@ -111,7 +118,8 @@ class ExportController:
             )
         except Exception as exc:
             logger.error(f"Falha ao exportar PDF para {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao exportar PDF: {exc}")
+            title, message = friendly_error_message(exc, "exportar o PDF")
+            QMessageBox.critical(self.window, title, message)
             return
         QMessageBox.information(self.window, "Sucesso", "PDF exportado com sucesso.")
 
@@ -126,7 +134,8 @@ class ExportController:
             main_window_module.export_individual_pdf(path, self.window.selected)
         except Exception as exc:
             logger.error(f"Falha ao exportar ficha em PDF para {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao exportar ficha: {exc}")
+            title, message = friendly_error_message(exc, "exportar a ficha em PDF")
+            QMessageBox.critical(self.window, title, message)
             return
         QMessageBox.information(self.window, "Sucesso", "Ficha PDF gerada com sucesso.")
 
@@ -154,6 +163,7 @@ class ExportController:
             )
         except Exception as exc:
             logger.error(f"Falha ao exportar painel em PDF para {path}: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao exportar painel: {exc}")
+            title, message = friendly_error_message(exc, "exportar o painel em PDF")
+            QMessageBox.critical(self.window, title, message)
             return
         QMessageBox.information(self.window, "Sucesso", "Relatório de Painel exportado.")

@@ -1,0 +1,101 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag de release existente (ex: v1.2.0)"
+        required: true
+        type: string
+      ref:
+        description: "Ref/commit para compilar. Se vazio, usa a tag informada."
+        required: false
+        default: ""
+        type: string
+      homepage_url:
+        description: "URL publica do projeto ou da pagina de suporte."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+      HOMEPAGE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.homepage_url || format('https://github.com/{0}', github.repository) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Resolve release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $version = python -c "from app import __version__; print(__version__)"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_name=Compensacoes v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes_md=release/Compensacoes-v$version-win64-notes.md" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Restore signing certificate
+        if: ${{ secrets.WINDOWS_SIGN_CERT_PFX_B64 != '' }}
+        shell: pwsh
+        run: |
+          $certDir = Join-Path $PWD "build\signing"
+          New-Item -ItemType Directory -Force -Path $certDir | Out-Null
+          $certPath = Join-Path $certDir "release-cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.WINDOWS_SIGN_CERT_PFX_B64 }}"))
+          "COMPENSACOES_CERT_PFX=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "COMPENSACOES_CERT_PASSWORD=${{ secrets.WINDOWS_SIGN_CERT_PASSWORD }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build signed release package
+        shell: pwsh
+        run: |
+          $releaseBaseUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}"
+          $args = @(
+            "-PythonExe", "python",
+            "-Clean",
+            "-BuildInstaller",
+            "-RequireInstallerCompiler",
+            "-ReleaseBaseUrl", $releaseBaseUrl,
+            "-HomepageUrl", $env:HOMEPAGE_URL
+          )
+          if ($env:COMPENSACOES_CERT_PFX) {
+            $args += "-SignArtifacts"
+          }
+          .\scripts\build_release.ps1 @args
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.metadata.outputs.release_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ env.RELEASE_REF }}
+          body_path: ${{ steps.metadata.outputs.notes_md }}
+          fail_on_unmatched_files: true
+          files: |
+            release/*

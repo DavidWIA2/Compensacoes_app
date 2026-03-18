@@ -1,5 +1,6 @@
 # Ambiente virtual
 .venv/
+.venv312/
 
 # IDE
 .idea/
@@ -7,14 +8,17 @@
 # Build
 build/
 dist/
+release/
 
 # Logs
 *.log
+logs/
 build_log.txt
 
 # Arquivos temporários
 __pycache__/
 *.pyc
+tmp_debug*/
 
 # Especifico do PyInstaller
 *.spec

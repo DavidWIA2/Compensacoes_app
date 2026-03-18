@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from typing import Callable, Dict, Optional, Tuple
 from urllib.error import URLError
@@ -24,8 +25,10 @@ class GeocodeWorker(QThread):
 
     def run(self):
         total = len(self.records)
+        cancelled = False
         for i, r in enumerate(self.records):
-            if not self.is_running:
+            if not self.is_running or self.isInterruptionRequested():
+                cancelled = True
                 break
 
             res = {}
@@ -47,6 +50,9 @@ class GeocodeWorker(QThread):
                     except Exception as e:
                         logger.error(f"[GEOCODE] Erro ao buscar endereço principal (linha {r.excel_row}): {e}")
                     time.sleep(0.3)
+                    if not self.is_running or self.isInterruptionRequested():
+                        cancelled = True
+                        break
                 elif not micro:
                     res["main"] = (float(lat_m), float(lon_m))
 
@@ -60,16 +66,21 @@ class GeocodeWorker(QThread):
                     except Exception as e:
                         logger.error(f"[GEOCODE] Erro ao buscar endereço de plantio (linha {r.excel_row}): {e}")
                     time.sleep(0.3)
+                    if not self.is_running or self.isInterruptionRequested():
+                        cancelled = True
+                        break
                 elif not micro and not res.get("main"):
                     res["plantio"] = (float(lat_p), float(lon_p))
 
             if res:
                 self.resultados[r.excel_row] = res
 
-        self.finished_process.emit(self.resultados)
+        if not cancelled:
+            self.finished_process.emit(self.resultados)
 
     def stop(self):
         self.is_running = False
+        self.requestInterruption()
 
     def _geocode_api(self, address: str):
         return geocode_address_arcgis(address, timeout=8)
@@ -77,6 +88,21 @@ class GeocodeWorker(QThread):
 
 class UpdaterWorker(QThread):
     update_available = Signal(str, str)  # version, release_notes
+    update_ready = Signal(object)
+    no_update = Signal(str)
+    check_failed = Signal(str)
+    _VERSION_RE = re.compile(r"^(?P<release>\d+(?:\.\d+)*)(?P<suffix>.*)$")
+    _PRERELEASE_RANKS = {
+        "": 4,
+        "dev": 0,
+        "a": 1,
+        "alpha": 1,
+        "b": 2,
+        "beta": 2,
+        "pre": 3,
+        "preview": 3,
+        "rc": 3,
+    }
 
     def __init__(
         self,
@@ -100,54 +126,101 @@ class UpdaterWorker(QThread):
         try:
             payload = self._fetch_json(self.update_url)
         except Exception as exc:
-            logger.warning(f"[UPDATER] Falha ao consultar atualizacoes: {exc}")
+            message = f"Falha ao consultar atualizacoes: {exc}"
+            logger.warning(f"[UPDATER] {message}")
+            self.check_failed.emit(message)
             return
 
         if self.isInterruptionRequested():
             return
 
-        latest_version = str(
+        details = self._extract_update_details(payload)
+        latest_version = details["version"]
+        release_notes = details["notes"]
+
+        if not latest_version:
+            logger.warning("[UPDATER] Resposta sem versao valida; verificacao ignorada.")
+            self.check_failed.emit("Resposta de atualizacao sem versao valida.")
+            return
+
+        if self._is_newer_version(latest_version, self.current_version):
+            self.update_available.emit(latest_version, release_notes or "Sem notas de versao.")
+            self.update_ready.emit(details)
+        else:
+            logger.info("[UPDATER] Aplicativo ja esta na versao mais recente configurada.")
+            self.no_update.emit(self.current_version)
+
+    @staticmethod
+    def _extract_update_details(payload: Dict[str, str]) -> Dict[str, str]:
+        version = str(
             payload.get("version")
             or payload.get("tag_name")
             or payload.get("latest_version")
             or ""
         ).strip()
-        release_notes = str(
+        notes = str(
             payload.get("notes")
             or payload.get("release_notes")
             or payload.get("body")
             or ""
         ).strip()
-
-        if not latest_version:
-            logger.warning("[UPDATER] Resposta sem versao valida; verificacao ignorada.")
-            return
-
-        if self._is_newer_version(latest_version, self.current_version):
-            self.update_available.emit(latest_version, release_notes or "Sem notas de versao.")
-        else:
-            logger.info("[UPDATER] Aplicativo ja esta na versao mais recente configurada.")
+        download_url = str(
+            payload.get("download_url")
+            or payload.get("browser_download_url")
+            or payload.get("html_url")
+            or ""
+        ).strip()
+        homepage_url = str(payload.get("homepage_url") or payload.get("html_url") or "").strip()
+        published_at = str(payload.get("published_at") or payload.get("created_at") or "").strip()
+        sha256 = str(payload.get("sha256") or "").strip().lower()
+        filename = str(payload.get("filename") or "").strip()
+        return {
+            "version": version,
+            "notes": notes,
+            "download_url": download_url,
+            "homepage_url": homepage_url,
+            "published_at": published_at,
+            "sha256": sha256,
+            "filename": filename,
+        }
 
     @staticmethod
-    def _normalize_version(version: str) -> Tuple[int, ...]:
+    def _normalize_version(version: str) -> Tuple[Tuple[int, ...], int, int]:
         clean = str(version or "").strip().lstrip("vV")
         if not clean:
-            return (0,)
+            return (0,), UpdaterWorker._PRERELEASE_RANKS[""], 0
 
-        parts = []
-        for chunk in clean.split("."):
-            digits = "".join(char for char in chunk if char.isdigit())
-            parts.append(int(digits) if digits else 0)
-        return tuple(parts or [0])
+        match = UpdaterWorker._VERSION_RE.match(clean)
+        if not match:
+            return (0,), UpdaterWorker._PRERELEASE_RANKS[""], 0
+
+        release = tuple(int(chunk) for chunk in match.group("release").split("."))
+        suffix = (match.group("suffix") or "").strip()
+        if not suffix:
+            return release, UpdaterWorker._PRERELEASE_RANKS[""], 0
+
+        suffix = suffix.lstrip("-_.")
+        prerelease = re.match(r"^(a|alpha|b|beta|rc|pre|preview|dev)(\d*)", suffix, re.IGNORECASE)
+        if not prerelease:
+            return release, UpdaterWorker._PRERELEASE_RANKS[""], 0
+
+        tag = prerelease.group(1).lower()
+        number = int(prerelease.group(2) or 0)
+        return release, UpdaterWorker._PRERELEASE_RANKS.get(tag, UpdaterWorker._PRERELEASE_RANKS[""]), number
 
     @classmethod
     def _is_newer_version(cls, latest_version: str, current_version: str) -> bool:
-        latest_parts = cls._normalize_version(latest_version)
-        current_parts = cls._normalize_version(current_version)
+        latest_parts, latest_rank, latest_number = cls._normalize_version(latest_version)
+        current_parts, current_rank, current_number = cls._normalize_version(current_version)
         max_len = max(len(latest_parts), len(current_parts))
         latest_padded = latest_parts + (0,) * (max_len - len(latest_parts))
         current_padded = current_parts + (0,) * (max_len - len(current_parts))
-        return latest_padded > current_padded
+
+        if latest_padded != current_padded:
+            return latest_padded > current_padded
+        if latest_rank != current_rank:
+            return latest_rank > current_rank
+        return latest_number > current_number
 
     @staticmethod
     def _default_fetch_json(url: str) -> Dict[str, str]:

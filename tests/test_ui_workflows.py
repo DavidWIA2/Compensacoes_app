@@ -2,6 +2,21 @@ import os
 
 from app.config import SEARCH_FILTER_DEBOUNCE_MS
 from app.models.compensacao import Compensacao
+from app.services.app_settings import AppSettings
+
+
+class MemorySettings:
+    def __init__(self):
+        self._data = {}
+
+    def value(self, key, default=None):
+        return self._data.get(key, default)
+
+    def setValue(self, key, value):
+        self._data[key] = value
+
+    def remove(self, key):
+        self._data.pop(key, None)
 
 
 def make_record(**overrides) -> Compensacao:
@@ -119,3 +134,54 @@ def test_schedule_apply_filter_uses_debounce_interval(ui_window_factory, monkeyp
     window.schedule_apply_filter()
 
     assert started == [SEARCH_FILTER_DEBOUNCE_MS]
+
+
+def test_export_dialog_uses_last_export_dir_and_remembers_selection(ui_window_factory, monkeypatch, tmp_path):
+    window = ui_window_factory()
+    window.settings = AppSettings(MemorySettings())
+    window.settings.set_last_export_dir(str(tmp_path))
+
+    target = tmp_path / "relatorios" / "saida.xlsx"
+    target.parent.mkdir()
+    captured = {}
+
+    def fake_get_save_file_name(_parent, _title, initial_dir, _file_filter):
+        captured["initial_dir"] = initial_dir
+        return str(target), "Excel (*.xlsx)"
+
+    monkeypatch.setattr("app.ui.controllers.export_controller.QFileDialog.getSaveFileName", fake_get_save_file_name)
+
+    path = window._get_save_path("Salvar Excel", "Excel (*.xlsx)")
+
+    assert captured["initial_dir"] == str(tmp_path)
+    assert path == str(target)
+    assert window.settings.last_export_dir() == str(target.parent)
+    window.close()
+
+
+def test_open_excel_uses_last_excel_directory(ui_window_factory, monkeypatch, tmp_path):
+    window = ui_window_factory()
+    window.settings = AppSettings(MemorySettings())
+
+    excel_path = tmp_path / "base.xlsx"
+    excel_path.write_text("stub", encoding="utf-8")
+    window.settings.set_last_excel_path(str(excel_path))
+
+    captured = {}
+
+    def fake_get_open_file_name(_parent, _title, initial_dir, _file_filter):
+        captured["initial_dir"] = initial_dir
+        return str(excel_path), "Excel (*.xlsx)"
+
+    def fake_load_excel(path):
+        captured["loaded"] = path
+        return True
+
+    monkeypatch.setattr("app.ui.controllers.data_controller.QFileDialog.getOpenFileName", fake_get_open_file_name)
+    monkeypatch.setattr(window.data_controller, "load_excel", fake_load_excel)
+
+    window.open_excel()
+
+    assert captured["initial_dir"] == str(tmp_path)
+    assert captured["loaded"] == str(excel_path)
+    window.close()

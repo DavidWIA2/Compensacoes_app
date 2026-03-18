@@ -56,6 +56,12 @@ class AppSettings:
     def clear_last_excel_path(self):
         self.remove("last_excel_path")
 
+    def last_export_dir(self) -> str:
+        return str(self.value("last_export_dir", "") or "")
+
+    def set_last_export_dir(self, path: str):
+        self.setValue("last_export_dir", path)
+
     def map_layer(self) -> str:
         return str(self.value("map_layer", DEFAULT_MAP_LAYER) or DEFAULT_MAP_LAYER)
 

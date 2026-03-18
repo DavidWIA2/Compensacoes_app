@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from PySide6.QtWidgets import QMessageBox
 
 from app.models.compensacao import Compensacao
+from app.services.error_service import friendly_error_message
 from app.services.records_service import safe_upper
 from app.services.validation import validate_compensacao
 from app.ui.components.ui_utils import msg_confirm
@@ -34,6 +35,7 @@ class FormController:
         self.window.form_state_label.setText("Sem alterações")
         self.window.setWindowModified(False)
         self.reset_history()
+        self.window._refresh_window_chrome()
 
     def _checked_eletronico_value(self) -> str:
         checked = self.window.data_tab.eletronico_group.checkedButton()
@@ -163,6 +165,7 @@ class FormController:
         self.window.data_tab.form_group.setTitle(self._DIRTY_GROUP_TITLE if is_dirty else self._CLEAN_GROUP_TITLE)
         self.window.form_state_label.setText("Alterações pendentes" if is_dirty else "Sem alterações")
         self.window.setWindowModified(is_dirty)
+        self.window._refresh_window_chrome()
 
     def confirm_discard_changes(self, action_text: str) -> bool:
         if not self.has_pending_changes():
@@ -278,7 +281,12 @@ class FormController:
 
     def delete_selected(self):
         if self.window.selected and msg_confirm(self.window, "Excluir", "Deseja excluir este registro?"):
-            self.window.excel.delete_record_shift_up(self.window.selected.excel_row, self.window.selected.uid)
+            try:
+                self.window.excel.delete_record_shift_up(self.window.selected.excel_row, self.window.selected.uid)
+            except Exception as exc:
+                title, message = friendly_error_message(exc, "excluir o registro")
+                QMessageBox.critical(self.window, title, message)
+                return
             self.window.reload()
             self.clear_form(force=True)
             self.window.statusBar().showMessage("Registro excluído")

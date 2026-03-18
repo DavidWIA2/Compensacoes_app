@@ -1,8 +1,29 @@
 # Compensações
 
+[![Windows CI](https://github.com/DavidWIA2/Compensacoes_app/actions/workflows/windows-ci.yml/badge.svg)](https://github.com/DavidWIA2/Compensacoes_app/actions/workflows/windows-ci.yml)
+[![Windows Release](https://github.com/DavidWIA2/Compensacoes_app/actions/workflows/windows-release.yml/badge.svg)](https://github.com/DavidWIA2/Compensacoes_app/actions/workflows/windows-release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/DavidWIA2/Compensacoes_app?display_name=tag)](https://github.com/DavidWIA2/Compensacoes_app/releases/latest)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+
 Aplicativo desktop em Python para cadastro, consulta e acompanhamento de compensações ambientais ligadas à supressão de árvores no município de São Carlos - SP.
 
 O projeto foi evoluído para um fluxo mais completo de operação: leitura e edição de planilhas Excel, filtros e métricas, mapa com apoio geoespacial, exportações em vários formatos, diagnósticos, logs e pipeline de release para distribuição no Windows.
+
+## Download
+
+- Última versão publicada: [GitHub Releases](https://github.com/DavidWIA2/Compensacoes_app/releases/latest)
+- Pacotes disponíveis: instalador Windows, `.zip`, checksums, notas de release e `latest.json`
+- Para distribuição restrita sem assinatura, publique também o `.sha256` e o `verify_release_checksum.ps1`
+
+## Capturas
+
+### Visão geral da aplicação
+
+![Tela principal do app](docs/images/app-overview.png)
+
+### Splash screen
+
+![Splash screen do app](docs/images/splash-screen.png)
 
 ## O que o app faz
 

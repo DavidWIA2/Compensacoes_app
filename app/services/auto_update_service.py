@@ -210,8 +210,9 @@ function Write-UpdateLog([string]$message) {{
     Add-Content -Path $logPath -Value \"[$timestamp] $message\"
 }}
 
-try {{
+try {
     Write-UpdateLog \"Aguardando o encerramento do aplicativo (PID $pidToWait).\"
+    Write-UpdateLog \"Caminho de reinicio: $restartExecutable\"
     while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
         Start-Sleep -Milliseconds 500
     }}

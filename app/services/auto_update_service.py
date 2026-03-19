@@ -216,8 +216,8 @@ while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
 }}
 
 Write-UpdateLog \"Iniciando instalador silencioso: $installerPath\"
-$installProcess = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru
-Write-UpdateLog (\"Instalador finalizado com codigo {0}.\" -f $installProcess.ExitCode)
+$installProcess = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru -Verb RunAs
+Write-UpdateLog (\"Instalador finalizado com codigo {{0}}.\" -f $installProcess.ExitCode)
 
 if ($installProcess.ExitCode -eq 0 -and $restartExecutable -and (Test-Path $restartExecutable)) {{
     Write-UpdateLog \"Relancando aplicativo atualizado.\"

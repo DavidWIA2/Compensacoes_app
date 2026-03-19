@@ -35,7 +35,7 @@ O projeto foi evoluído para um fluxo mais completo de operação: leitura e edi
 - Exporta dados em `CSV`, `Excel` e `PDF`, incluindo ficha individual e relatório de painel.
 - Mantém backups da planilha e permite restaurar versões anteriores.
 - Gera logs e diagnóstico para suporte.
-- Suporta verificação de atualização por `latest.json`.
+- Suporta verificação e instalação automática de atualização via `latest.json` do GitHub Releases quando a release publica instalador `.exe` com `SHA-256`.
 
 ## Stack principal
 
@@ -125,6 +125,8 @@ O fluxo de release atual gera:
 - `latest.json` para o atualizador
 - script de verificação de checksum
 - script do instalador Inno Setup
+
+Nas builds publicadas, o app consulta por padrão `https://github.com/DavidWIA2/Compensacoes_app/releases/latest/download/latest.json`. A variável `COMPENSACOES_UPDATE_URL` continua disponível para override.
 
 Para detalhes de empacotamento, instalador, publicação e assinatura de código, veja [docs/release.md](docs/release.md).
 

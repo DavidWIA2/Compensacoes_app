@@ -42,7 +42,11 @@ Ao final do processo, a pasta `release/` recebe:
 
 ## Manifest de atualizacao
 
-Se voce hospedar o arquivo `latest.json` em um servidor ou bucket, a aplicacao pode consultar esse endpoint usando a variavel de ambiente `COMPENSACOES_UPDATE_URL`.
+Nas releases oficiais deste repositorio, a aplicacao consulta por padrao `https://github.com/DavidWIA2/Compensacoes_app/releases/latest/download/latest.json`.
+
+A variavel de ambiente `COMPENSACOES_UPDATE_URL` continua disponivel para override. Se voce hospedar o arquivo `latest.json` em outro servidor ou bucket, basta apontar essa variavel para o novo endpoint.
+
+Quando o manifest publicado aponta para um instalador `.exe` e inclui `sha256`, o app consegue baixar, validar e iniciar a instalacao silenciosa automaticamente.
 
 Exemplo de build com link publico:
 

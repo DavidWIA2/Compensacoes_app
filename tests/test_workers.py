@@ -1,14 +1,23 @@
+from app.config import DEFAULT_UPDATE_MANIFEST_URL
 from app.ui.components.workers import UpdaterWorker
 
 
 def test_updater_worker_skips_when_no_source_is_configured():
     worker = UpdaterWorker(update_url="")
+    worker.update_url = ""
     emitted = []
     worker.update_available.connect(lambda version, notes: emitted.append((version, notes)))
 
     worker.run()
 
     assert emitted == []
+
+
+def test_updater_worker_uses_default_manifest_url_when_not_overridden(monkeypatch):
+    monkeypatch.delenv("COMPENSACOES_UPDATE_URL", raising=False)
+    worker = UpdaterWorker(update_url=None)
+
+    assert worker.update_url == DEFAULT_UPDATE_MANIFEST_URL
 
 
 def test_updater_worker_emits_when_endpoint_reports_newer_version():

@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         self._startup_layout_pending = False
         self._dashboard_dirty = True
         self._pending_dashboard_metrics: Optional[Dict[str, object]] = None
+        self._skip_close_discard_confirmation = False
         self._startup_window_timer = QTimer(self)
         self._startup_window_timer.setSingleShot(True)
         self._startup_window_timer.timeout.connect(self._apply_startup_window_state)
@@ -1523,7 +1524,7 @@ class MainWindow(QMainWindow):
         return path
 
     def closeEvent(self, event):
-        if not self.form_controller.confirm_discard_changes("fechar a janela"):
+        if not self._skip_close_discard_confirmation and not self.form_controller.confirm_discard_changes("fechar a janela"):
             event.ignore()
             return
 
@@ -1533,6 +1534,9 @@ class MainWindow(QMainWindow):
             self._initial_map_sync_timer.stop()
 
         self.settings_controller.save_before_close()
+
+        if hasattr(self, "support_controller"):
+            self.support_controller.shutdown()
 
         if getattr(self, "geo_worker", None) is not None:
             try:

@@ -9,6 +9,11 @@ from urllib.request import Request, urlopen
 from PySide6.QtCore import QThread, Signal
 
 from app import __version__ as APP_VERSION
+from app.config import resolve_update_manifest_url
+from app.services.auto_update_service import (
+    AutoUpdateCancelled,
+    prepare_staged_update,
+)
 from app.services.geocode_service import geocode_address_arcgis
 from app.utils.logger import logger
 
@@ -111,7 +116,7 @@ class UpdaterWorker(QThread):
         fetch_json: Optional[Callable[[str], Dict[str, object]]] = None,
     ):
         super().__init__()
-        self.update_url = (update_url or os.getenv("COMPENSACOES_UPDATE_URL", "")).strip()
+        self.update_url = resolve_update_manifest_url(update_url)
         self.current_version = current_version
         self._fetch_json = fetch_json or self._default_fetch_json
 
@@ -255,3 +260,55 @@ class UpdaterWorker(QThread):
             raise RuntimeError("resposta de atualizacao deve ser um objeto JSON")
 
         return payload
+
+
+class UpdateInstallerWorker(QThread):
+    progress = Signal(int, str)
+    staged = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal(str)
+
+    def __init__(
+        self,
+        details: Dict[str, object],
+        *,
+        current_pid: int,
+        current_executable: str = "",
+        prepare_update: Optional[Callable[..., object]] = None,
+    ):
+        super().__init__()
+        self.details = dict(details or {})
+        self.current_pid = current_pid
+        self.current_executable = current_executable
+        self._prepare_update = prepare_update or prepare_staged_update
+
+    def run(self):
+        try:
+            staged_update = self._prepare_update(
+                self.details,
+                current_pid=self.current_pid,
+                current_executable=self.current_executable,
+                progress_callback=self._emit_progress,
+                interruption_requested=self.isInterruptionRequested,
+            )
+        except AutoUpdateCancelled as exc:
+            logger.info(f"[UPDATER] Download cancelado: {exc}")
+            self.cancelled.emit(str(exc))
+            return
+        except Exception as exc:
+            logger.warning(f"[UPDATER] Falha ao preparar atualizacao automatica: {exc}")
+            self.failed.emit(str(exc))
+            return
+
+        payload = staged_update.to_payload() if hasattr(staged_update, "to_payload") else staged_update
+        self.staged.emit(payload)
+
+    def _emit_progress(self, downloaded_bytes: int, total_bytes: Optional[int]):
+        if total_bytes and total_bytes > 0:
+            percent = int((downloaded_bytes / total_bytes) * 100)
+            message = f"Baixando atualizacao... {percent}%"
+        else:
+            percent = 0
+            downloaded_mb = downloaded_bytes / (1024 * 1024)
+            message = f"Baixando atualizacao... {downloaded_mb:.1f} MB"
+        self.progress.emit(percent, message)

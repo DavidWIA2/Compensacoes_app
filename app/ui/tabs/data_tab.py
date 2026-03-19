@@ -125,6 +125,7 @@ class DataTab(QWidget):
         self.table.setSelectionMode(QTableView.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setMinimumHeight(0)
         self.table.setMinimumWidth(0)
         self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
@@ -416,6 +417,7 @@ class DataTab(QWidget):
         self.in_micro.setMinimumWidth(secondary_field_w)
         self.in_micro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.in_caixa = mk_in(secondary_field_w)
+        self.in_caixa.setValidator(QIntValidator(0, 999999))
         self.chk_arquivado = QCheckBox("Arquivado")
         self.chk_compensado = QCheckBox("Compensado (SIM)")
 

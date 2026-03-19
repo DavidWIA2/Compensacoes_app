@@ -570,6 +570,7 @@ class MainWindow(QMainWindow):
         self.data_tab.chk_compensado.toggled.connect(self._on_form_field_changed)
         self.data_tab.chk_sn.toggled.connect(self._on_chk_sn_toggled)
         self.data_tab.chk_arquivado.toggled.connect(self._on_chk_arquivado_toggled)
+        self.data_tab.chk_arquivado.toggled.connect(self._on_form_field_changed)
         
         self.data_tab.btn_export_csv.clicked.connect(self.export_csv_clicked)
         self.data_tab.btn_export_excel.clicked.connect(self.export_excel_clicked)
@@ -1019,8 +1020,6 @@ class MainWindow(QMainWindow):
 
         for index, is_visible in new_map.items():
             self.data_tab.table.setColumnHidden(index, not is_visible)
-        self.data_tab.align_splitter_to_table_width()
-        QTimer.singleShot(0, self.data_tab.align_splitter_to_table_width)
 
     def _on_table_clicked(self, index):
         if self.selected is not None and self.form_controller.has_pending_changes():
@@ -1431,11 +1430,21 @@ class MainWindow(QMainWindow):
         act_delete.triggered.connect(self._delete_selected_from_table_shortcut)
         self.data_tab.table.addAction(act_delete)
 
+    def _get_visible_column_attrs(self) -> List[str]:
+        attrs = []
+        header = self.data_tab.table.horizontalHeader()
+        for i, attr in enumerate(DISPLAY_COLUMN_ATTRS):
+            # O índice 'i' aqui é o índice lógico (do modelo)
+            # isColumnHidden também espera o índice lógico
+            if not self.data_tab.table.isColumnHidden(i):
+                attrs.append(attr)
+        return attrs
+
     def export_csv_clicked(self):
         path = self._get_save_path("Salvar CSV", "CSV (*.csv)")
         if path:
             try:
-                export_csv(path, self.filtered_records, list(DISPLAY_COLUMN_ATTRS))
+                export_csv(path, self.filtered_records, self._get_visible_column_attrs())
             except Exception as exc:
                 logger.error(f"Falha ao exportar CSV para {path}: {exc}", exc_info=True)
                 QMessageBox.critical(self, "Erro", f"Falha ao exportar CSV: {exc}")
@@ -1451,7 +1460,7 @@ class MainWindow(QMainWindow):
                     path,
                     self.filtered_records,
                     self._build_filter_summary(),
-                    list(DISPLAY_COLUMN_ATTRS),
+                    self._get_visible_column_attrs(),
                     self._metrics_to_kpi_rows(metrics),
                     metrics["pend_micro_sorted"],
                     metrics["pend_ele_sorted"],
@@ -1471,7 +1480,7 @@ class MainWindow(QMainWindow):
                     path,
                     self.filtered_records,
                     self._build_filter_summary(),
-                    list(DISPLAY_COLUMN_ATTRS),
+                    self._get_visible_column_attrs(),
                     self._metrics_to_kpi_rows(metrics),
                     metrics["pend_micro_sorted"],
                 )

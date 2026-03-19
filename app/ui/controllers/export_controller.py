@@ -70,7 +70,7 @@ class ExportController:
             return
         main_window_module = self._main_window_module()
         try:
-            main_window_module.export_csv(path, self.window.filtered_records, list(DISPLAY_COLUMN_ATTRS))
+            main_window_module.export_csv(path, self.window.filtered_records, self.window._get_visible_column_attrs())
         except Exception as exc:
             logger.error(f"Falha ao exportar CSV para {path}: {exc}", exc_info=True)
             title, message = friendly_error_message(exc, "exportar o CSV")
@@ -89,7 +89,7 @@ class ExportController:
                 path,
                 self.window.filtered_records,
                 self.build_filter_summary(),
-                list(DISPLAY_COLUMN_ATTRS),
+                self.window._get_visible_column_attrs(),
                 self.metrics_to_kpi_rows(metrics),
                 metrics["pend_micro_sorted"],
                 metrics["pend_ele_sorted"],
@@ -112,7 +112,7 @@ class ExportController:
                 path,
                 self.window.filtered_records,
                 self.build_filter_summary(),
-                list(DISPLAY_COLUMN_ATTRS),
+                self.window._get_visible_column_attrs(),
                 self.metrics_to_kpi_rows(metrics),
                 metrics["pend_micro_sorted"],
             )

@@ -207,34 +207,34 @@ function Write-UpdateLog([string]$message) {{
     }}
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Add-Content -Path $logPath -Value \"[$timestamp] $message\"
+    Add-Content -Path $logPath -Value "[$timestamp] $message"
 }}
 
-try {
-    Write-UpdateLog \"Aguardando o encerramento do aplicativo (PID $pidToWait).\"
-    Write-UpdateLog \"Caminho de reinicio: $restartExecutable\"
+try {{
+    Write-UpdateLog "Aguardando o encerramento do aplicativo (PID $pidToWait)."
+    Write-UpdateLog "Caminho de reinicio: $restartExecutable"
     while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {{
         Start-Sleep -Milliseconds 500
     }}
 
-    Write-UpdateLog \"Iniciando instalador silencioso: $installerPath\"
+    Write-UpdateLog "Iniciando instalador silencioso: $installerPath"
     # Start-Process com -Verb RunAs pode retornar null se o UAC for aceito mas o processo nao for capturado imediatamente
     $installProcess = Start-Process -FilePath $installerPath -ArgumentList $arguments -Wait -PassThru -Verb RunAs
     
     if ($installProcess) {{
-        Write-UpdateLog (\"Instalador finalizado com codigo {{0}}.\" -f $installProcess.ExitCode)
+        Write-UpdateLog ("Instalador finalizado com codigo {{0}}." -f $installProcess.ExitCode)
         $exitCode = $installProcess.ExitCode
     }} else {{
-        Write-UpdateLog \"Instalador iniciado (processo elevado, aguardando conclusao via arquivo se possivel).\"
+        Write-UpdateLog "Instalador iniciado (processo elevado, aguardando conclusao via arquivo se possivel)."
         $exitCode = 0
     }}
 
     if ($exitCode -eq 0 -and $restartExecutable -and (Test-Path $restartExecutable)) {{
-        Write-UpdateLog \"Relancando aplicativo atualizado.\"
+        Write-UpdateLog "Relancando aplicativo atualizado."
         Start-Process -FilePath $restartExecutable -WorkingDirectory ([System.IO.Path]::GetDirectoryName($restartExecutable))
     }}
 }} catch {{
-    Write-UpdateLog \"ERRO FATAL DURANTE A ATUALIZACAO: $_\"
+    Write-UpdateLog "ERRO FATAL DURANTE A ATUALIZACAO: $_"
     exit 1
 }}
 

@@ -79,6 +79,11 @@ class FormController:
             caixa = str(state.get("caixa", ""))
             self.window.data_tab.chk_arquivado.setChecked(is_arquivado)
             self.window.data_tab.in_caixa.setEnabled(not is_arquivado)
+            if is_arquivado:
+                self.window.data_tab.in_caixa.setValidator(None)
+            else:
+                from PySide6.QtGui import QIntValidator
+                self.window.data_tab.in_caixa.setValidator(QIntValidator(0, 999999))
             self.window.data_tab.in_caixa.setText(caixa)
 
             self.window.data_tab.in_avtec.setText(str(state.get("av_tec", "")))
@@ -321,6 +326,7 @@ class FormController:
             self.window.data_tab.in_avtec.setStyleSheet("")
             self.window.data_tab.in_avtec.setToolTip("")
             self.window.data_tab.table.clearSelection()
+            self.window.data_tab.btn_street_view.setEnabled(False)
 
         self.window._update_address_search_enabled()
         self.update_form_action_buttons()

@@ -196,13 +196,39 @@ def export_pdf(
     doc = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
+        rightMargin=20,
+        leftMargin=20,
+        topMargin=20,
         bottomMargin=18,
     )
     elements = []
     styles = getSampleStyleSheet()
+    
+    # Estilos customizados para a tabela
+    style_header = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Normal'],
+        fontSize=7,
+        leading=8,
+        textColor=colors.whitesmoke,
+        fontName='Helvetica-Bold',
+        alignment=1 # Center
+    )
+    
+    style_cell = ParagraphStyle(
+        'CellStyle',
+        parent=styles['Normal'],
+        fontSize=7,
+        leading=8,
+        alignment=0 # Left
+    )
+    
+    style_cell_center = ParagraphStyle(
+        'CellStyleCenter',
+        parent=style_cell,
+        alignment=1
+    )
+
     title_style = styles["Title"]
     title_style.fontSize = 14
     normal_style = styles["Normal"]
@@ -230,29 +256,52 @@ def export_pdf(
     elements.append(Spacer(1, 15))
 
     headers = _selected_headers(selected_cols)
+    
+    # 1. Calcular pesos para larguras das colunas baseado no conteúdo
+    # Colunas que tendem a ser longas ganham mais peso
+    weights = []
+    for attr in selected_cols:
+        if "endereco" in attr.lower():
+            weights.append(3.5) # Endereços precisam de mais espaço
+        elif "oficio" in attr.lower() or "processo" in attr.lower():
+            weights.append(2.0)
+        elif "micro" in attr.lower():
+            weights.append(2.0)
+        elif attr in ["caixa", "av_tec", "eletronico", "compensado", "compensacao"]:
+            weights.append(1.0) # Campos curtos
+        else:
+            weights.append(1.5)
+            
+    page_width = landscape(A4)[0] - 40 # Margens
+    total_weight = sum(weights)
+    col_widths = [(w / total_weight) * page_width for w in weights]
 
-    def wrap_text(text: Any, limit: int = 25) -> str:
-        value = str(text)
-        return value[:limit] + "..." if len(value) > limit else value
-
-    table_data = [headers]
+    # 2. Montar dados da tabela com Paragraphs para wrapping
+    table_data = [[Paragraph(h, style_header) for h in headers]]
     raw_data = _records_to_dict_list(records, selected_cols)
+    
     for row_dict in raw_data:
-        table_data.append([wrap_text(row_dict.get(header, "")) for header in headers])
+        row_elements = []
+        for i, attr in enumerate(selected_cols):
+            val = str(row_dict.get(headers[i], "") or "")
+            # Centralizar campos curtos/status
+            current_style = style_cell_center if weights[i] <= 1.0 else style_cell
+            row_elements.append(Paragraph(val, current_style))
+        table_data.append(row_elements)
 
-    page_width = landscape(A4)[0] - 60
-    col_width = page_width / len(headers)
-    t_main = Table(table_data, colWidths=[col_width] * len(headers), repeatRows=1)
+    t_main = Table(table_data, colWidths=col_widths, repeatRows=1)
     t_main.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
             ]
         )
     )

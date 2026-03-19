@@ -142,12 +142,10 @@ def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
     calls = []
     monkeypatch.setattr(window.data_tab, "align_splitter_to_table_width", lambda: calls.append("align"))
     monkeypatch.setattr(window.data_tab, "_sync_left_panel_heights", lambda: calls.append("sync"))
-    monkeypatch.setattr(window.data_tab, "lock_splitter_height", lambda: calls.append("lock_splitter"))
-    monkeypatch.setattr(window.data_tab, "lock_table_height", lambda: calls.append("lock"))
 
     window._finalize_startup_layout()
 
-    assert calls == ["align", "sync", "lock_splitter", "lock"]
+    assert calls == ["align", "sync"]
     window.close()
 
 

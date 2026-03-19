@@ -831,8 +831,6 @@ class MainWindow(QMainWindow):
     def _finalize_startup_layout(self):
         self.data_tab.align_splitter_to_table_width()
         self.data_tab._sync_left_panel_heights()
-        self.data_tab.lock_splitter_height()
-        self.data_tab.lock_table_height()
 
     def _apply_theme(self):
         t = THEME_DARK if self.is_dark_mode else THEME_LIGHT

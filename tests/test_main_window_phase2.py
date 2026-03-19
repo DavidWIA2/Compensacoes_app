@@ -159,3 +159,13 @@ def test_help_menu_exposes_update_action():
 
     assert window.action_check_updates.text() == "Verificar Atualizacoes"
     window.close()
+
+
+def test_startup_layout_does_not_lock_table_or_splitter_heights():
+    window = MainWindow()
+
+    window._finalize_startup_layout()
+
+    assert window.data_tab._locked_table_height is None
+    assert window.data_tab._locked_splitter_height is None
+    window.close()

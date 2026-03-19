@@ -312,6 +312,60 @@ def test_table_max_height_is_clamped_to_left_panel_space():
     window.close()
 
 
+def test_splitter_and_panels_ignore_vertical_size_hints():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    assert window.data_tab.splitter.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
+    assert window.data_tab.left_panel.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
+    assert window.data_tab.right_panel.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
+
+    window.close()
+
+
+def test_apply_filter_keeps_window_and_table_height_stable():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    initial_window_height = window.height()
+    initial_splitter_height = window.data_tab.splitter.height()
+    initial_table_height = window.data_tab.table.height()
+
+    window.search.setText("Gregorio")
+    window.apply_filter()
+    get_app().processEvents()
+
+    assert window.height() == initial_window_height
+    assert window.data_tab.splitter.height() == initial_splitter_height
+    assert window.data_tab.table.height() == initial_table_height
+
+    window.close()
+
+
+def test_progress_bar_visibility_does_not_expand_table_area():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    initial_splitter_height = window.data_tab.splitter.height()
+    initial_table_height = window.data_tab.table.height()
+
+    window.progress_bar.setVisible(True)
+    window.progress_bar.setRange(0, 10)
+    window.progress_bar.setValue(2)
+    get_app().processEvents()
+
+    assert window.data_tab.splitter.height() == initial_splitter_height
+    assert window.data_tab.table.height() == initial_table_height
+
+    window.close()
+
+
 def test_lock_table_height_prevents_vertical_growth():
     window = MainWindow()
     window.resize(1600, 900)

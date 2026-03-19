@@ -106,10 +106,12 @@ class DataTab(QWidget):
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(int(8 * self.sf))
+        self.splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         layout.addWidget(self.splitter, 1)
 
         self.left_panel = QWidget()
         self.left_panel.setMinimumHeight(0)
+        self.left_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         l_lay = QVBoxLayout(self.left_panel)
         l_lay.setContentsMargins(0, 0, panel_gap, panel_bottom_gap)
         l_lay.setSpacing(int(8 * self.sf))
@@ -136,6 +138,7 @@ class DataTab(QWidget):
         self.splitter.addWidget(self.left_panel)
 
         self.right_panel = QWidget()
+        self.right_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         r_lay = QVBoxLayout(self.right_panel)
         r_lay.setContentsMargins(panel_gap, 0, 0, 0)
         r_lay.setSpacing(int(8 * self.sf))
@@ -212,7 +215,8 @@ class DataTab(QWidget):
         target_height = max(available_table_height, 0)
         if self._locked_table_height is not None:
             target_height = min(target_height, self._locked_table_height)
-            self.table.setFixedHeight(target_height)
+            self.table.setMinimumHeight(0)
+            self.table.setMaximumHeight(target_height)
             return
 
         self.table.setMinimumHeight(0)

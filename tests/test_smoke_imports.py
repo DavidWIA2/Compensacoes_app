@@ -37,4 +37,4 @@ def test_theme_qss_emphasizes_checked_checkboxes_and_radios():
     assert "QCheckBox::indicator:checked" in qss
     assert "QRadioButton::indicator:checked" in qss
     assert THEME_DARK["btn_primary_hover"] in qss
-    assert "data:image/svg+xml;utf8" in qss
+    assert "assets/toggle_on.svg" in qss.replace("\\", "/")

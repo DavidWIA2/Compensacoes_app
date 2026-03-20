@@ -326,6 +326,7 @@ class FormController:
             self.window.data_tab.in_avtec.setStyleSheet("")
             self.window.data_tab.in_avtec.setToolTip("")
             self.window.data_tab.table.clearSelection()
+            self.window.last_marker_coords = None
             self.window.data_tab.btn_street_view.setEnabled(False)
 
         self.window._update_address_search_enabled()

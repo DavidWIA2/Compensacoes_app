@@ -31,16 +31,65 @@ class MapController:
         has_plantio = bool(self.window.data_tab.in_end_plantio.text().strip())
         self.window.data_tab.btn_maps.setEnabled(self.window.data_tab.in_end.isEnabled() and has_end)
         self.window.data_tab.btn_maps_plantio.setEnabled(self.window.data_tab.in_end_plantio.isEnabled() and has_plantio)
-        self.window.data_tab.btn_street_view.setEnabled(self.window.last_marker_coords is not None)
+        
+        # Habilita Street View se houver um marcador OU algum endereço preenchido
+        self.window.data_tab.btn_street_view.setEnabled(
+            self.window.last_marker_coords is not None or has_end or has_plantio
+        )
 
     def open_street_view(self):
-        if not self.window.last_marker_coords:
-            QMessageBox.information(self.window, "Street View", "Clique em um ponto no mapa ou faça uma busca primeiro para obter uma coordenada.")
-            return
-        lat, lon = self.window.last_marker_coords
-        url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
-        QDesktopServices.openUrl(QUrl(url))
-        logger.info(f"Street View aberto para {lat}, {lon}")
+        """
+        Abre o Google Street View. 
+        Se o endereço de plantio estiver vazio, busca o endereço principal.
+        Se o endereço de plantio estiver preenchido, pergunta qual buscar.
+        """
+        end_principal = self.window.data_tab.in_end.text().strip()
+        end_plantio = self.window.data_tab.in_end_plantio.text().strip()
+        
+        target_address = None
+        
+        if not end_plantio:
+            if not end_principal:
+                # Se não tem endereço mas tem marcador manual, usa o marcador
+                if self.window.last_marker_coords:
+                    lat, lon = self.window.last_marker_coords
+                    url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
+                    QDesktopServices.openUrl(QUrl(url))
+                    logger.info(f"Street View aberto para marcador manual {lat}, {lon}")
+                    return
+                
+                QMessageBox.warning(self.window, "Atenção", "Nenhum endereço ou ponto no mapa selecionado para o Street View.")
+                return
+            target_address = end_principal
+        else:
+            # Perguntar qual endereço
+            msg_box = QMessageBox(self.window)
+            msg_box.setWindowTitle("Escolha o Endereço")
+            msg_box.setText("Qual endereço você deseja visualizar no Street View?")
+            btn_principal = msg_box.addButton("Endereço Principal", QMessageBox.ActionRole)
+            btn_plantio = msg_box.addButton("Endereço de Plantio", QMessageBox.ActionRole)
+            msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+            
+            msg_box.exec_()
+            
+            if msg_box.clickedButton() == btn_principal:
+                target_address = end_principal
+            elif msg_box.clickedButton() == btn_plantio:
+                target_address = end_plantio
+            else:
+                return # Cancelado
+                
+        if target_address:
+             self.window.statusBar().showMessage(f"Geocodificando para Street View: {target_address}...")
+             coords = geocode_address_arcgis(target_address)
+             if coords:
+                 lat, lon = coords
+                 self.set_map_marker(lat, lon)
+                 url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
+                 QDesktopServices.openUrl(QUrl(url))
+                 logger.info(f"Street View aberto para {lat}, {lon} ({target_address})")
+             else:
+                 QMessageBox.warning(self.window, "Erro", f"Não foi possível localizar o endereço: {target_address}")
 
     def load_custom_layer(self):
         path, _ = QFileDialog.getOpenFileName(self.window, "Adicionar Camada GIS", "", "Arquivos GIS (*.geojson *.json *.kml)")

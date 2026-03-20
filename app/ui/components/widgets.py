@@ -1,5 +1,5 @@
 from typing import List, Dict
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot, Signal, QTimer, QEvent
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QVBoxLayout, QLabel, QLineEdit, QCheckBox,
@@ -30,16 +30,65 @@ class DebugPage(QWebEnginePage):
 
 
 class CheckableComboBox(QComboBox):
+    selectionChanged = Signal()
+
     def __init__(self, all_label: str):
         super().__init__()
         self._all_label = all_label
+        self._block = False
         self.setEditable(True)
         self.lineEdit().setReadOnly(True)
         self.lineEdit().setPlaceholderText(all_label)
-        self.view().pressed.connect(self._on_pressed)
+        
+        # O segredo para combos de multiseleção estáveis no Qt: eventFilter no viewport
+        self.view().viewport().installEventFilter(self)
         self.set_items([])
 
+    def eventFilter(self, widget, event):
+        if widget == self.view().viewport() and event.type() == QEvent.MouseButtonRelease:
+            index = self.view().indexAt(event.pos())
+            if index.isValid():
+                self._toggle_item(index)
+                return True # Bloqueia o fechamento automático e o processamento padrão
+        return super().eventFilter(widget, event)
+
+    def _toggle_item(self, index):
+        if self._block: return
+        self._block = True
+        
+        m = self.model()
+        item = m.itemFromIndex(index)
+        row_idx = index.row()
+        
+        # Alterna o estado manualmente
+        current_state = item.data(Qt.CheckStateRole)
+        new_state = Qt.Checked if current_state == Qt.Unchecked else Qt.Unchecked
+        item.setData(new_state, Qt.CheckStateRole)
+        
+        if row_idx == 0:
+            if new_state == Qt.Checked:
+                # Marcou "Todas": desmarca todo o resto
+                for i in range(1, m.rowCount()):
+                    m.item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
+            else:
+                # Tentou desmarcar "Todas": se nada mais estiver marcado, força a volta do "Todas"
+                if not self.checked_items():
+                    item.setData(Qt.Checked, Qt.CheckStateRole)
+        else:
+            if new_state == Qt.Checked:
+                # Marcou um item específico: desmarca o "Todas" obrigatoriamente
+                m.item(0).setData(Qt.Unchecked, Qt.CheckStateRole)
+            else:
+                # Desmarcou um item: se não sobrou absolutamente nada, reativa o "Todas"
+                if not self.checked_items():
+                    m.item(0).setData(Qt.Checked, Qt.CheckStateRole)
+        
+        self._refresh_ui()
+        self._block = False
+        self.selectionChanged.emit()
+
     def set_items(self, items: List[str]):
+        self._block = True
         m = QStandardItemModel()
         all_item = QStandardItem(self._all_label)
         all_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
@@ -47,60 +96,58 @@ class CheckableComboBox(QComboBox):
         m.appendRow(all_item)
         for it in items:
             if not it or not str(it).strip(): continue
-            row = QStandardItem(it)
+            row = QStandardItem(str(it))
             row.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
             row.setData(Qt.Unchecked, Qt.CheckStateRole)
             m.appendRow(row)
         self.setModel(m)
-        self._refresh_text()
+        self._refresh_ui()
+        self._block = False
 
     def checked_items(self) -> List[str]:
         m = self.model()
+        if not m: return []
         return [m.item(i).text() for i in range(1, m.rowCount()) if m.item(i).data(Qt.CheckStateRole) == Qt.Checked]
 
     def is_all_selected(self) -> bool:
         m = self.model()
-        if m.rowCount() == 0: return True
+        if not m or m.rowCount() == 0: return True
         return m.item(0).data(Qt.CheckStateRole) == Qt.Checked
 
     def select_all(self):
         m = self.model()
-        if m.rowCount() == 0: return
+        if not m or m.rowCount() == 0: return
+        self._block = True
         m.item(0).setData(Qt.Checked, Qt.CheckStateRole)
-        for i in range(1, m.rowCount()): m.item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
-        self._refresh_text()
+        for i in range(1, m.rowCount()):
+            m.item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
+        self._refresh_ui()
+        self._block = False
+        self.selectionChanged.emit()
 
     def set_checked_items(self, items: List[str], *, all_selected: bool = False):
         m = self.model()
-        if m.rowCount() == 0:
-            return
-
+        if not m or m.rowCount() == 0: return
+        self._block = True
         if all_selected:
-            self.select_all()
-            return
+            m.item(0).setData(Qt.Checked, Qt.CheckStateRole)
+            for i in range(1, m.rowCount()):
+                m.item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
+        else:
+            selected = {str(item).strip().upper() for item in items if str(item).strip()}
+            m.item(0).setData(Qt.Unchecked, Qt.CheckStateRole)
+            for i in range(1, m.rowCount()):
+                st = Qt.Checked if m.item(i).text().strip().upper() in selected else Qt.Unchecked
+                m.item(i).setData(st, Qt.CheckStateRole)
+        self._refresh_ui()
+        self._block = False
+        self.selectionChanged.emit()
 
-        selected = {str(item).strip().upper() for item in items if str(item).strip()}
-        m.item(0).setData(Qt.Unchecked, Qt.CheckStateRole)
-        for i in range(1, m.rowCount()):
-            row = m.item(i)
-            state = Qt.Checked if row.text().strip().upper() in selected else Qt.Unchecked
-            row.setData(state, Qt.CheckStateRole)
-        self._refresh_text()
-
-    def _on_pressed(self, index):
-        item = self.model().itemFromIndex(index)
-        new_state = Qt.Unchecked if item.data(Qt.CheckStateRole) == Qt.Checked else Qt.Checked
-        item.setData(new_state, Qt.CheckStateRole)
-        if index.row() == 0 and new_state == Qt.Checked:
-            for i in range(1, self.model().rowCount()): self.model().item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
-        elif new_state == Qt.Checked:
-            self.model().item(0).setData(Qt.Unchecked, Qt.CheckStateRole)
-        self._refresh_text()
-        self.currentTextChanged.emit(self.currentText())
-
-    def _refresh_text(self):
+    def _refresh_ui(self):
         checked = self.checked_items()
-        self.lineEdit().setText(self._all_label if not checked else ", ".join(checked))
+        txt = self._all_label if self.is_all_selected() or not checked else ", ".join(checked)
+        self.lineEdit().setText(txt)
+        self.setEditText(txt)
 
 
 class NumericSortProxy(QSortFilterProxyModel):
@@ -167,6 +214,7 @@ class ColumnsDialog(QDialog):
         self.btn_all = QPushButton("Marcar Todos")
         self.btn_none = QPushButton("Desmarcar Todos")
         btn_layout.addWidget(self.btn_all)
+        btn_none.clicked.connect(lambda: [c.setChecked(False) for c in self.checks])
         btn_layout.addWidget(self.btn_none)
         layout.addLayout(btn_layout)
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

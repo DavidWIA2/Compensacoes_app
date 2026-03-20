@@ -74,16 +74,11 @@ THEME_DARK = {
 
 COLS = DISPLAY_COLUMN_LABELS
 
-def _svg_data_uri(svg: str) -> str:
-    encoded = (
-        svg.replace("%", "%25")
-        .replace("#", "%23")
-        .replace("<", "%3C")
-        .replace(">", "%3E")
-        .replace('"', "'")
-        .replace("\n", "")
-    )
-    return f"data:image/svg+xml;utf8,{encoded}"
+import base64
+from app.ui.components.ui_utils import resource_path
+
+def _svg_to_base64(svg: str) -> str:
+    return base64.b64encode(svg.encode('utf-8')).decode('ascii')
 
 def get_app_qss(t: dict, sf: float = 1.0) -> str:
     """Gera o código CSS (QSS) completo, escalado e com suporte total a temas."""
@@ -93,20 +88,14 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
     radius = int(8 * sf)
     min_h_input = int(24 * sf)
     min_h_btn = int(30 * sf)
-    checkbox_mark = _svg_data_uri(
-        f"""
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
-            <path d="M2.2 6.1 4.7 8.5 9.7 3.4" fill="none" stroke="{t['btn_primary']}" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
-        </svg>
-        """
-    )
-    radio_dot = _svg_data_uri(
-        f"""
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12">
-            <circle cx="6" cy="6" r="2.35" fill="{t['btn_primary']}"/>
-        </svg>
-        """
-    )
+    
+    # Caminhos para os SVGs (agora arquivos físicos)
+    # Importante: No QSS do Qt, caminhos de arquivo precisam usar barras normais / e ser escapados se necessário.
+    # Mas aqui passaremos o caminho absoluto via resource_path.
+    t_off = resource_path("assets", "toggle_off.svg").replace("\\", "/")
+    t_on = resource_path("assets", "toggle_on.svg").replace("\\", "/")
+    r_off = resource_path("assets", "radio_off.svg").replace("\\", "/")
+    r_on = resource_path("assets", "radio_on.svg").replace("\\", "/")
     
     return f"""
         /* ===== Base ===== */
@@ -125,34 +114,60 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             background-color: {t['bg_panel']};
             border-top: 1px solid {t['input_border']};
         }}
-        QStatusBar::item {{
+        
+        /* ===== Toggle (CheckBox) - Resolvendo a distorção da bolinha ===== */
+        QCheckBox {{ 
+            color: {t['text']}; 
+            spacing: {max(int(10 * sf), 10)}px;
+            font-weight: 500;
+        }}
+        
+        QCheckBox::indicator {{
+            width: {max(int(40 * sf), 40)}px;
+            height: {max(int(20 * sf), 20)}px;
+            background: transparent;
             border: none;
         }}
-
-        QLabel {{ color: {t['text']}; }}
-        QLabel#StatusChip, QLabel#FormStateLabel {{
-            background-color: {t['btn_secondary_bg']};
-            border: 1px solid {t['input_border']};
-            border-radius: {max(int(7 * sf), 7)}px;
-            padding: {max(int(2 * sf), 2)}px {max(int(8 * sf), 8)}px;
+        
+        QCheckBox::indicator:unchecked {{
+            image: url({t_off});
         }}
-        QCheckBox, QRadioButton {{ color: {t['text']}; background: transparent; }}
+        
         QCheckBox::indicator:checked {{
-            background-color: {t['btn_secondary_hover']};
-            border: 1px solid {t['btn_primary_hover']};
-            border-radius: {max(int(3 * sf), 3)}px;
-            image: url("{checkbox_mark}");
+            image: url({t_on});
         }}
-        QRadioButton::indicator:checked {{
-            background-color: {t['btn_secondary_hover']};
-            border: 1px solid {t['btn_primary_hover']};
-            border-radius: {max(int(6 * sf), 6)}px;
-            image: url("{radio_dot}");
-        }}
-        QCheckBox::indicator:checked:hover, QRadioButton::indicator:checked:hover {{
-            background-color: {t['btn_secondary_pressed']};
+        
+        QCheckBox::indicator:hover {{
+            opacity: 0.9;
         }}
 
+        /* ===== Radio Button - Resolvendo a visibilidade e nitidez ===== */
+        QRadioButton {{ 
+            color: {t['text']}; 
+            spacing: {max(int(8 * sf), 8)}px;
+            font-weight: 500;
+        }}
+        
+        QRadioButton::indicator {{
+            width: {max(int(20 * sf), 20)}px;
+            height: {max(int(20 * sf), 20)}px;
+            background: transparent;
+            border: none;
+        }}
+        
+        QRadioButton::indicator:unchecked {{
+            image: url({r_off});
+        }}
+        
+        QRadioButton::indicator:checked {{
+            image: url({r_on});
+        }}
+        
+        QRadioButton::indicator:hover {{
+            opacity: 0.9;
+        }}
+
+        /* Resto dos estilos */
         QGroupBox {{
             font-weight: 800;
             border: 1px solid {t['input_border']};
@@ -290,11 +305,7 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             border: 1px solid {t['btn_primary']};
         }}
 
-        QPushButton:disabled,
-        QPushButton[kind="primary"]:disabled,
-        QPushButton[kind="secondary"]:disabled,
-        QPushButton[kind="success"]:disabled,
-        QPushButton[kind="danger"]:disabled {{
+        QPushButton:disabled {{
             background-color: {t['btn_disabled_bg']};
             color: {t['placeholder']};
             border: 1px solid {t['input_border']};
@@ -334,4 +345,20 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
         QSplitter::handle {{ background: {t['splitter_handle']}; }}
         QMenu {{ background-color: {t['bg_panel']}; color: {t['text']}; border: 1px solid {t['input_border']}; }}
         QMenu::item:selected {{ background-color: {t['table_sel_bg']}; color: {t['table_sel_fg']}; }}
+
+        /* ===== Status Bar Chips ===== */
+        QLabel#StatusChip, QLabel#FormStateLabel {{
+            background-color: {t['btn_secondary_bg']};
+            color: {t['text']};
+            border: 1px solid {t['input_border']};
+            border-radius: {int(6*sf)}px;
+            padding: 2px {int(10*sf)}px;
+            font-weight: 700;
+            font-size: {int(10*sf)}px;
+            margin-left: {int(4*sf)}px;
+        }}
+        QLabel#FormStateLabel {{
+            color: {t['btn_primary']};
+            border-color: {t['btn_primary']};
+        }}
     """

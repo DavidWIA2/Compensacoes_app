@@ -378,7 +378,7 @@ class DataTab(QWidget):
         label_w = max(int(112 * self.sf), 96)
         primary_field_w = max(int(170 * self.sf), 126)
         secondary_field_w = max(int(150 * self.sf), 110)
-        aux_col_w = max(int(66 * self.sf), 56)
+        aux_col_w = max(int(85 * self.sf), 75)
 
         g = QGroupBox("Cadastro / Edição")
         g.setObjectName("formGroup")
@@ -465,14 +465,14 @@ class DataTab(QWidget):
 
         l.setColumnMinimumWidth(0, label_w)
         l.setColumnMinimumWidth(1, primary_field_w)
-        l.setColumnMinimumWidth(2, aux_col_w)
+        l.setColumnMinimumWidth(2, aux_col_w + int(10 * self.sf))
         l.setColumnMinimumWidth(3, label_w)
         l.setColumnMinimumWidth(4, secondary_field_w)
         l.setRowMinimumHeight(0, input_h)
         l.setRowMinimumHeight(1, input_h)
         l.setRowMinimumHeight(2, input_h)
         l.setRowMinimumHeight(3, input_h)
-        l.setColumnStretch(1, 2)
+        l.setColumnStretch(1, 1)
         l.setColumnStretch(2, 0)
         l.setColumnStretch(4, 1)
         return g
@@ -489,6 +489,7 @@ class DataTab(QWidget):
         self.btn_map_full = QPushButton("Mapa Tela Cheia")
         self.btn_street_view = QPushButton("Street View")
         self.btn_add_layer = QPushButton("Adicionar Camada GIS")
+        self.btn_add_layer.setToolTip("Adicione camadas externas ao mapa (.geojson, .json ou .kml)")
         self.chk_heatmap = QCheckBox("Mapa de Calor")
         self.combo_heatmap_type = QComboBox()
         self.combo_heatmap_type.addItems(["Pendentes", "Realizadas", "Tudo"])

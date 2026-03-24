@@ -1,4 +1,5 @@
 from app.models.display_columns import DISPLAY_COLUMN_LABELS
+from app.ui.components.ui_utils import resource_path
 
 
 # --- TEMAS VISUAIS ---
@@ -74,12 +75,6 @@ THEME_DARK = {
 
 COLS = DISPLAY_COLUMN_LABELS
 
-import base64
-from app.ui.components.ui_utils import resource_path
-
-def _svg_to_base64(svg: str) -> str:
-    return base64.b64encode(svg.encode('utf-8')).decode('ascii')
-
 def get_app_qss(t: dict, sf: float = 1.0) -> str:
     """Gera o código CSS (QSS) completo, escalado e com suporte total a temas."""
     font_size = int(12 * sf)
@@ -130,11 +125,11 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
         }}
         
         QCheckBox::indicator:unchecked {{
-            image: url({t_off});
+            image: url("{t_off}");
         }}
         
         QCheckBox::indicator:checked {{
-            image: url({t_on});
+            image: url("{t_on}");
         }}
         
         QCheckBox::indicator:hover {{
@@ -156,11 +151,11 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
         }}
         
         QRadioButton::indicator:unchecked {{
-            image: url({r_off});
+            image: url("{r_off}");
         }}
         
         QRadioButton::indicator:checked {{
-            image: url({r_on});
+            image: url("{r_on}");
         }}
         
         QRadioButton::indicator:hover {{
@@ -216,7 +211,7 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             border-bottom: {int(3*sf)}px solid {t['btn_primary']};
         }}
 
-        QLineEdit, QComboBox {{
+        QLineEdit, QComboBox, QTextEdit, QPlainTextEdit {{
             background-color: {t['input_bg']};
             border: 1px solid {t['input_border']};
             border-radius: {radius}px;
@@ -224,7 +219,7 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             color: {t['input_text']};
             min-height: {min_h_input}px;
         }}
-        QLineEdit::placeholder {{ color: {t['placeholder']}; }}
+        QLineEdit::placeholder, QTextEdit::placeholder, QPlainTextEdit::placeholder {{ color: {t['placeholder']}; }}
         
         QComboBox QAbstractItemView {{
             background-color: {t['input_bg']};

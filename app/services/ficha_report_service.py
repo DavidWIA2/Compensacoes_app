@@ -1,0 +1,202 @@
+import os
+from typing import List
+from xml.sax.saxutils import escape
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from app.models.compensacao import Compensacao
+from app.services.coordinates import format_coordinate_pair
+from app.ui.components.ui_utils import resource_path
+
+
+def _resolve_ficha_logo_path() -> str:
+    candidate_paths = [
+        resource_path("assets", "logo_prefeitura.png"),
+        os.path.join(os.path.expanduser("~"), "Downloads", "logo prefeitura.png"),
+        resource_path("assets", "Logo_512.png"),
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+    return candidate_paths[-1]
+
+
+def _build_ficha_header(styles):
+    logo_path = _resolve_ficha_logo_path()
+    logo = Spacer(1, 1)
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.55 * inch, height=0.97 * inch)
+
+    header_title = ParagraphStyle(
+        "FichaHeaderTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        alignment=1,
+        textColor=colors.black,
+    )
+    header_text = ParagraphStyle(
+        "FichaHeaderText",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        alignment=1,
+        textColor=colors.black,
+    )
+
+    lines = [
+        Paragraph("PREFEITURA MUNICIPAL DE S&Atilde;O CARLOS", header_title),
+        Paragraph("Capital Nacional da Tecnologia", header_text),
+        Paragraph("Secretaria Municipal de Conserva&ccedil;&atilde;o e Qualidade Urbana", header_text),
+        Paragraph("Departamento de Poda de &Aacute;rvores", header_text),
+        Paragraph("Se&ccedil;&atilde;o de Recupera&ccedil;&atilde;o Ambiental", header_text),
+    ]
+
+    table = Table([[logo, lines]], colWidths=[1.7 * inch, 4.5 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    return [
+        table,
+        Spacer(1, 0.12 * inch),
+        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#7A7A7A")),
+        Spacer(1, 0.18 * inch),
+    ]
+
+
+def _status_label(record: Compensacao) -> str:
+    return "CONCLU\u00cdDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE"
+
+
+def _build_ficha_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
+    rows = [
+        ["Of\u00edcio/Processo:", str(record.oficio_processo or ""), "Eletr\u00f4nico:", str(record.eletronico or "")],
+        ["Av. T\u00e9cnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
+        ["Status:", _status_label(record), "Microbacia:", str(record.microbacia or "")],
+        ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
+        ["End. Ocorr\u00eancia:", str(record.endereco or ""), "", ""],
+        ["End. Plantio:", str(record.endereco_plantio or ""), "", ""],
+    ]
+
+    ocorrencia_coords = format_coordinate_pair(record.latitude, record.longitude)
+    plantio_coords = format_coordinate_pair(record.latitude_plantio, record.longitude_plantio)
+    if ocorrencia_coords:
+        rows.append(["Coord. Ocorr\u00eancia:", ocorrencia_coords, "", ""])
+    if plantio_coords:
+        rows.append(["Coord. Plantio:", plantio_coords, "", ""])
+    if not ocorrencia_coords and not plantio_coords:
+        rows.append(["Coordenadas:", "", "", ""])
+    if str(observation or "").strip():
+        rows.append(["Observa\u00e7\u00f5es:", str(observation).strip(), "", ""])
+
+    return rows
+
+
+def export_individual_pdf(filepath: str, record: Compensacao, observation: str = ""):
+    def paragraph_text(value: object) -> str:
+        return escape(str(value or "")).replace("\r\n", "\n").replace("\n", "<br/>")
+
+    doc = SimpleDocTemplate(
+        filepath,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=28,
+        bottomMargin=40,
+    )
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "FichaMainTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        textColor=colors.HexColor("#2C3E50"),
+        alignment=1,
+        spaceAfter=14,
+    )
+    label_style = ParagraphStyle(
+        "FichaLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#2C3E50"),
+    )
+    value_style = ParagraphStyle(
+        "FichaValue",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+    )
+    signature_style = ParagraphStyle(
+        "FichaSignature",
+        parent=styles["Normal"],
+        alignment=1,
+        fontSize=12,
+    )
+    signature_subtitle_style = ParagraphStyle(
+        "FichaSignatureSubtitle",
+        parent=styles["Normal"],
+        alignment=1,
+        fontSize=10,
+    )
+
+    elements = [
+        *_build_ficha_header(styles),
+        Paragraph("Ficha de Compensa\u00e7\u00e3o Ambiental", title_style),
+        Spacer(1, 0.12 * inch),
+    ]
+
+    data = _build_ficha_rows(record, observation)
+    table_rows = []
+    for row in data:
+        table_row = [
+            Paragraph(paragraph_text(row[0]), label_style),
+            Paragraph(paragraph_text(row[1]), value_style),
+        ]
+        table_row.append(Paragraph(paragraph_text(row[2]), label_style) if row[2] else "")
+        table_row.append(Paragraph(paragraph_text(row[3]), value_style) if row[3] else "")
+        table_rows.append(table_row)
+
+    table = Table(table_rows, colWidths=[120, 150, 100, 140])
+    table_style = [
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+    ]
+
+    for row_index, row in enumerate(data):
+        if row[2] == "" and row[3] == "":
+            table_style.append(("SPAN", (1, row_index), (3, row_index)))
+    table.setStyle(TableStyle(table_style))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.5 * inch))
+    elements.append(Spacer(1, 1.5 * inch))
+    elements.append(Paragraph("_" * 40, signature_style))
+    elements.append(Paragraph("Assinatura do T\u00e9cnico Respons\u00e1vel", signature_subtitle_style))
+
+    doc.build(elements)

@@ -26,9 +26,10 @@ from app.services.geocode_update_service import find_record_by_excel_row
 from app.services.app_settings import AppSettings
 from app.services.validation import validate_compensacao
 from app.services.report_service import (
-    export_csv, export_pdf, export_dashboard_pdf, export_individual_pdf,
+    export_csv, export_pdf, export_dashboard_pdf,
     export_excel_two_sheets
 )
+from app.services.ficha_report_service import export_individual_pdf
 from app.services.coordinates import build_heatmap_point
 from app.services.gis_service import GisService
 from app.services.records_service import (
@@ -1540,8 +1541,16 @@ class MainWindow(QMainWindow):
         if not self.selected: return
         path = self._get_save_path("Salvar Ficha PDF", "PDF (*.pdf)")
         if path:
+            observacao, ok = QInputDialog.getMultiLineText(
+                self,
+                "Observacao da Ficha",
+                "Observacao (opcional):",
+                "",
+            )
+            if not ok:
+                return
             try:
-                export_individual_pdf(path, self.selected)
+                export_individual_pdf(path, self.selected, observacao.strip())
             except Exception as exc:
                 logger.error(f"Falha ao exportar ficha em PDF para {path}: {exc}", exc_info=True)
                 QMessageBox.critical(self, "Erro", f"Falha ao exportar ficha: {exc}")

@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.compensacao import Compensacao
 from app.models.display_columns import (
@@ -18,6 +18,7 @@ from app.models.display_columns import (
     display_column_label,
 )
 from app.services.coordinates import format_coordinate_pair
+from app.ui.components.ui_utils import resource_path
 
 
 ALL_COLUMNS = DISPLAY_COLUMNS
@@ -42,7 +43,7 @@ def _format_individual_status(record: Compensacao) -> str:
     return "CONCLUÍDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE"
 
 
-def _build_individual_pdf_rows(record: Compensacao) -> List[List[str]]:
+def _build_individual_pdf_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
     rows = [
         ["Ofício/Processo:", str(record.oficio_processo or ""), "Eletrônico:", str(record.eletronico or "")],
         ["Av. Técnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
@@ -60,8 +61,66 @@ def _build_individual_pdf_rows(record: Compensacao) -> List[List[str]]:
         rows.append(["Coord. Plantio:", plantio_coords, "", ""])
     if not main_coords and not plantio_coords:
         rows.append(["Coordenadas:", "", "", ""])
+    if str(observation or "").strip():
+        rows.append(["Observações:", str(observation).strip(), "", ""])
 
     return rows
+
+
+def _build_individual_pdf_header(styles):
+    logo_path = resource_path("assets", "Logo_512.png")
+    logo = Spacer(1, 1)
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.15 * inch, height=0.95 * inch)
+
+    header_title = ParagraphStyle(
+        "FichaHeaderTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        alignment=1,
+        textColor=colors.black,
+    )
+    header_text = ParagraphStyle(
+        "FichaHeaderText",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        alignment=1,
+        textColor=colors.black,
+    )
+
+    lines = [
+        Paragraph("PREFEITURA MUNICIPAL DE S&Atilde;O CARLOS", header_title),
+        Paragraph("Capital Nacional da Tecnologia", header_text),
+        Paragraph("Secretaria Municipal de Conserva&ccedil;&atilde;o e Qualidade Urbana", header_text),
+        Paragraph("Departamento de Poda de &Aacute;rvores", header_text),
+        Paragraph("Se&ccedil;&atilde;o de Recupera&ccedil;&atilde;o Ambiental", header_text),
+    ]
+
+    table = Table([[logo, lines]], colWidths=[1.35 * inch, 4.85 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    return [
+        table,
+        Spacer(1, 0.12 * inch),
+        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#7A7A7A")),
+        Spacer(1, 0.18 * inch),
+    ]
 
 
 def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict]:

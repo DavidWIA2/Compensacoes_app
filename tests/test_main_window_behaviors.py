@@ -550,6 +550,37 @@ def test_export_csv_reports_failure_without_raising(monkeypatch, tmp_path):
     window.close()
 
 
+def test_export_ficha_pdf_prompts_observation_and_forwards_it(monkeypatch, tmp_path):
+    window = MainWindow()
+    window.selected = make_record(oficio_processo="ABC-1")
+    captured = {}
+
+    monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "ficha.pdf"))
+    monkeypatch.setattr(
+        main_window_module.QInputDialog,
+        "getMultiLineText",
+        lambda *args, **kwargs: ("Observacao de teste", True),
+    )
+    monkeypatch.setattr(
+        main_window_module,
+        "export_individual_pdf",
+        lambda path, record, observation="": captured.update(
+            {
+                "path": path,
+                "record": record,
+                "observation": observation,
+            }
+        ),
+    )
+
+    window.export_ficha_pdf()
+
+    assert captured["path"].endswith("ficha.pdf")
+    assert captured["record"] is window.selected
+    assert captured["observation"] == "Observacao de teste"
+    window.close()
+
+
 def test_export_dashboard_pdf_uses_images_from_dash_tab(monkeypatch, tmp_path):
     window = MainWindow()
     window.records = [make_record(compensacao="10", microbacia="Gregorio")]
@@ -1217,4 +1248,49 @@ def test_save_edit_blocks_invalid_payload(monkeypatch):
 
     assert saved == []
     assert warnings and "Compensação" in warnings[0]
+    window.close()
+def test_save_edit_requires_endereco_plantio_when_compensado(monkeypatch):
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == "dummy.xlsx" else real_exists(p))
+
+    window = MainWindow()
+    saved = []
+    warnings = []
+
+    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window, "reload", lambda: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+
+    window.excel.path = "dummy.xlsx"
+    window.selected = make_record()
+    window._fill_form(window.selected)
+
+    window.data_tab.chk_compensado.setChecked(True)
+    window.data_tab.in_end_plantio.setText("")
+
+    assert window.data_tab.btn_save_edit.isEnabled() is False
+
+    window.save_edit()
+
+    assert saved == []
+    assert warnings == ["Preencha Endereco Plantio para salvar um registro compensado."]
+    window.close()
+
+
+def test_save_edit_reenables_when_endereco_plantio_is_filled(monkeypatch):
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == "dummy.xlsx" else real_exists(p))
+
+    window = MainWindow()
+    window.excel.path = "dummy.xlsx"
+    window.selected = make_record()
+    window._fill_form(window.selected)
+
+    window.data_tab.chk_compensado.setChecked(True)
+    window.data_tab.in_end_plantio.setText("")
+    assert window.data_tab.btn_save_edit.isEnabled() is False
+
+    window.data_tab.in_end_plantio.setText("Rua do Plantio, 123")
+    assert window.data_tab.btn_save_edit.isEnabled() is True
+
     window.close()

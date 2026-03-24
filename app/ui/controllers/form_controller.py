@@ -12,6 +12,7 @@ from app.ui.components.ui_utils import msg_confirm
 
 
 class FormController:
+    _MISSING_PLANTIO_ERROR = "Preencha Endereco Plantio para salvar um registro compensado."
     _DIRTY_GROUP_TITLE = "Cadastro / Edição *"
     _CLEAN_GROUP_TITLE = "Cadastro / Edição"
 
@@ -197,8 +198,14 @@ class FormController:
         has_excel = bool(self.window.excel.path and os.path.exists(self.window.excel.path))
         has_selected = self.window.selected is not None
         is_dirty = self.has_pending_changes()
+        compensado_requires_plantio = (
+            self.window.data_tab.chk_compensado.isChecked()
+            and not self.window.data_tab.in_end_plantio.text().strip()
+        )
         self.window.data_tab.btn_add.setEnabled(has_excel)
-        self.window.data_tab.btn_save_edit.setEnabled(has_excel and has_selected and is_dirty)
+        self.window.data_tab.btn_save_edit.setEnabled(
+            has_excel and has_selected and is_dirty and not compensado_requires_plantio
+        )
         self.window.data_tab.btn_delete.setEnabled(has_excel and has_selected)
         self.window.data_tab.btn_ficha_pdf.setEnabled(has_excel and has_selected)
 
@@ -267,6 +274,9 @@ class FormController:
 
     def save_edit(self):
         if not self.window.excel.path or not self.window.selected:
+            return
+        if self.window.data_tab.chk_compensado.isChecked() and not self.window.data_tab.in_end_plantio.text().strip():
+            QMessageBox.warning(self.window, "Erro", self._MISSING_PLANTIO_ERROR)
             return
         record = self.read_form()
         error = validate_compensacao(record)

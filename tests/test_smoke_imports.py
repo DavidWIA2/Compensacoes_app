@@ -6,6 +6,7 @@ def test_core_modules_import_cleanly():
 
     import app.main  # noqa: F401
     import app.services.excel_service  # noqa: F401
+    import app.services.ficha_report_service  # noqa: F401
     import app.services.gis_service  # noqa: F401
     import app.services.report_service  # noqa: F401
     import app.ui.main_window  # noqa: F401
@@ -32,9 +33,27 @@ def test_main_window_close_stops_owned_timers(ui_window_factory, qt_app):
 def test_theme_qss_emphasizes_checked_checkboxes_and_radios():
     from app.ui.components.themes import THEME_DARK, get_app_qss
 
-    qss = get_app_qss(THEME_DARK, 1.0)
+    qss = get_app_qss(THEME_DARK, 1.0).replace("\\", "/")
 
     assert "QCheckBox::indicator:checked" in qss
     assert "QRadioButton::indicator:checked" in qss
     assert THEME_DARK["btn_primary_hover"] in qss
-    assert "assets/toggle_on.svg" in qss.replace("\\", "/")
+    assert 'image: url("' in qss
+    assert 'assets/toggle_on.svg")' in qss
+    assert 'assets/radio_on.svg")' in qss
+    assert "QTextEdit" in qss
+    assert "QPlainTextEdit" in qss
+
+
+def test_columns_dialog_buttons_work_without_name_errors(qt_app):
+    from app.ui.components.widgets import ColumnsDialog
+
+    dialog = ColumnsDialog(None, ["Ofício", "Microbacia"], {0: True, 1: False})
+
+    dialog.btn_none.click()
+    assert all(not check.isChecked() for check in dialog.checks)
+
+    dialog.btn_all.click()
+    assert all(check.isChecked() for check in dialog.checks)
+
+    dialog.close()

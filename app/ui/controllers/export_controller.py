@@ -1,16 +1,16 @@
 import os
 from typing import Dict, List, Tuple
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog
 
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS
 from app.services.error_service import friendly_error_message
+from app.services.ficha_report_service import export_individual_pdf
 from app.services.records_service import compute_metrics
 from app.services.report_service import (
     export_csv,
     export_dashboard_pdf,
     export_excel_two_sheets,
-    export_individual_pdf,
     export_pdf,
 )
 from app.utils.logger import logger
@@ -129,9 +129,17 @@ class ExportController:
         path = self.window._get_save_path("Salvar Ficha PDF", "PDF (*.pdf)")
         if not path:
             return
+        observacao, ok = QInputDialog.getMultiLineText(
+            self.window,
+            "Observacao da Ficha",
+            "Observacao (opcional):",
+            "",
+        )
+        if not ok:
+            return
         main_window_module = self._main_window_module()
         try:
-            main_window_module.export_individual_pdf(path, self.window.selected)
+            main_window_module.export_individual_pdf(path, self.window.selected, observacao.strip())
         except Exception as exc:
             logger.error(f"Falha ao exportar ficha em PDF para {path}: {exc}", exc_info=True)
             title, message = friendly_error_message(exc, "exportar a ficha em PDF")

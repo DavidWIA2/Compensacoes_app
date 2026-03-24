@@ -214,7 +214,6 @@ class ColumnsDialog(QDialog):
         self.btn_all = QPushButton("Marcar Todos")
         self.btn_none = QPushButton("Desmarcar Todos")
         btn_layout.addWidget(self.btn_all)
-        btn_none.clicked.connect(lambda: [c.setChecked(False) for c in self.checks])
         btn_layout.addWidget(self.btn_none)
         layout.addLayout(btn_layout)
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

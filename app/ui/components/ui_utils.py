@@ -50,6 +50,7 @@ def msg_confirm(parent, title: str, text: str) -> bool:
     msg.setIcon(QMessageBox.Question)
     btn_sim = msg.addButton("Sim", QMessageBox.YesRole)
     btn_nao = msg.addButton("Não", QMessageBox.NoRole)
-    msg.setDefaultButton(btn_nao)
+    msg.setDefaultButton(btn_sim)
+    msg.setEscapeButton(btn_nao)
     msg.exec()
     return msg.clickedButton() == btn_sim

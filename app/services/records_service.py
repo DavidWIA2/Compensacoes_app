@@ -3,6 +3,7 @@ import unicodedata
 from typing import Dict, Iterable, List, Sequence, Optional
 
 from app.models.compensacao import Compensacao
+from app.services.plantio_service import record_plantio_addresses
 
 
 def remove_accents(input_str: str) -> str:
@@ -36,8 +37,9 @@ def row_is_compensado(c: Compensacao) -> bool:
 
 
 def build_search_blob(record: Compensacao) -> str:
+    plantio_addresses = " ".join(record_plantio_addresses(record))
     blob = (
-        f"{record.oficio_processo} {record.endereco} {record.endereco_plantio} "
+        f"{record.oficio_processo} {record.endereco} {record.endereco_plantio} {plantio_addresses} "
         f"{record.microbacia} {record.av_tec} {record.caixa} {record.eletronico}"
     ).lower()
     return remove_accents(blob)

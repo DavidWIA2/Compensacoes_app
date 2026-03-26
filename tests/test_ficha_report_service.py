@@ -1,5 +1,11 @@
 from app.models.compensacao import Compensacao
-from app.services.ficha_report_service import _build_ficha_rows, _resolve_ficha_logo_path, export_individual_pdf
+from app.models.plantio_item import PlantioItem
+from app.services.ficha_report_service import (
+    _build_ficha_rows,
+    _build_plantios_rows,
+    _resolve_ficha_logo_path,
+    export_individual_pdf,
+)
 
 
 def make_record(**overrides) -> Compensacao:
@@ -43,3 +49,19 @@ def test_export_individual_pdf_generates_file_with_header_and_observation(tmp_pa
 
     assert path.exists()
     assert path.stat().st_size > 0
+
+
+def test_build_plantios_rows_lists_all_registered_plantios():
+    rows = _build_plantios_rows(
+        make_record(
+            plantios=[
+                PlantioItem(sequence=1, endereco="Rua Plantio A", qtd_mudas="3", latitude="-22.01", longitude="-47.89"),
+                PlantioItem(sequence=2, endereco="Rua Plantio B", qtd_mudas="7", latitude="-22.02", longitude="-47.90"),
+            ]
+        )
+    )
+
+    assert rows == [
+        ["1", "Rua Plantio A", "3", "-22.01, -47.89"],
+        ["2", "Rua Plantio B", "7", "-22.02, -47.90"],
+    ]

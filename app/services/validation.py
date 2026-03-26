@@ -1,6 +1,7 @@
 from datetime import date
 
 from app.models.compensacao import Compensacao
+from app.services.plantio_service import validate_record_plantios
 from app.services.records_service import extract_year
 
 
@@ -73,5 +74,9 @@ def validate_compensacao(c: Compensacao) -> str:
     lat_lon_err = _validate_lat_lon(c)
     if lat_lon_err:
         return lat_lon_err
+
+    plantio_err = validate_record_plantios(c)
+    if plantio_err:
+        return plantio_err
 
     return ""

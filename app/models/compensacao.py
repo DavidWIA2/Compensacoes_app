@@ -1,5 +1,7 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+from app.models.plantio_item import PlantioItem
 
 @dataclass
 class Compensacao:
@@ -19,3 +21,4 @@ class Compensacao:
     latitude: Optional[str] = ""
     longitude: Optional[str] = ""
     uid: str = ""
+    plantios: List[PlantioItem] = field(default_factory=list)

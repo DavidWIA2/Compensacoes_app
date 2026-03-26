@@ -3,6 +3,7 @@ import pytest
 import openpyxl
 
 from app.models.compensacao import Compensacao
+from app.models.plantio_item import PlantioItem
 from app.services.excel_service import BACKUP_FOLDER_NAME, ExcelService
 from app.services.records_service import remove_accents
 
@@ -221,3 +222,35 @@ def test_read_all_requires_loaded_path():
 
     with pytest.raises(ValueError, match="Nenhum arquivo Excel carregado"):
         service.read_all()
+
+
+def test_save_edit_roundtrip_persists_hidden_plantios_sheet(tmp_path):
+    path = tmp_path / "compensacoes_multi.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+    record = records[0]
+    record.compensado = "SIM"
+    record.plantios = [
+        PlantioItem(sequence=1, endereco="Rua Plantio A", qtd_mudas="3", latitude="-22.01", longitude="-47.89"),
+        PlantioItem(sequence=2, endereco="Rua Plantio B", qtd_mudas="5", latitude="-22.02", longitude="-47.90"),
+    ]
+
+    service.save_edit(record)
+
+    reloaded_wb = openpyxl.load_workbook(path)
+    assert "Plantios" in reloaded_wb.sheetnames
+    plantio_ws = reloaded_wb["Plantios"]
+    assert plantio_ws.sheet_state == "hidden"
+    assert plantio_ws.max_row == 3
+    assert plantio_ws.cell(row=2, column=3).value == "Rua Plantio A"
+    assert plantio_ws.cell(row=3, column=3).value == "Rua Plantio B"
+
+    reloaded_service = ExcelService()
+    reloaded_records = reloaded_service.load(str(path))
+
+    assert len(reloaded_records[0].plantios) == 2
+    assert reloaded_records[0].plantios[0].endereco == "Rua Plantio A"
+    assert reloaded_records[0].plantios[1].qtd_mudas == "5"
+    assert reloaded_records[0].endereco_plantio == "2 áreas / 8 mudas"

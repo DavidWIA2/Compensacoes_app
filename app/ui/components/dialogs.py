@@ -4,15 +4,258 @@ from PySide6.QtCore import Qt, QUrl, QTimer
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, 
     QLineEdit, QComboBox, QWidget, QSizePolicy, QMessageBox, QApplication, QCheckBox,
-    QTableView, QHeaderView
+    QTableView, QHeaderView, QDialogButtonBox, QTableWidget, QTableWidgetItem,
+    QFormLayout,
+    QAbstractItemView
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from app.models.display_columns import display_column_index
-from app.services.coordinates import build_heatmap_point
+from app.services.coordinates import build_heatmap_points
 from app.ui.components.widgets import CheckableComboBox, MapBridge, DebugPage
 from app.services.geocode_service import geocode_address_arcgis
+from app.services.plantio_service import build_plantios_from_rows, clone_plantios, parse_numeric_value
+
+
+class PlantioRowEditorDialog(QDialog):
+    def __init__(self, parent, endereco="", qtd_mudas=""):
+        super().__init__(parent)
+        self.setWindowTitle("Editar Plantio")
+        self.resize(520, 170)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        self.in_endereco = QLineEdit(str(endereco or ""))
+        self.in_qtd_mudas = QLineEdit(str(qtd_mudas or ""))
+
+        form.addRow("Endereco de Plantio:", self.in_endereco)
+        form.addRow("Qtd. mudas:", self.in_qtd_mudas)
+        layout.addLayout(form)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def values(self):
+        return self.in_endereco.text().strip(), self.in_qtd_mudas.text().strip()
+
+
+class PlantiosDialog(QDialog):
+    def __init__(self, parent, plantios, compensacao_total=""):
+        super().__init__(parent)
+        self.setWindowTitle("Plantios da Compensação")
+        self.resize(760, 420)
+        self._previous_plantios = clone_plantios(plantios)
+        self._result_plantios = clone_plantios(plantios)
+        self._compensacao_total = str(compensacao_total or "").strip()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.lbl_hint = QLabel(
+            "Cadastre cada endereço de plantio com a quantidade de mudas usada naquela área."
+        )
+        self.lbl_total = QLabel("")
+        self.lbl_total.setObjectName("FormStateLabel")
+
+        layout.addWidget(self.lbl_hint)
+        layout.addWidget(self.lbl_total)
+
+        self.table = QTableWidget(0, 2, self)
+        self.table.setHorizontalHeaderLabels(["Endereço de Plantio", "Qtd. mudas"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table, 1)
+
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(8)
+        self.btn_add_row = QPushButton("Adicionar Linha")
+        self.btn_edit_row = QPushButton("Editar Linha")
+        self.btn_remove_row = QPushButton("Remover Linha")
+        self.btn_add_row.setProperty("kind", "secondary")
+        self.btn_edit_row.setProperty("kind", "secondary")
+        self.btn_remove_row.setProperty("kind", "secondary")
+        buttons_row.addWidget(self.btn_add_row)
+        buttons_row.addWidget(self.btn_edit_row)
+        buttons_row.addWidget(self.btn_remove_row)
+        buttons_row.addStretch(1)
+        layout.addLayout(buttons_row)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(self.button_box)
+
+        self.btn_add_row.clicked.connect(self.add_empty_row)
+        self.btn_edit_row.clicked.connect(self.edit_selected_row)
+        self.btn_remove_row.clicked.connect(self.remove_selected_row)
+        self.button_box.accepted.connect(self._accept_with_validation)
+        self.button_box.rejected.connect(self.reject)
+        self.table.itemChanged.connect(self._refresh_totals)
+        self.table.itemSelectionChanged.connect(self._refresh_row_actions)
+
+        for plantio in self._previous_plantios:
+            self._append_row(plantio.endereco, plantio.qtd_mudas)
+        if self.table.rowCount() == 0:
+            self.add_empty_row(start_edit=False)
+        else:
+            self.table.setCurrentCell(0, 0)
+        self._refresh_totals()
+        self._refresh_row_actions()
+
+    @property
+    def plantios(self):
+        return clone_plantios(self._result_plantios)
+
+    def _append_row(self, endereco="", qtd_mudas=""):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(str(endereco or "")))
+        self.table.setItem(row, 1, QTableWidgetItem(str(qtd_mudas or "")))
+
+    def add_empty_row(self, start_edit: bool = True):
+        self._append_row("", "")
+        self.table.setCurrentCell(self.table.rowCount() - 1, 0)
+        self._refresh_totals()
+        self._refresh_row_actions()
+        if start_edit:
+            self.edit_selected_row()
+
+    def edit_selected_row(self):
+        if self.table.rowCount() == 0:
+            self.add_empty_row(start_edit=False)
+
+        row = self.table.currentRow()
+        if row < 0:
+            row = self.table.rowCount() - 1
+
+        column = self.table.currentColumn()
+        if column < 0:
+            column = 0
+
+        self.table.setCurrentCell(row, column)
+        self._edit_row_at(row)
+
+    def _edit_row_at(self, row: int):
+        endereco_item = self.table.item(row, 0)
+        qtd_item = self.table.item(row, 1)
+        editor = PlantioRowEditorDialog(
+            self,
+            endereco=endereco_item.text() if endereco_item else "",
+            qtd_mudas=qtd_item.text() if qtd_item else "",
+        )
+        if not editor.exec():
+            return
+
+        endereco, qtd_mudas = editor.values()
+        if endereco_item is None:
+            endereco_item = QTableWidgetItem("")
+            self.table.setItem(row, 0, endereco_item)
+        if qtd_item is None:
+            qtd_item = QTableWidgetItem("")
+            self.table.setItem(row, 1, qtd_item)
+
+        endereco_item.setText(endereco)
+        qtd_item.setText(qtd_mudas)
+        self.table.setCurrentCell(row, 0)
+        self._refresh_totals()
+
+    def remove_selected_row(self):
+        row = self.table.currentRow()
+        if row < 0:
+            row = self.table.rowCount() - 1
+        if row < 0:
+            return
+        self.table.removeRow(row)
+        if self.table.rowCount() == 0:
+            self.add_empty_row(start_edit=False)
+            return
+        next_row = min(row, self.table.rowCount() - 1)
+        self.table.setCurrentCell(next_row, 0)
+        self._refresh_totals()
+        self._refresh_row_actions()
+
+    def _refresh_row_actions(self):
+        has_rows = self.table.rowCount() > 0
+        self.btn_edit_row.setEnabled(has_rows)
+        self.btn_remove_row.setEnabled(has_rows)
+
+    def _rows_from_table(self):
+        rows = []
+        for row in range(self.table.rowCount()):
+            endereco_item = self.table.item(row, 0)
+            qtd_item = self.table.item(row, 1)
+            rows.append(
+                (
+                    endereco_item.text().strip() if endereco_item else "",
+                    qtd_item.text().strip() if qtd_item else "",
+                )
+            )
+        return rows
+
+    def _refresh_totals(self, *_args):
+        total = 0.0
+        invalid = False
+        rows = self._rows_from_table()
+        for endereco, qtd in rows:
+            if not endereco and not qtd:
+                continue
+            try:
+                total += parse_numeric_value(qtd)
+            except ValueError:
+                invalid = True
+
+        if invalid:
+            total_text = "Soma dos plantios: valor inválido"
+        else:
+            total_text = f"Soma dos plantios: {total:g} mudas"
+
+        if self._compensacao_total:
+            total_text = f"{total_text} | Compensação: {self._compensacao_total}"
+        self.lbl_total.setText(total_text)
+
+    def _accept_with_validation(self):
+        rows = self._rows_from_table()
+        plantios = build_plantios_from_rows(rows, self._previous_plantios)
+        for index, item in enumerate(plantios, start=1):
+            if not item.endereco:
+                QMessageBox.warning(self, "Aviso", f"Preencha o endereço do Plantio {index}.")
+                return
+            if not item.qtd_mudas:
+                QMessageBox.warning(self, "Aviso", f"Preencha a quantidade de mudas do Plantio {index}.")
+                return
+            try:
+                qtd = parse_numeric_value(item.qtd_mudas)
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Aviso",
+                    f"A quantidade de mudas do Plantio {index} deve ser numérica.",
+                )
+                return
+            if qtd <= 0:
+                QMessageBox.warning(
+                    self,
+                    "Aviso",
+                    f"A quantidade de mudas do Plantio {index} deve ser maior que zero.",
+                )
+                return
+
+        self._result_plantios = plantios
+        self.accept()
 
 class MapFullScreenDialog(QDialog):
     def __init__(self, parent, html_path, geojson_data, theme, marker_coords, gis_service, current_layer, heatmap_points):
@@ -122,9 +365,7 @@ class MapFullScreenDialog(QDialog):
         pts = []
         typ = self.combo_fs_heatmap.currentText()
         for r in self.parent_window.filtered_records:
-            point = build_heatmap_point(r, typ)
-            if point:
-                pts.append(point)
+            pts.extend(build_heatmap_points(r, typ))
         return pts
 
     def _on_map_click_fs(self, lat, lng):

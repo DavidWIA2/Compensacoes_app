@@ -57,3 +57,24 @@ def test_columns_dialog_buttons_work_without_name_errors(qt_app):
     assert all(check.isChecked() for check in dialog.checks)
 
     dialog.close()
+
+
+def test_msg_confirm_uses_yes_as_default_and_no_as_escape(monkeypatch, qt_app):
+    from PySide6.QtWidgets import QMessageBox
+    from app.ui.components.ui_utils import msg_confirm
+
+    captured = {}
+
+    def fake_exec(self):
+        captured["default_text"] = self.defaultButton().text()
+        captured["escape_text"] = self.escapeButton().text()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: self.defaultButton())
+
+    result = msg_confirm(None, "Confirmação", "Deseja continuar?")
+
+    assert result is True
+    assert captured["default_text"] == "Sim"
+    assert captured["escape_text"] == "Não"

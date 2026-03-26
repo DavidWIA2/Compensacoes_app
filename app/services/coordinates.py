@@ -1,6 +1,7 @@
 from typing import Any, List, Optional, Tuple
 
 from app.models.compensacao import Compensacao
+from app.services.plantio_service import record_plantio_items
 from app.services.records_service import safe_upper
 
 
@@ -26,6 +27,10 @@ def parse_coordinate_pair(lat: Any, lon: Any) -> Optional[Tuple[float, float]]:
 
 def get_record_coordinates(record: Compensacao, source: str = "main") -> Optional[Tuple[float, float]]:
     if source == "plantio":
+        for plantio in record_plantio_items(record):
+            coords = parse_coordinate_pair(plantio.latitude, plantio.longitude)
+            if coords:
+                return coords
         return parse_coordinate_pair(
             getattr(record, "latitude_plantio", ""),
             getattr(record, "longitude_plantio", ""),
@@ -36,20 +41,46 @@ def get_record_coordinates(record: Compensacao, source: str = "main") -> Optiona
     )
 
 
-def build_heatmap_point(record: Compensacao, heatmap_type: str) -> Optional[List[float]]:
+def get_record_plantio_coordinates(record: Compensacao) -> List[List[float]]:
+    points: List[List[float]] = []
+    for plantio in record_plantio_items(record):
+        coords = parse_coordinate_pair(plantio.latitude, plantio.longitude)
+        if coords:
+            points.append([coords[0], coords[1]])
+
+    if points:
+        return points
+
+    legacy_coords = parse_coordinate_pair(
+        getattr(record, "latitude_plantio", ""),
+        getattr(record, "longitude_plantio", ""),
+    )
+    if legacy_coords:
+        return [[legacy_coords[0], legacy_coords[1]]]
+    return []
+
+
+def build_heatmap_points(record: Compensacao, heatmap_type: str) -> List[List[float]]:
     is_compensated = safe_upper(record.compensado) == "SIM"
 
     if heatmap_type == "Pendentes":
         if is_compensated:
-            return None
+            return []
         coords = get_record_coordinates(record, "main")
     elif heatmap_type == "Realizadas":
         if not is_compensated:
-            return None
-        coords = get_record_coordinates(record, "plantio")
+            return []
+        return get_record_plantio_coordinates(record)
     else:
         coords = get_record_coordinates(record, "main")
 
     if not coords:
+        return []
+    return [[coords[0], coords[1]]]
+
+
+def build_heatmap_point(record: Compensacao, heatmap_type: str) -> Optional[List[float]]:
+    points = build_heatmap_points(record, heatmap_type)
+    if not points:
         return None
-    return [coords[0], coords[1]]
+    return points[0]

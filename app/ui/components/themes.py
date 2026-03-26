@@ -178,8 +178,8 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             color: {t['text']};
         }}
         QGroupBox#formGroup {{
-            margin-top: {int(16*sf)}px;
-            padding-top: {int(18*sf)}px;
+            margin-top: {int(10*sf)}px;
+            padding-top: {int(10*sf)}px;
         }}
         QGroupBox#formGroup::title {{
             left: {int(12*sf)}px;
@@ -187,6 +187,11 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
         }}
         QGroupBox#formGroup QLineEdit,
         QGroupBox#formGroup QComboBox {{
+            min-height: {max(int(24*sf), 24)}px;
+            max-height: {max(int(24*sf), 24)}px;
+            padding: {max(int(2*sf), 2)}px {padding_h}px;
+        }}
+        QGroupBox#formGroup QPushButton {{
             min-height: {max(int(24*sf), 24)}px;
             max-height: {max(int(24*sf), 24)}px;
             padding: {max(int(2*sf), 2)}px {padding_h}px;

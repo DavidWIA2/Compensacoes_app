@@ -264,7 +264,7 @@ class DataTab(QWidget):
         return sum(button.minimumSizeHint().width() for button in buttons) + (self._crud_spacing * (len(buttons) - 1))
 
     def preferred_right_panel_width(self) -> int:
-        widths = [max(int(620 * self.sf), 560)]
+        widths = [max(int(700 * self.sf), 620)]
         if hasattr(self, "form_group"):
             widths.append(self.form_group.minimumSizeHint().width())
         if hasattr(self, "map_group"):
@@ -371,14 +371,14 @@ class DataTab(QWidget):
         return w
 
     def _create_form_group(self):
-        top_margin = max(int(28 * self.sf), 28)
-        row_spacing = max(int(12 * self.sf), 12)
+        top_margin = max(int(14 * self.sf), 14)
+        row_spacing = max(int(10 * self.sf), 10)
         column_spacing = max(int(10 * self.sf), 8)
         input_h = max(int(30 * self.sf), 30)
         label_w = max(int(112 * self.sf), 96)
-        primary_field_w = max(int(170 * self.sf), 126)
+        primary_field_w = max(int(190 * self.sf), 140)
         secondary_field_w = max(int(150 * self.sf), 110)
-        aux_col_w = max(int(85 * self.sf), 75)
+        aux_col_w = max(int(108 * self.sf), 90)
 
         g = QGroupBox("Cadastro / Edição")
         g.setObjectName("formGroup")
@@ -410,7 +410,27 @@ class DataTab(QWidget):
         self.in_comp.setValidator(QDoubleValidator(0, 9999999, 2))
         self.in_end = mk_in(primary_field_w)
         self.in_end_plantio = mk_in(primary_field_w)
+        self.in_end_plantio.setReadOnly(True)
         self.in_end_plantio.setEnabled(False)
+        self.in_end_plantio.setPlaceholderText("Nenhum plantio cadastrado")
+        self.in_end_plantio.setMinimumWidth(max(int(220 * self.sf), 170))
+        self.btn_manage_plantios = QPushButton("Plantios...")
+        self.btn_manage_plantios.setProperty("kind", "secondary")
+        self.btn_manage_plantios.setFixedHeight(input_h)
+        plantio_button_w = max(int(132 * self.sf), 122)
+        self.btn_manage_plantios.setMinimumWidth(plantio_button_w)
+        self.btn_manage_plantios.setEnabled(False)
+        self.plantio_summary_container = QWidget()
+        self.plantio_summary_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.plantio_summary_layout = QHBoxLayout(self.plantio_summary_container)
+        self.plantio_summary_layout.setContentsMargins(0, 0, 0, 0)
+        self.plantio_summary_layout.setSpacing(0)
+        self.plantio_summary_layout.addWidget(self.in_end_plantio, 1)
+        self.plantio_actions_container = QWidget()
+        self.plantio_actions_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.plantio_actions_layout = QHBoxLayout(self.plantio_actions_container)
+        self.plantio_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.plantio_actions_layout.setSpacing(int(10 * self.sf))
         self.in_micro = QComboBox()
         self.in_micro.setEditable(True)
         self.in_micro.setFixedHeight(input_h)
@@ -420,6 +440,9 @@ class DataTab(QWidget):
         self.in_caixa.setValidator(QIntValidator(0, 999999))
         self.chk_arquivado = QCheckBox("Arquivado")
         self.chk_compensado = QCheckBox("Compensado (SIM)")
+        self.plantio_actions_layout.addWidget(self.btn_manage_plantios, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        self.plantio_actions_layout.addWidget(self.chk_compensado, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        self.plantio_actions_layout.addStretch(1)
 
         self.eletronico_cont = QWidget()
         self.eletronico_cont.setFixedHeight(input_h)
@@ -456,11 +479,11 @@ class DataTab(QWidget):
         l.addWidget(self.in_micro, 2, 4)
 
         l.addWidget(lbl_endereco_plantio, 3, 0)
-        l.addWidget(self.in_end_plantio, 3, 1, 1, 2)
+        l.addWidget(self.plantio_summary_container, 3, 1, 1, 2)
         l.addWidget(lbl_caixa, 3, 3)
         l.addWidget(self.in_caixa, 3, 4)
 
-        l.addWidget(self.chk_compensado, 4, 1, 1, 2)
+        l.addWidget(self.plantio_actions_container, 4, 1, 1, 2)
         l.addWidget(self.chk_arquivado, 4, 4)
 
         l.setColumnMinimumWidth(0, label_w)

@@ -36,7 +36,9 @@ class DataController:
             "path": self.window.excel.path,
             "wb": self.window.excel.wb,
             "ws": self.window.excel.ws,
+            "plantio_ws": self.window.excel.plantio_ws,
             "col_map": dict(self.window.excel.col_map),
+            "plantio_col_map": dict(self.window.excel.plantio_col_map),
             "uid_to_row": dict(self.window.excel.uid_to_row),
             "last_backup_time": self.window.excel.last_backup_time,
             "merged_cells_warning": self.window.excel.merged_cells_warning,
@@ -46,7 +48,9 @@ class DataController:
         self.window.excel.path = snapshot["path"]
         self.window.excel.wb = snapshot["wb"]
         self.window.excel.ws = snapshot["ws"]
+        self.window.excel.plantio_ws = snapshot.get("plantio_ws")
         self.window.excel.col_map = dict(snapshot["col_map"])
+        self.window.excel.plantio_col_map = dict(snapshot.get("plantio_col_map", {}))
         self.window.excel.uid_to_row = dict(snapshot["uid_to_row"])
         self.window.excel.last_backup_time = snapshot["last_backup_time"]
         self.window.excel.merged_cells_warning = snapshot["merged_cells_warning"]
@@ -268,11 +272,12 @@ class DataController:
         self.apply_filter()
         self.window.statusBar().showMessage("Filtros limpos")
 
-    def reload(self):
+    def reload(self, confirm_discard: bool = True):
         if self.window.excel.path:
-            if not self.window.form_controller.confirm_discard_changes("recarregar a planilha"):
-                return
-            self.load_excel(self.window.excel.path, confirm_discard=False)
+            if confirm_discard and not self.window.form_controller.confirm_discard_changes("recarregar a planilha"):
+                return False
+            return self.load_excel(self.window.excel.path, confirm_discard=False)
+        return False
 
     def import_excel_data(self):
         if not self.window.excel.path:

@@ -109,6 +109,7 @@ class SupportController:
                 "Atualizacao Disponivel",
                 "\n".join(lines),
                 QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
             )
             if reply == QMessageBox.Yes:
                 self.begin_automatic_update(payload)
@@ -123,6 +124,7 @@ class SupportController:
                 "Atualizacao Disponivel",
                 "\n".join(lines),
                 QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
             )
             if reply == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(download_url))

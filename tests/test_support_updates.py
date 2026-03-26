@@ -40,11 +40,12 @@ def test_present_update_offer_opens_download_url_when_auto_update_is_not_support
     controller = SupportController(window)
     opened = []
     prompts = []
+    default_buttons = []
 
     monkeypatch.setattr(controller, "_can_automatically_apply_update", lambda payload: False)
     monkeypatch.setattr(
         "app.ui.controllers.support_controller.QMessageBox.question",
-        lambda *args, **kwargs: prompts.append(args[2]) or 16384,
+        lambda *args, **kwargs: prompts.append(args[2]) or default_buttons.append(args[4]) or 16384,
     )
     monkeypatch.setattr(
         "app.ui.controllers.support_controller.QDesktopServices.openUrl",
@@ -67,6 +68,7 @@ def test_present_update_offer_opens_download_url_when_auto_update_is_not_support
     assert "Arquivo: Compensacoes-Setup-v1.1.0-win64.exe" in prompts[0]
     assert "SHA-256: abc123" in prompts[0]
     assert "Assinatura digital: ausente nesta release." in prompts[0]
+    assert default_buttons == [16384]
     assert window.statusBar().messages[-1] == "Link da atualizacao aberto no navegador."
 
 
@@ -74,12 +76,13 @@ def test_present_update_offer_starts_automatic_update_when_supported(monkeypatch
     window = DummyWindow()
     controller = SupportController(window)
     started = []
+    default_buttons = []
 
     monkeypatch.setattr(controller, "_can_automatically_apply_update", lambda payload: True)
     monkeypatch.setattr(controller, "begin_automatic_update", lambda payload: started.append(dict(payload)))
     monkeypatch.setattr(
         "app.ui.controllers.support_controller.QMessageBox.question",
-        lambda *args, **kwargs: 16384,
+        lambda *args, **kwargs: default_buttons.append(args[4]) or 16384,
     )
 
     controller.present_update_offer(
@@ -99,6 +102,7 @@ def test_present_update_offer_starts_automatic_update_when_supported(monkeypatch
         "filename": "Compensacoes-Setup-v1.1.0-win64.exe",
         "sha256": "abc123",
     }]
+    assert default_buttons == [16384]
 
 
 def test_check_for_updates_uses_default_manifest_url(monkeypatch):

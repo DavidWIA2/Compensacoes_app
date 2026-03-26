@@ -2,17 +2,28 @@ import os
 from contextlib import contextmanager
 from typing import Dict, Optional
 
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMessageBox
 
 from app.models.compensacao import Compensacao
 from app.services.error_service import friendly_error_message
+from app.services.plantio_service import (
+    clone_plantios,
+    deserialize_plantios_state,
+    serialize_plantios_state,
+    summarize_plantios,
+    sync_legacy_plantio_fields,
+    validate_record_plantios,
+)
 from app.services.records_service import safe_upper
 from app.services.validation import validate_compensacao
+from app.ui.components.dialogs import PlantiosDialog
 from app.ui.components.ui_utils import msg_confirm
 
 
 class FormController:
     _MISSING_PLANTIO_ERROR = "Preencha Endereco Plantio para salvar um registro compensado."
+    _LOCKED_COMPENSADO_ERROR = "Limpe Endereco Plantio antes de desmarcar Compensado."
     _DIRTY_GROUP_TITLE = "Cadastro / Edição *"
     _CLEAN_GROUP_TITLE = "Cadastro / Edição"
 
@@ -42,6 +53,15 @@ class FormController:
         checked = self.window.data_tab.eletronico_group.checkedButton()
         return checked.text() if checked else ""
 
+    def _set_form_plantios(self, plantios, *, block_signals: bool = False):
+        self.window.form_plantios = clone_plantios(plantios)
+        summary = summarize_plantios(self.window.form_plantios)
+        if block_signals:
+            self.window.data_tab.in_end_plantio.blockSignals(True)
+        self.window.data_tab.in_end_plantio.setText(summary)
+        if block_signals:
+            self.window.data_tab.in_end_plantio.blockSignals(False)
+
     def capture_form_state(self) -> Dict[str, object]:
         return {
             "oficio_processo": self.window.data_tab.in_oficio.text().strip(),
@@ -50,6 +70,7 @@ class FormController:
             "compensacao": self.window.data_tab.in_comp.text().strip(),
             "endereco": self.window.data_tab.in_end.text().strip(),
             "endereco_plantio": self.window.data_tab.in_end_plantio.text().strip(),
+            "plantios": serialize_plantios_state(self.window.form_plantios),
             "microbacia": self.window.data_tab.in_micro.currentText().strip(),
             "compensado": self.window.data_tab.chk_compensado.isChecked(),
             "sn": self.window.data_tab.chk_sn.isChecked(),
@@ -84,18 +105,25 @@ class FormController:
                 self.window.data_tab.in_caixa.setValidator(None)
             else:
                 from PySide6.QtGui import QIntValidator
+
                 self.window.data_tab.in_caixa.setValidator(QIntValidator(0, 999999))
             self.window.data_tab.in_caixa.setText(caixa)
 
             self.window.data_tab.in_avtec.setText(str(state.get("av_tec", "")))
             self.window.data_tab.in_comp.setText(str(state.get("compensacao", "")))
             self.window.data_tab.in_end.setText(str(state.get("endereco", "")))
-            self.window.data_tab.in_end_plantio.setText(str(state.get("endereco_plantio", "")))
+
+            plantios_state = deserialize_plantios_state(state.get("plantios", ()))
+            self._set_form_plantios(plantios_state, block_signals=False)
+            if not self.window.form_plantios:
+                self.window.data_tab.in_end_plantio.setText(str(state.get("endereco_plantio", "")))
+
             self.window.data_tab.in_micro.setCurrentText(str(state.get("microbacia", "")))
 
             is_compensado = bool(state.get("compensado"))
             self.window.data_tab.chk_compensado.setChecked(is_compensado)
             self.window.data_tab.in_end_plantio.setEnabled(is_compensado)
+            self.window.data_tab.btn_manage_plantios.setEnabled(is_compensado)
 
             target_eletronico = safe_upper(str(state.get("eletronico", "")))
             self.window.data_tab.eletronico_group.setExclusive(False)
@@ -188,28 +216,73 @@ class FormController:
         dup = self.check_duplicate_av_tec(av_tec, uid)
 
         if dup:
-            self.window.data_tab.in_avtec.setStyleSheet("QLineEdit { border: 2px solid #e74c3c; background-color: #fdf0ed; }")
+            self.window.data_tab.in_avtec.setStyleSheet(self._duplicate_av_tec_stylesheet())
             self.window.data_tab.in_avtec.setToolTip(f"Esta Av. Técnica já existe na linha {dup - 1}.")
         else:
             self.window.data_tab.in_avtec.setStyleSheet("")
             self.window.data_tab.in_avtec.setToolTip("")
 
+    def _duplicate_av_tec_stylesheet(self) -> str:
+        palette = self.window.data_tab.in_avtec.palette()
+        background_color = palette.color(QPalette.ColorRole.Base).name()
+        text_color = palette.color(QPalette.ColorRole.Text).name()
+        return (
+            "QLineEdit { "
+            "border: 2px solid #e74c3c; "
+            f"background-color: {background_color}; "
+            f"color: {text_color}; "
+            "}"
+        )
+
     def update_form_action_buttons(self):
         has_excel = bool(self.window.excel.path and os.path.exists(self.window.excel.path))
         has_selected = self.window.selected is not None
         is_dirty = self.has_pending_changes()
-        compensado_requires_plantio = (
-            self.window.data_tab.chk_compensado.isChecked()
-            and not self.window.data_tab.in_end_plantio.text().strip()
-        )
+        plantio_error = validate_record_plantios(self.read_form()) if has_selected else ""
         self.window.data_tab.btn_add.setEnabled(has_excel)
         self.window.data_tab.btn_save_edit.setEnabled(
-            has_excel and has_selected and is_dirty and not compensado_requires_plantio
+            has_excel and has_selected and is_dirty and not plantio_error
         )
         self.window.data_tab.btn_delete.setEnabled(has_excel and has_selected)
         self.window.data_tab.btn_ficha_pdf.setEnabled(has_excel and has_selected)
 
+    def on_compensado_toggled(self, checked: bool):
+        if not checked and self.window.form_plantios:
+            with self.suspend_tracking():
+                self.window.data_tab.chk_compensado.blockSignals(True)
+                self.window.data_tab.chk_compensado.setChecked(True)
+                self.window.data_tab.chk_compensado.blockSignals(False)
+            self.window.data_tab.in_end_plantio.setEnabled(True)
+            self.window.data_tab.btn_manage_plantios.setEnabled(True)
+            self.window.data_tab.in_end_plantio.setFocus()
+            QMessageBox.warning(self.window, "Aviso", self._LOCKED_COMPENSADO_ERROR)
+            self.update_form_action_buttons()
+            self.window._update_address_search_enabled()
+            return
+
+        self.window.data_tab.in_end_plantio.setEnabled(checked)
+        self.window.data_tab.btn_manage_plantios.setEnabled(checked)
+        self.remember_current_state()
+        self.update_form_action_buttons()
+        self.window._update_address_search_enabled()
+
+    def open_plantios_dialog(self):
+        if not self.window.data_tab.chk_compensado.isChecked():
+            return
+
+        dialog = PlantiosDialog(
+            self.window,
+            self.window.form_plantios,
+            self.window.data_tab.in_comp.text().strip(),
+        )
+        if dialog.exec():
+            self._set_form_plantios(dialog.plantios, block_signals=True)
+            self.remember_current_state()
+            self.update_form_action_buttons()
+            self.window._update_address_search_enabled()
+
     def fill_form(self, record: Compensacao):
+        sync_legacy_plantio_fields(record)
         self._apply_state_to_form(
             {
                 "oficio_processo": (record.oficio_processo or "").strip(),
@@ -218,6 +291,7 @@ class FormController:
                 "compensacao": str(record.compensacao or ""),
                 "endereco": record.endereco,
                 "endereco_plantio": record.endereco_plantio,
+                "plantios": serialize_plantios_state(record.plantios),
                 "microbacia": record.microbacia,
                 "compensado": safe_upper(record.compensado) == "SIM",
                 "sn": (record.oficio_processo or "").strip().upper() == "S/N",
@@ -238,7 +312,7 @@ class FormController:
         return None
 
     def read_form(self) -> Compensacao:
-        return Compensacao(
+        record = Compensacao(
             excel_row=self.window.selected.excel_row if self.window.selected else -1,
             oficio_processo=self.window.data_tab.in_oficio.text().strip(),
             caixa=self.window.data_tab.in_caixa.text().strip(),
@@ -250,7 +324,9 @@ class FormController:
             compensado="SIM" if self.window.data_tab.chk_compensado.isChecked() else "",
             eletronico=self._checked_eletronico_value(),
             uid=self.window.selected.uid if self.window.selected else "",
+            plantios=clone_plantios(self.window.form_plantios),
         )
+        return sync_legacy_plantio_fields(record)
 
     def add_new(self):
         if not self.window.excel.path:
@@ -275,10 +351,11 @@ class FormController:
     def save_edit(self):
         if not self.window.excel.path or not self.window.selected:
             return
-        if self.window.data_tab.chk_compensado.isChecked() and not self.window.data_tab.in_end_plantio.text().strip():
-            QMessageBox.warning(self.window, "Erro", self._MISSING_PLANTIO_ERROR)
-            return
         record = self.read_form()
+        plantio_error = validate_record_plantios(record)
+        if plantio_error:
+            QMessageBox.warning(self.window, "Erro", plantio_error)
+            return
         error = validate_compensacao(record)
         if error:
             QMessageBox.warning(self.window, "Erro", error)
@@ -291,7 +368,12 @@ class FormController:
         ):
             return
         self.window.excel.save_edit(record)
-        self.window.reload()
+        try:
+            reload_result = self.window.reload(confirm_discard=False)
+        except TypeError:
+            reload_result = self.window.reload()
+        if reload_result is False:
+            return
         QMessageBox.information(self.window, "Sucesso", "Salvo com sucesso.")
 
     def delete_selected(self):
@@ -317,10 +399,10 @@ class FormController:
                 self.window.data_tab.in_avtec,
                 self.window.data_tab.in_comp,
                 self.window.data_tab.in_end,
-                self.window.data_tab.in_end_plantio,
                 self.window.data_tab.in_caixa,
             ]:
                 widget.clear()
+            self._set_form_plantios([], block_signals=True)
             self.window.data_tab.in_micro.setCurrentIndex(-1)
             self.window.data_tab.in_micro.setEditText("")
             self.window.data_tab.eletronico_group.setExclusive(False)
@@ -333,6 +415,7 @@ class FormController:
             self.window.data_tab.in_oficio.setEnabled(True)
             self.window.data_tab.in_caixa.setEnabled(True)
             self.window.data_tab.in_end_plantio.setEnabled(False)
+            self.window.data_tab.btn_manage_plantios.setEnabled(False)
             self.window.data_tab.in_avtec.setStyleSheet("")
             self.window.data_tab.in_avtec.setToolTip("")
             self.window.data_tab.table.clearSelection()

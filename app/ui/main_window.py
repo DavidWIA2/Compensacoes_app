@@ -30,7 +30,7 @@ from app.services.report_service import (
     export_excel_two_sheets
 )
 from app.services.ficha_report_service import export_individual_pdf
-from app.services.coordinates import build_heatmap_point
+from app.services.coordinates import build_heatmap_point, build_heatmap_points
 from app.services.gis_service import GisService
 from app.services.records_service import (
     compute_metrics, filter_records, extract_year, safe_upper, unique_non_empty
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.records: List[Compensacao] = []
         self.filtered_records: List[Compensacao] = []
         self.selected: Optional[Compensacao] = None
+        self.form_plantios = []
         self.is_dark_mode = False
         self.settings = AppSettings(QSettings(APP_SETTINGS_ORG, APP_SETTINGS_NAME))
         self.gis: Optional[GisService] = None
@@ -187,6 +188,7 @@ class MainWindow(QMainWindow):
         self._fill_form = self.form_controller.fill_form
         self._check_duplicate_av_tec = self.form_controller.check_duplicate_av_tec
         self._read_form = self.form_controller.read_form
+        self.edit_plantios = self.form_controller.open_plantios_dialog
         self.add_new = self.form_controller.add_new
         self.save_edit = self.form_controller.save_edit
         self.delete_selected = self.form_controller.delete_selected
@@ -205,6 +207,7 @@ class MainWindow(QMainWindow):
         self.on_geocode_finished = self.map_controller.on_geocode_finished
         self.toggle_heatmap = self.map_controller.toggle_heatmap
         self._build_heatmap_point = build_heatmap_point
+        self._build_heatmap_points = build_heatmap_points
         self.save_map_layer_preference = self.settings_controller.save_map_layer_preference
         self.export_csv_clicked = self.export_controller.export_csv_clicked
         self.export_excel_clicked = self.export_controller.export_excel_clicked
@@ -544,6 +547,7 @@ class MainWindow(QMainWindow):
         self.data_tab.btn_save_edit.clicked.connect(self.save_edit)
         self.data_tab.btn_delete.clicked.connect(self.delete_selected)
         self.data_tab.btn_ficha_pdf.clicked.connect(self.export_ficha_pdf)
+        self.data_tab.btn_manage_plantios.clicked.connect(self.edit_plantios)
         
         self.data_tab.btn_maps.clicked.connect(self.search_on_map)
         self.data_tab.btn_maps_plantio.clicked.connect(self.search_on_map_plantio)
@@ -567,8 +571,7 @@ class MainWindow(QMainWindow):
         self.data_tab.in_end_plantio.textChanged.connect(self._on_form_field_changed)
         self.data_tab.in_micro.currentTextChanged.connect(self._on_form_field_changed)
         
-        self.data_tab.chk_compensado.toggled.connect(self.data_tab.in_end_plantio.setEnabled)
-        self.data_tab.chk_compensado.toggled.connect(self._on_form_field_changed)
+        self.data_tab.chk_compensado.toggled.connect(self.form_controller.on_compensado_toggled)
         self.data_tab.chk_sn.toggled.connect(self._on_chk_sn_toggled)
         self.data_tab.chk_arquivado.toggled.connect(self._on_chk_arquivado_toggled)
         self.data_tab.chk_arquivado.toggled.connect(self._on_form_field_changed)

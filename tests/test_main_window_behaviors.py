@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 from app.models.compensacao import Compensacao
+from app.models.plantio_item import PlantioItem
 from app.services.app_settings import AppSettings
 from app.utils.logger import LOG_DIR
 
@@ -11,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QObject, Signal, QSettings
-from PySide6.QtGui import QStandardItemModel
+from PySide6.QtGui import QPalette, QStandardItemModel
 
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
@@ -406,9 +407,25 @@ def test_right_panel_reserves_width_for_original_form_layout():
 
     assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.form_group.minimumSizeHint().width()
     assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.map_group.minimumSizeHint().width()
-    assert window.data_tab.right_panel.minimumWidth() >= 560
+    assert window.data_tab.right_panel.minimumWidth() >= 620
     assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
     assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
+    assert window.data_tab.form_group.layout().itemAtPosition(4, 1).widget() is window.data_tab.plantio_actions_container
+    assert window.data_tab.btn_manage_plantios.minimumWidth() >= (
+        window.data_tab.btn_manage_plantios.fontMetrics().horizontalAdvance(window.data_tab.btn_manage_plantios.text()) + 20
+    )
+    assert window.data_tab.in_end_plantio.minimumWidth() >= 170
+
+    window.close()
+
+
+def test_form_group_button_height_fits_plantio_action_row():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    assert window.data_tab.btn_manage_plantios.height() <= window.data_tab.plantio_actions_container.height()
 
     window.close()
 
@@ -982,6 +999,76 @@ def test_on_geocode_finished_persists_batch_coordinates(monkeypatch):
     window.close()
 
 
+def test_search_on_map_plantio_asks_which_address_to_use(monkeypatch):
+    window = MainWindow()
+    captured = []
+    window.form_plantios = [
+        PlantioItem(sequence=1, endereco="Rua Plantio A", qtd_mudas="4"),
+        PlantioItem(sequence=2, endereco="Rua Plantio B", qtd_mudas="6"),
+    ]
+
+    monkeypatch.setattr(
+        "app.ui.controllers.map_controller.QInputDialog.getItem",
+        lambda *args, **kwargs: ("Plantio 2: Rua Plantio B (6 mudas)", True),
+    )
+    monkeypatch.setattr(window.map_controller, "perform_geocode", lambda address: captured.append(address))
+
+    window.search_on_map_plantio()
+
+    assert captured == ["Rua Plantio B"]
+    window.close()
+
+
+def test_on_geocode_finished_updates_all_plantios(monkeypatch):
+    window = MainWindow()
+    record = make_record(
+        uid="u-multi",
+        compensado="SIM",
+        plantios=[
+            PlantioItem(sequence=1, endereco="Rua Plantio A", qtd_mudas="3"),
+            PlantioItem(sequence=2, endereco="Rua Plantio B", qtd_mudas="7"),
+        ],
+    )
+    window.records = [record]
+    window.gis = SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio")
+
+    saved = {}
+    monkeypatch.setattr(window.excel, "save_batch_edits", lambda records: saved.setdefault("records", list(records)) or len(records))
+    monkeypatch.setattr(window, "reload", lambda: None)
+
+    window.on_geocode_finished(
+        {
+            record.excel_row: {
+                "plantios": {
+                    1: (-22.01, -47.89),
+                    2: (-22.02, -47.90),
+                }
+            }
+        }
+    )
+
+    saved_record = saved["records"][0]
+    assert saved_record.plantios[0].latitude == "-22.01"
+    assert saved_record.plantios[1].longitude == "-47.9"
+    assert saved_record.latitude_plantio == "-22.01"
+    assert saved_record.endereco_plantio == "2 áreas / 10 mudas"
+
+
+def test_heatmap_realizadas_includes_all_plantio_coordinates():
+    window = MainWindow()
+    record = make_record(
+        compensado="SIM",
+        plantios=[
+            PlantioItem(sequence=1, endereco="Rua Plantio A", qtd_mudas="3", latitude="-22.05", longitude="-47.95"),
+            PlantioItem(sequence=2, endereco="Rua Plantio B", qtd_mudas="7", latitude="-22.06", longitude="-47.96"),
+        ],
+    )
+
+    assert window._build_heatmap_points(record, "Realizadas") == [[-22.05, -47.95], [-22.06, -47.96]]
+
+    window.close()
+
+
 def test_perform_geocode_surfaces_not_found(monkeypatch):
     window = MainWindow()
     warnings = []
@@ -1293,4 +1380,74 @@ def test_save_edit_reenables_when_endereco_plantio_is_filled(monkeypatch):
     window.data_tab.in_end_plantio.setText("Rua do Plantio, 123")
     assert window.data_tab.btn_save_edit.isEnabled() is True
 
+    window.close()
+
+
+def test_duplicate_av_tec_highlight_keeps_current_palette_colors():
+    window = MainWindow()
+    duplicate_record = make_record(uid="u-1", av_tec="AT-1")
+    selected_record = make_record(excel_row=3, uid="u-2", av_tec="AT-2")
+    window.records = [duplicate_record, selected_record]
+    window.selected = selected_record
+    window._fill_form(selected_record)
+
+    palette = window.data_tab.in_avtec.palette()
+    expected_bg = palette.color(QPalette.ColorRole.Base).name()
+    expected_text = palette.color(QPalette.ColorRole.Text).name()
+
+    window.data_tab.in_avtec.setText("AT-1")
+    window._validate_as_you_type()
+
+    style = window.data_tab.in_avtec.styleSheet()
+
+    assert "border: 2px solid #e74c3c;" in style
+    assert f"background-color: {expected_bg};" in style
+    assert f"color: {expected_text};" in style
+    assert "#fdf0ed" not in style
+
+    window.close()
+
+
+def test_compensado_cannot_be_unchecked_when_endereco_plantio_has_data(monkeypatch):
+    window = MainWindow()
+    warnings = []
+    record = make_record(compensado="SIM", endereco_plantio="Rua do Plantio, 123")
+    window.selected = record
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
+
+    window._fill_form(record)
+    assert window.data_tab.chk_compensado.isChecked() is True
+
+    window.data_tab.chk_compensado.setChecked(False)
+
+    assert window.data_tab.chk_compensado.isChecked() is True
+    assert window.data_tab.in_end_plantio.isEnabled() is True
+    assert warnings == ["Limpe Endereco Plantio antes de desmarcar Compensado."]
+    window.close()
+
+
+def test_save_edit_reloads_without_discard_confirmation(monkeypatch):
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: True if p == "dummy.xlsx" else real_exists(p))
+
+    window = MainWindow()
+    saved = []
+    reload_calls = []
+    infos = []
+
+    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window, "reload", lambda confirm_discard=True: reload_calls.append(confirm_discard) or True)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: infos.append(args[2]))
+
+    window.excel.path = "dummy.xlsx"
+    window.selected = make_record()
+    window._fill_form(window.selected)
+    window.data_tab.in_comp.setText("11")
+
+    window.save_edit()
+
+    assert len(saved) == 1
+    assert reload_calls == [False]
+    assert infos == ["Salvo com sucesso."]
     window.close()

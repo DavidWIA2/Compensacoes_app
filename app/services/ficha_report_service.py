@@ -10,6 +10,7 @@ from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, 
 
 from app.models.compensacao import Compensacao
 from app.services.coordinates import format_coordinate_pair
+from app.services.plantio_service import record_plantio_items
 from app.ui.components.ui_utils import resource_path
 
 
@@ -109,6 +110,20 @@ def _build_ficha_rows(record: Compensacao, observation: str = "") -> List[List[s
     return rows
 
 
+def _build_plantios_rows(record: Compensacao) -> List[List[str]]:
+    rows = []
+    for index, plantio in enumerate(record_plantio_items(record), start=1):
+        rows.append(
+            [
+                str(index),
+                str(plantio.endereco or ""),
+                str(plantio.qtd_mudas or ""),
+                format_coordinate_pair(plantio.latitude, plantio.longitude),
+            ]
+        )
+    return rows
+
+
 def export_individual_pdf(filepath: str, record: Compensacao, observation: str = ""):
     def paragraph_text(value: object) -> str:
         return escape(str(value or "")).replace("\r\n", "\n").replace("\n", "<br/>")
@@ -153,6 +168,14 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
         alignment=1,
         fontSize=12,
     )
+    section_title_style = ParagraphStyle(
+        "FichaSectionTitle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        textColor=colors.HexColor("#2C3E50"),
+        spaceAfter=8,
+    )
     signature_subtitle_style = ParagraphStyle(
         "FichaSignatureSubtitle",
         parent=styles["Normal"],
@@ -194,6 +217,47 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
     table.setStyle(TableStyle(table_style))
 
     elements.append(table)
+
+    plantio_rows = _build_plantios_rows(record)
+    if plantio_rows:
+        elements.append(Spacer(1, 0.18 * inch))
+        elements.append(Paragraph("Plantios Cadastrados", section_title_style))
+        plantio_table_rows = [
+            [
+                Paragraph("Plantio", label_style),
+                Paragraph("Endereço", label_style),
+                Paragraph("Qtd. mudas", label_style),
+                Paragraph("Coordenadas", label_style),
+            ]
+        ]
+        for plantio_row in plantio_rows:
+            plantio_table_rows.append(
+                [
+                    Paragraph(paragraph_text(plantio_row[0]), value_style),
+                    Paragraph(paragraph_text(plantio_row[1]), value_style),
+                    Paragraph(paragraph_text(plantio_row[2]), value_style),
+                    Paragraph(paragraph_text(plantio_row[3]), value_style),
+                ]
+            )
+
+        plantio_table = Table(plantio_table_rows, colWidths=[50, 260, 90, 130])
+        plantio_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDF2F7")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                ]
+            )
+        )
+        elements.append(plantio_table)
+
     elements.append(Spacer(1, 0.5 * inch))
     elements.append(Spacer(1, 1.5 * inch))
     elements.append(Paragraph("_" * 40, signature_style))

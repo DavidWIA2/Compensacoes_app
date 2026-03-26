@@ -10,11 +10,9 @@ from PySide6.QtCore import QThread, Signal
 
 from app import __version__ as APP_VERSION
 from app.config import resolve_update_manifest_url
-from app.services.auto_update_service import (
-    AutoUpdateCancelled,
-    prepare_staged_update,
-)
+from app.services.auto_update_service import AutoUpdateCancelled, prepare_staged_update
 from app.services.geocode_service import geocode_address_arcgis
+from app.services.plantio_service import record_plantio_items
 from app.utils.logger import logger
 
 
@@ -26,59 +24,72 @@ class GeocodeWorker(QThread):
         super().__init__()
         self.records = records_to_process
         self.is_running = True
-        self.resultados = {}  # {excel_row: {"main": (lat, lon), "plantio": (lat, lon)}}
+        self.resultados = {}  # {excel_row: {"main": (lat, lon), "plantios": {sequencia: (lat, lon)}}}
 
     def run(self):
         total = len(self.records)
         cancelled = False
-        for i, r in enumerate(self.records):
+        for i, record in enumerate(self.records):
             if not self.is_running or self.isInterruptionRequested():
                 cancelled = True
                 break
 
-            res = {}
-            lat_m = str(getattr(r, "latitude", "")).strip()
-            lon_m = str(getattr(r, "longitude", "")).strip()
-            lat_p = str(getattr(r, "latitude_plantio", "")).strip()
-            lon_p = str(getattr(r, "longitude_plantio", "")).strip()
-            micro = str(getattr(r, "microbacia", "")).strip()
+            result = {}
+            lat_m = str(getattr(record, "latitude", "")).strip()
+            lon_m = str(getattr(record, "longitude", "")).strip()
+            micro = str(getattr(record, "microbacia", "")).strip()
             has_main_coords = bool(lat_m and lon_m)
-            has_plantio_coords = bool(lat_p and lon_p)
 
-            if (r.endereco or "").strip():
+            if (record.endereco or "").strip():
                 if not has_main_coords:
-                    self.progress_update.emit(i, f"Principal ({i + 1}/{total}): {str(r.endereco)[:30]}...")
+                    self.progress_update.emit(i, f"Principal ({i + 1}/{total}): {str(record.endereco)[:30]}...")
                     try:
-                        coords = self._geocode_api(r.endereco)
+                        coords = self._geocode_api(record.endereco)
                         if coords:
-                            res["main"] = coords
-                    except Exception as e:
-                        logger.error(f"[GEOCODE] Erro ao buscar endereço principal (linha {r.excel_row}): {e}")
+                            result["main"] = coords
+                    except Exception as exc:
+                        logger.error(f"[GEOCODE] Erro ao buscar endereco principal (linha {record.excel_row}): {exc}")
                     time.sleep(0.3)
                     if not self.is_running or self.isInterruptionRequested():
                         cancelled = True
                         break
                 elif not micro:
-                    res["main"] = (float(lat_m), float(lon_m))
+                    result["main"] = (float(lat_m), float(lon_m))
 
-            if (r.endereco_plantio or "").strip():
+            plantio_results = {}
+            for plantio in record_plantio_items(record):
+                if not (plantio.endereco or "").strip():
+                    continue
+
+                lat_p = str(getattr(plantio, "latitude", "")).strip()
+                lon_p = str(getattr(plantio, "longitude", "")).strip()
+                has_plantio_coords = bool(lat_p and lon_p)
+
                 if not has_plantio_coords:
-                    self.progress_update.emit(i, f"Plantio ({i + 1}/{total}): {str(r.endereco_plantio)[:30]}...")
+                    self.progress_update.emit(i, f"Plantio ({i + 1}/{total}): {str(plantio.endereco)[:30]}...")
                     try:
-                        coords = self._geocode_api(r.endereco_plantio)
+                        coords = self._geocode_api(plantio.endereco)
                         if coords:
-                            res["plantio"] = coords
-                    except Exception as e:
-                        logger.error(f"[GEOCODE] Erro ao buscar endereço de plantio (linha {r.excel_row}): {e}")
+                            plantio_results[int(plantio.sequence)] = coords
+                    except Exception as exc:
+                        logger.error(
+                            f"[GEOCODE] Erro ao buscar endereco de plantio (linha {record.excel_row}, plantio {plantio.sequence}): {exc}"
+                        )
                     time.sleep(0.3)
                     if not self.is_running or self.isInterruptionRequested():
                         cancelled = True
                         break
-                elif not micro and not res.get("main"):
-                    res["plantio"] = (float(lat_p), float(lon_p))
+                elif not micro and not result.get("main"):
+                    plantio_results[int(plantio.sequence)] = (float(lat_p), float(lon_p))
 
-            if res:
-                self.resultados[r.excel_row] = res
+            if cancelled:
+                break
+
+            if plantio_results:
+                result["plantios"] = plantio_results
+
+            if result:
+                self.resultados[record.excel_row] = result
 
         if not cancelled:
             self.finished_process.emit(self.resultados)
@@ -92,7 +103,7 @@ class GeocodeWorker(QThread):
 
 
 class UpdaterWorker(QThread):
-    update_available = Signal(str, str)  # version, release_notes
+    update_available = Signal(str, str)
     update_ready = Signal(object)
     no_update = Signal(str)
     check_failed = Signal(str)

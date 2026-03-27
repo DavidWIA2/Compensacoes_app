@@ -56,9 +56,39 @@ def test_prepare_staged_update_downloads_validates_and_writes_launcher(tmp_path)
     assert installer_path.parent == tmp_path / "updates" / "1.2.3"
     assert launcher_path.exists()
     assert "4321" in script_text
-    assert "/VERYSILENT" in script_text
+    assert "/SILENT" in script_text
+    assert "Start-UpdateCleanup" in script_text
+    assert "Relancando aplicativo atualizado." in script_text
     assert "Compensacoes.exe" in script_text
     assert staged.restart_executable.endswith("Compensacoes.exe")
+
+
+def test_prepare_staged_update_removes_old_update_directories(tmp_path):
+    content = b"fake-installer-binary"
+    checksum = hashlib.sha256(content).hexdigest()
+    stale_dir = tmp_path / "updates" / "1.1.3"
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "Compensacoes-Setup-v1.1.3-win64.exe").write_bytes(b"old")
+
+    def fake_download(download_url, destination, progress_callback=None, interruption_requested=None):
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return target
+
+    prepare_staged_update(
+        {
+            "version": "1.2.4",
+            "download_url": "https://example.com/Compensacoes-Setup-v1.2.4-win64.exe",
+            "filename": "Compensacoes-Setup-v1.2.4-win64.exe",
+            "sha256": checksum,
+        },
+        current_pid=4321,
+        app_data_dir=tmp_path,
+        download_fn=fake_download,
+    )
+
+    assert stale_dir.exists() is False
 
 
 def test_prepare_staged_update_rejects_non_installer_assets(tmp_path):
@@ -91,6 +121,7 @@ def test_launch_update_installer_uses_detached_powershell(monkeypatch, tmp_path)
 
     launch_update_installer(launcher_path, powershell_executable="pwsh.exe")
 
-    assert captured["command"][:4] == ["pwsh.exe", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+    assert captured["command"][:6] == ["pwsh.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass"]
     assert captured["command"][-1] == str(launcher_path.resolve())
     assert captured["kwargs"]["cwd"] == str(tmp_path.resolve())
+    assert captured["kwargs"]["creationflags"] != 0

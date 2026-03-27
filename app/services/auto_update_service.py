@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -90,26 +91,26 @@ def resolve_update_staging_dir(version: str, *, app_data_dir: str | Path | None 
     base_dir = Path(app_data_dir) if app_data_dir else resolve_app_data_dir()
     updates_dir = ensure_dir(base_dir / "updates")
     _cleanup_old_update_directories(updates_dir, keep_name=safe_version)
-    return ensure_dir(updates_dir / safe_version)
+    staging_dir = updates_dir / safe_version
+    if staging_dir.exists():
+        _remove_update_directory(staging_dir)
+    return ensure_dir(staging_dir)
 
 
-def _cleanup_old_update_directories(root: Path, *, keep_name: str, limit: int = 3) -> None:
+def _cleanup_old_update_directories(root: Path, *, keep_name: str) -> None:
     if not root.exists():
         return
 
     candidates = [path for path in root.iterdir() if path.is_dir() and path.name != keep_name]
-    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-    for stale_dir in candidates[limit:]:
-        try:
-            for item in stale_dir.rglob("*"):
-                if item.is_file():
-                    item.unlink(missing_ok=True)
-            for item in sorted(stale_dir.rglob("*"), reverse=True):
-                if item.is_dir():
-                    item.rmdir()
-            stale_dir.rmdir()
-        except OSError:
-            continue
+    for stale_dir in candidates:
+        _remove_update_directory(stale_dir)
+
+
+def _remove_update_directory(path: Path) -> None:
+    try:
+        shutil.rmtree(path, ignore_errors=False)
+    except OSError:
+        return
 
 
 def compute_sha256(path: str | Path) -> str:
@@ -191,15 +192,17 @@ def write_update_launcher_script(
 ) -> Path:
     installer = Path(installer_path).resolve()
     launcher = Path(launcher_path).resolve()
+    staging_dir = launcher.parent.resolve()
     log_target = Path(log_path).resolve() if log_path else launcher.with_name("install-update.log")
     restart_target = str(restart_executable or "").strip()
 
     script = f"""$ErrorActionPreference = 'Stop'
 $installerPath = '{_ps_literal(str(installer))}'
+$stagingDir = '{_ps_literal(str(staging_dir))}'
 $restartExecutable = '{_ps_literal(restart_target)}'
 $logPath = '{_ps_literal(str(log_target))}'
 $pidToWait = {int(current_pid)}
-$arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOCANCEL', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS')
+$arguments = @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/NOCANCEL', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS')
 
 function Write-UpdateLog([string]$message) {{
     if (-not $logPath) {{
@@ -208,6 +211,15 @@ function Write-UpdateLog([string]$message) {{
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Content -Path $logPath -Value "[$timestamp] $message"
+}}
+
+function Start-UpdateCleanup() {{
+    if (-not $stagingDir) {{
+        return
+    }}
+
+    $cleanupArgs = '/c timeout /t 3 /nobreak >nul & if exist "{0}" rmdir /s /q "{0}"' -f $stagingDir
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $cleanupArgs -WindowStyle Hidden | Out-Null
 }}
 
 try {{
@@ -229,9 +241,13 @@ try {{
         $exitCode = 0
     }}
 
-    if ($exitCode -eq 0 -and $restartExecutable -and (Test-Path $restartExecutable)) {{
-        Write-UpdateLog "Relancando aplicativo atualizado."
-        Start-Process -FilePath $restartExecutable -WorkingDirectory ([System.IO.Path]::GetDirectoryName($restartExecutable))
+    if ($exitCode -eq 0) {{
+        Write-UpdateLog "Instalacao concluida com sucesso. Agendando limpeza dos arquivos temporarios."
+        if ($restartExecutable -and (Test-Path $restartExecutable)) {{
+            Write-UpdateLog "Relancando aplicativo atualizado."
+            Start-Process -FilePath $restartExecutable -WorkingDirectory ([System.IO.Path]::GetDirectoryName($restartExecutable))
+        }}
+        Start-UpdateCleanup
     }}
 }} catch {{
     Write-UpdateLog "ERRO FATAL DURANTE A ATUALIZACAO: $_"
@@ -250,6 +266,8 @@ def launch_update_installer(launcher_path: str | Path, *, powershell_executable:
     command = [
         powershell_executable,
         "-NoProfile",
+        "-WindowStyle",
+        "Hidden",
         "-ExecutionPolicy",
         "Bypass",
         "-File",
@@ -257,9 +275,7 @@ def launch_update_installer(launcher_path: str | Path, *, powershell_executable:
     ]
     creationflags = 0
     if os.name == "nt":
-        # Usamos apenas CREATE_NEW_PROCESS_GROUP para desvincular o ciclo de vida,
-        # mas evitamos DETACHED_PROCESS que pode impedir a interacao com o desktop (UAC).
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     kwargs = {
         "cwd": str(Path(launcher_path).resolve().parent),

@@ -27,9 +27,28 @@ class DummyWindow:
         self.form_controller = DummyFormController()
         self._skip_close_discard_confirmation = False
         self.closed = False
+        self.busy_events = []
+        self.tracked_workers = []
+        self.released_workers = []
 
     def statusBar(self):
         return self._status_bar
+
+    def begin_busy_operation(self, message, *, total=None, cancellable=False, cancel_callback=None):
+        self.busy_events.append(("begin", message, total, cancellable, bool(cancel_callback)))
+
+    def update_busy_operation(self, value, message=None):
+        self.busy_events.append(("update", value, message))
+
+    def end_busy_operation(self, message="Pronto"):
+        self.busy_events.append(("end", message))
+
+    def track_background_worker(self, name, worker, **kwargs):
+        self.tracked_workers.append((name, worker))
+        return worker
+
+    def release_background_worker(self, name):
+        self.released_workers.append(name)
 
     def close(self):
         self.closed = True
@@ -153,6 +172,9 @@ def test_check_for_updates_uses_default_manifest_url(monkeypatch):
     assert events[0] == ("start", DEFAULT_UPDATE_MANIFEST_URL, APP_VERSION)
     assert events[1][0] == "info"
     assert "versao mais recente" in events[1][2]
+    assert window.busy_events[0][0] == "begin"
+    assert window.busy_events[-1] == ("end", "Verificacao de atualizacoes concluida.")
+    assert window.released_workers == ["manual_update_check"]
 
 
 def test_begin_automatic_update_wires_download_worker(monkeypatch):
@@ -233,7 +255,8 @@ def test_begin_automatic_update_wires_download_worker(monkeypatch):
     assert events[0][1] == "1.1.0"
     assert controller._update_progress_dialog is not None
     assert controller._update_progress_dialog.shown is True
-    assert window.statusBar().messages[-1] == "Baixando atualizacao automatica..."
+    assert window.busy_events[0] == ("begin", "Baixando atualizacao automatica...", 100, True, True)
+    assert window.tracked_workers and window.tracked_workers[0][0] == "automatic_update"
 
 
 def test_on_auto_update_staged_launches_installer_and_closes_window(monkeypatch):

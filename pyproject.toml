@@ -1,0 +1,18 @@
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E9"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+ignore_missing_imports = true
+follow_imports = "silent"
+files = [
+  "app/services/excel_service.py",
+  "app/services/auto_update_service.py",
+  "app/ui/controllers/data_controller.py",
+  "app/ui/controllers/export_controller.py",
+  "app/ui/controllers/map_controller.py",
+]

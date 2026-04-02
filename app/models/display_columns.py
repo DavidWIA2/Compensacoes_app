@@ -3,7 +3,7 @@ from typing import Dict, Tuple
 
 DISPLAY_COLUMNS: Tuple[Tuple[str, str], ...] = (
     ("Ofício/ Processo", "oficio_processo"),
-    ("Eletrônico", "eletronico"),
+    ("Tipo", "eletronico"),
     ("Caixa", "caixa"),
     ("Av. Tec.", "av_tec"),
     ("Compensação", "compensacao"),

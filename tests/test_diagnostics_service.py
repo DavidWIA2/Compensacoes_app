@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.services.diagnostics_service import (
     build_diagnostics_snapshot,
     default_diagnostics_filename,
@@ -25,6 +26,19 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
         is_dark_mode=True,
         last_marker_coords=(-22.01, -47.89),
         settings_controller=SimpleNamespace(current_map_layer=lambda: "Mapa Claro"),
+        _local_session_source_status={"source": "sqlite", "strategy": "sqlite_snapshot", "filtered_records": 3},
+        _local_filter_facets_status={"source": "sqlite", "micro_count": 2, "year_count": 1},
+        _local_mutation_sync_status={"status": "sqlite", "operation": "edit", "record_count": 3},
+        _local_record_read_status=LocalRecordReadStatus(
+            status="sqlite",
+            source="sqlite",
+            strategy="sqlite_query",
+            workbook_path="C:/dados/base.xlsx",
+            synced_at="2026-03-31T12:00:00+00:00",
+            mirrored_records=3,
+            session_records=3,
+            filtered_records=1,
+        ),
     )
 
     snapshot = build_diagnostics_snapshot(window)
@@ -37,6 +51,65 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
     assert snapshot["session"]["selected_uid"] == "uid-1"
     assert snapshot["session"]["map_layer"] == "Mapa Claro"
     assert snapshot["session"]["last_marker_coords"] == [-22.01, -47.89]
+    assert snapshot["session"]["local_session_source"]["strategy"] == "sqlite_snapshot"
+    assert snapshot["session"]["local_filter_facets"]["source"] == "sqlite"
+    assert snapshot["session"]["local_mutation_sync"]["operation"] == "edit"
+    assert snapshot["session"]["local_record_read"]["source"] == "sqlite"
+    assert snapshot["session"]["local_record_read"]["filtered_records"] == 1
+
+
+def test_build_diagnostics_snapshot_includes_persistence_data():
+    persistence_service = SimpleNamespace(
+        db_path="C:/dados/state/compensacoes.db",
+        build_workbook_diagnostics=lambda workbook_path: SimpleNamespace(
+            workbook_path=workbook_path,
+            db_path="C:/dados/state/compensacoes.db",
+            synced_at="2026-03-30T12:00:00+00:00",
+            record_count=3,
+            plantio_count=1,
+            audit_event_count=2,
+            compensados_count=1,
+            pendentes_count=2,
+            top_microbacias=(("Gregorio", 2),),
+            recent_audit_events=({"action": "edit", "summary": "Registro alterado", "timestamp": "2026-03-30T12:00:00+00:00"},),
+        ),
+    )
+    window = SimpleNamespace(
+        excel=SimpleNamespace(path="C:/dados/base.xlsx"),
+        records=[1, 2, 3],
+        filtered_records=[1, 2],
+        selected=None,
+        recent_files=[],
+        is_dark_mode=False,
+        last_marker_coords=(),
+        settings_controller=SimpleNamespace(current_map_layer=lambda: "Mapa Claro"),
+        persistence_service=persistence_service,
+        _local_session_source_status={"source": "session", "issues": ["divergente"]},
+        _local_filter_facets_status={"source": "session", "issues": ["fallback"]},
+        _local_mutation_sync_status={"status": "falha", "operation": "import", "issues": ["sqlite offline"]},
+        _local_record_read_status=LocalRecordReadStatus(
+            status="fallback",
+            source="session",
+            strategy="session_filter",
+            workbook_path="C:/dados/base.xlsx",
+            synced_at="2026-03-31T12:00:00+00:00",
+            mirrored_records=2,
+            session_records=3,
+            filtered_records=2,
+            issues=("Espelho com contagem divergente.",),
+        ),
+    )
+
+    snapshot = build_diagnostics_snapshot(window)
+
+    assert snapshot["persistence"]["available"] is True
+    assert snapshot["persistence"]["db_path"] == "C:/dados/state/compensacoes.db"
+    assert snapshot["persistence"]["workbook"]["record_count"] == 3
+    assert snapshot["persistence"]["workbook"]["recent_audit_events"][0]["action"] == "edit"
+    assert snapshot["session"]["local_session_source"]["source"] == "session"
+    assert snapshot["session"]["local_filter_facets"]["source"] == "session"
+    assert snapshot["session"]["local_mutation_sync"]["status"] == "falha"
+    assert snapshot["session"]["local_record_read"]["status"] == "fallback"
 
 
 def test_write_diagnostics_report_persists_json(tmp_path):

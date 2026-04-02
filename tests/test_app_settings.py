@@ -26,6 +26,7 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.map_layer() == "Mapa Claro"
     assert settings.sort_state() == (-1, 0)
     assert settings.window_geometry() is None
+    assert settings.operation_history_filter_state() == {}
 
     settings.set_dark_mode(True)
     settings.set_active_tab_index(2)
@@ -35,6 +36,7 @@ def test_app_settings_round_trip_and_defaults():
     settings.set_map_layer("Satélite")
     settings.set_sort_state(4, 1)
     settings.set_window_geometry(b"geom")
+    settings.set_operation_history_filter_state({"action": "EDIT", "search": "uid-1"})
 
     assert settings.is_dark_mode() is True
     assert settings.active_tab_index() == 2
@@ -44,6 +46,7 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.map_layer() == "Satélite"
     assert settings.sort_state() == (4, 1)
     assert settings.window_geometry() == b"geom"
+    assert settings.operation_history_filter_state() == {"action": "EDIT", "search": "uid-1"}
 
     settings.clear_last_excel_path()
     settings.clear_sort_state()

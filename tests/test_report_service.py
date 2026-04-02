@@ -6,7 +6,7 @@ def test_report_service_uses_readable_column_labels():
     headers = [label for label, _attr in ALL_COLUMNS]
 
     assert "Of\u00edcio/ Processo" in headers
-    assert "Eletr\u00f4nico" in headers
+    assert "Tipo" in headers
     assert "Compensa\u00e7\u00e3o" in headers
     assert "Endere\u00e7o" in headers
     assert "Endere\u00e7o do Plantio" in headers
@@ -33,5 +33,6 @@ def test_individual_pdf_rows_include_plantio_coordinates_when_present():
 
     rows = _build_individual_pdf_rows(record)
 
+    assert rows[0] == ["Ofício/Processo:", "123/2026", "Tipo:", "Eletrônico"]
     assert ["Coord. Plantio:", "-22.05, -47.95", "", ""] in rows
     assert not any(row[0] == "Coordenadas:" and row[1] == "" for row in rows)

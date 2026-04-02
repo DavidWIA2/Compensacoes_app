@@ -18,6 +18,7 @@ from app.models.display_columns import (
     display_column_label,
 )
 from app.services.coordinates import format_coordinate_pair
+from app.services.records_service import display_tipo_value
 from app.ui.components.ui_utils import resource_path
 
 
@@ -45,7 +46,7 @@ def _format_individual_status(record: Compensacao) -> str:
 
 def _build_individual_pdf_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
     rows = [
-        ["Ofício/Processo:", str(record.oficio_processo or ""), "Eletrônico:", str(record.eletronico or "")],
+        ["Ofício/Processo:", str(record.oficio_processo or ""), "Tipo:", display_tipo_value(record.eletronico)],
         ["Av. Técnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
         ["Status:", _format_individual_status(record), "Microbacia:", str(record.microbacia or "")],
         ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
@@ -130,6 +131,8 @@ def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) 
         for attr in selected_cols:
             header_name = DISPLAY_COLUMN_LABEL_BY_ATTR.get(attr, attr)
             value = getattr(record, attr)
+            if attr == "eletronico":
+                value = display_tipo_value(value)
             row[header_name] = "" if value is None else str(value)
         data_list.append(row)
     return data_list
@@ -204,7 +207,7 @@ def export_excel_two_sheets(
 
     df_kpis = pd.DataFrame(kpis, columns=["Métrica", "Valor"])
     df_micro = pd.DataFrame(pend_micro_sorted, columns=["Microbacia", "Mudas Pendentes"])
-    df_ele = pd.DataFrame(pend_ele_sorted, columns=["Processo Eletrônico", "Mudas Pendentes"])
+    df_ele = pd.DataFrame(pend_ele_sorted, columns=["Tipo", "Mudas Pendentes"])
 
     try:
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -231,11 +234,11 @@ def export_excel_two_sheets(
                 worksheet.cell(row=5 + index, column=5, value=row["Microbacia"])
                 worksheet.cell(row=5 + index, column=6, value=row["Mudas Pendentes"])
 
-            worksheet.cell(row=3, column=9, value="PENDÊNCIAS POR PROCESSO").font = FONT_BOLD
-            worksheet.cell(row=4, column=9, value="Eletrônico").font = FONT_BOLD
+            worksheet.cell(row=3, column=9, value="PENDÊNCIAS POR TIPO").font = FONT_BOLD
+            worksheet.cell(row=4, column=9, value="Tipo").font = FONT_BOLD
             worksheet.cell(row=4, column=10, value="Mudas").font = FONT_BOLD
             for index, row in df_ele.iterrows():
-                worksheet.cell(row=5 + index, column=9, value=row["Processo Eletrônico"])
+                worksheet.cell(row=5 + index, column=9, value=row["Tipo"])
                 worksheet.cell(row=5 + index, column=10, value=row["Mudas Pendentes"])
 
             _style_worksheet(writer.sheets["Dados"], highlight_compensado=True)

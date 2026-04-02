@@ -54,4 +54,4 @@ def test_compute_metrics_groups_empty_values_with_fallback_labels():
     metrics = harness._compute_metrics(records)
 
     assert metrics["pend_micro_sorted"] == [("(Sem microbacia)", 4.0)]
-    assert metrics["pend_ele_sorted"] == [("(Sem eletr\u00f4nico)", 4.0)]
+    assert metrics["pend_ele_sorted"] == [("Nulo", 4.0)]

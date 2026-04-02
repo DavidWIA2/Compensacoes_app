@@ -45,3 +45,10 @@ def setup_logger():
 
 
 logger = setup_logger()
+
+
+def get_logger(component: str = ""):
+    if not component:
+        return logger
+    clean_component = ".".join(part.strip() for part in str(component).split(".") if part.strip())
+    return logger.getChild(clean_component)

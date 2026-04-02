@@ -84,3 +84,12 @@ class AppSettings:
 
     def set_window_geometry(self, geometry):
         self.setValue("window_geometry", geometry)
+
+    def operation_history_filter_state(self) -> dict:
+        state = self.value("operation_history_filter_state", {})
+        if isinstance(state, dict):
+            return dict(state)
+        return {}
+
+    def set_operation_history_filter_state(self, state: dict):
+        self.setValue("operation_history_filter_state", dict(state or {}))

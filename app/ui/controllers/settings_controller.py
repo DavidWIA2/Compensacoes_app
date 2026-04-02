@@ -58,6 +58,13 @@ class SettingsController:
         else:
             self.window.is_dark_mode = str(self._value("dark_mode", "false")).lower() == "true"
 
+        geometry = None
+        if hasattr(self.window.settings, "window_geometry"):
+            geometry = self.window.settings.window_geometry()
+        else:
+            geometry = self._value("window_geometry")
+        self.window._startup_geometry_restored = bool(geometry and self.window.restoreGeometry(geometry))
+
         if hasattr(self.window.settings, "active_tab_index"):
             tab_index = self.window.settings.active_tab_index()
         else:
@@ -92,7 +99,8 @@ class SettingsController:
         self.window._startup_window_state_applied = True
         self.window.setWindowState(self.window.windowState() & ~(Qt.WindowMinimized | Qt.WindowFullScreen))
         self.window.showNormal()
-        self.window.showMaximized()
+        if not self.window._startup_geometry_restored:
+            self.window.showMaximized()
         self.window._startup_layout_pending = True
 
     def load_sort_settings(self):

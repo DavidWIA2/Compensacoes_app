@@ -4,11 +4,13 @@ import tempfile
 import uuid
 from typing import Dict, List, Optional, Tuple
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from app.application.use_cases.local_record_queries import LocalRecordReadStatus
+from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
+from app.services.audit_service import format_audit_timestamp
 from app.ui.components.widgets import KPICard
 from app.ui.components.ui_utils import resource_path
 
@@ -40,6 +42,20 @@ class DashboardTab(QWidget):
         actions_layout.addWidget(self.btn_export_pdf)
         layout.addLayout(actions_layout)
 
+        self.lbl_local_overview = QLabel(
+            "Resumo local (SQLite): carregue uma planilha para acompanhar a qualidade dos dados."
+        )
+        self.lbl_local_overview.setWordWrap(True)
+        self.lbl_local_overview.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_local_overview)
+
+        self.lbl_read_source = QLabel(
+            "Leitura operacional atual: aguardando aplicacao dos filtros."
+        )
+        self.lbl_read_source.setWordWrap(True)
+        self.lbl_read_source.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_read_source)
+
         # QWebEngineView for ECharts
         self.web = QWebEngineView()
         self.web.setStyleSheet("background: transparent;")
@@ -65,12 +81,21 @@ class DashboardTab(QWidget):
         script = f"if(window.updateDashboard) window.updateDashboard({json.dumps(json.dumps(data))});"
         self.web.page().runJavaScript(script)
 
-    def update_dashboard(self, m: Dict, is_dark: bool, records_micros: List[str]):
+    def update_dashboard(
+        self,
+        m: Dict,
+        is_dark: bool,
+        records_micros: List[str],
+        record_overview: Optional[PersistenceRecordOverviewReport] = None,
+        record_read_status: Optional[LocalRecordReadStatus] = None,
+    ):
         # Cards
         self.card_total.update_value(f"{m['total_geral']:,.0f}".replace(",", "."))
         self.card_pend.update_value(f"{m['total_pendente']:,.0f}".replace(",", "."))
         self.card_comp.update_value(f"{m['total_compensado']:,.0f}".replace(",", "."))
         self.card_records.update_value(f"{m['count_total']}")
+        self._update_local_overview(record_overview)
+        self._update_read_source(record_read_status)
 
         payload = {
             "m": m,
@@ -81,6 +106,77 @@ class DashboardTab(QWidget):
         
         if self._page_loaded:
             self._send_to_js(payload)
+
+    def _update_local_overview(self, report: Optional[PersistenceRecordOverviewReport]):
+        if report is None:
+            self.lbl_local_overview.setText(
+                "Resumo local (SQLite): indisponivel para esta sessao."
+            )
+            return
+
+        if report.status == "indisponivel":
+            self.lbl_local_overview.setText(
+                "Resumo local (SQLite): o espelho local nao esta disponivel nesta sessao."
+            )
+            return
+
+        if report.status == "ausente":
+            self.lbl_local_overview.setText(
+                "Resumo local (SQLite): a planilha ainda nao foi sincronizada para leitura local."
+            )
+            return
+
+        lines = [
+            (
+                f"Espelho local (SQLite): {report.total_records} registro(s) | "
+                f"{report.compensados_count} compensados | "
+                f"{report.pendentes_count} pendentes | "
+                f"{report.records_with_plantios_count} com plantios"
+            ),
+            (
+                f"Qualidade dos dados: {report.records_without_microbacia_count} sem microbacia | "
+                f"{report.records_without_coordinates_count} sem coordenadas"
+            ),
+        ]
+        if report.top_microbacias:
+            lines.append(
+                "Top microbacias: "
+                + " | ".join(f"{label}: {count}" for label, count in report.top_microbacias)
+            )
+        self.lbl_local_overview.setText("\n".join(lines))
+
+    def _update_read_source(self, status: Optional[LocalRecordReadStatus]):
+        if status is None or status.status == "indisponivel":
+            self.lbl_read_source.setText(
+                "Leitura operacional atual: sessao em memoria."
+            )
+            return
+
+        if status.uses_sqlite:
+            lines = [
+                (
+                    f"Leitura operacional atual: espelho local (SQLite) | "
+                    f"{status.filtered_records} registro(s) no recorte"
+                )
+            ]
+            if status.strategy == "sqlite_query":
+                lines.append("Modo de leitura local: consulta indexada.")
+            if status.synced_at:
+                lines.append(
+                    f"Ultima sincronizacao valida: {format_audit_timestamp(status.synced_at)}"
+                )
+            self.lbl_read_source.setText("\n".join(lines))
+            return
+
+        lines = [
+            (
+                f"Leitura operacional atual: sessao em memoria | "
+                f"{status.filtered_records} registro(s) no recorte"
+            )
+        ]
+        if status.issues:
+            lines.append("Motivos do fallback: " + " | ".join(status.issues))
+        self.lbl_read_source.setText("\n".join(lines))
 
     def apply_theme(self, theme):
         for c in [self.card_total, self.card_pend, self.card_comp, self.card_records]:

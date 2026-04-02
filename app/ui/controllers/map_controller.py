@@ -1,49 +1,46 @@
 import json
-import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+from app.application.use_cases.batch_geocode_operations import BatchGeocodeOperationsUseCases
+from app.application.use_cases.map_interactions import MapInteractionsUseCases
+from app.application.use_cases.map_layer_operations import MapLayerOperationsUseCases
+from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.compensacao import Compensacao
-from app.services.coordinates import build_heatmap_points
 from app.services.geocode_service import geocode_address_arcgis
 from app.services.geocode_update_service import (
-    apply_geocode_to_record,
     build_cached_microbacia_finder,
-    find_record_by_excel_row,
 )
 from app.services.plantio_service import (
     clone_plantios,
-    plantio_choice_label,
     record_plantio_items,
-    sync_legacy_plantio_fields,
 )
+from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
+from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
 from app.ui.components.ui_utils import msg_confirm, resource_path
 from app.ui.components.workers import GeocodeWorker
-from app.utils.logger import logger
+from app.utils.logger import get_logger
+
+
+logger = get_logger("UI.Map")
+
+BATCH_GEOCODE_JOB_NAME = "batch_geocode"
 
 
 class MapController:
     def __init__(self, window):
         self.window = window
-
-    def _main_window_module(self):
-        from app.ui import main_window as main_window_module
-
-        return main_window_module
+        self.geocode_worker_factory = None
+        self.batch_geocode_use_cases = BatchGeocodeOperationsUseCases()
+        self.map_use_cases = MapInteractionsUseCases()
+        self.map_rendering_use_cases = MapRenderingUseCases()
+        self.map_layer_use_cases = MapLayerOperationsUseCases(self.map_rendering_use_cases)
 
     def _current_form_plantios(self):
         return clone_plantios(self.window.form_plantios)
-
-    def _choose_plantio_item(self, title: str, prompt: str, plantios):
-        options = [plantio_choice_label(item, index) for index, item in enumerate(plantios, start=1)]
-        selected, ok = QInputDialog.getItem(self.window, title, prompt, options, 0, False)
-        if not ok or not selected:
-            return None
-        selected_index = options.index(selected)
-        return plantios[selected_index]
 
     def update_address_search_enabled(self):
         has_end = bool(self.window.data_tab.in_end.text().strip())
@@ -57,59 +54,51 @@ class MapController:
         )
 
     def open_street_view(self):
-        end_principal = self.window.data_tab.in_end.text().strip()
-        plantios = self._current_form_plantios()
+        plan = self.map_use_cases.build_street_view_plan(
+            main_address=self.window.data_tab.in_end.text().strip(),
+            plantios=self._current_form_plantios(),
+            marker_coords=self.window.last_marker_coords,
+        )
 
-        choices = []
-        if end_principal:
-            choices.append(("Endereço Principal", end_principal))
-        for index, item in enumerate(plantios, start=1):
-            if item.endereco:
-                choices.append((plantio_choice_label(item, index), item.endereco))
-
-        target_address = None
-        if not choices:
-            if self.window.last_marker_coords:
-                lat, lon = self.window.last_marker_coords
-                url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
-                QDesktopServices.openUrl(QUrl(url))
+        if not plan.choices:
+            if plan.marker_fallback:
+                lat, lon = plan.marker_fallback
+                QDesktopServices.openUrl(QUrl(self.map_use_cases.build_street_view_url(lat=lat, lon=lon)))
                 logger.info(f"Street View aberto para marcador manual {lat}, {lon}")
                 return
 
-            QMessageBox.warning(
-                self.window,
-                "Atenção",
-                "Nenhum endereço ou ponto no mapa selecionado para o Street View.",
-            )
+            QMessageBox.warning(self.window, plan.empty_title, plan.empty_message)
             return
 
-        if len(choices) == 1:
-            target_address = choices[0][1]
+        if len(plan.choices) == 1:
+            target_address = plan.choices[0].address
         else:
-            labels = [label for label, _address in choices]
+            labels = [choice.label for choice in plan.choices]
             selected, ok = QInputDialog.getItem(
                 self.window,
-                "Escolha o Endereço",
-                "Qual endereço você deseja visualizar no Street View?",
+                plan.chooser_title,
+                plan.chooser_prompt,
                 labels,
                 0,
                 False,
             )
             if not ok or not selected:
                 return
-            target_address = dict(choices).get(selected)
+            target_address = self.map_use_cases.resolve_choice(plan, selected)
 
         if target_address:
-            self.window.statusBar().showMessage(f"Geocodificando para Street View: {target_address}...")
+            self.window.statusBar().showMessage(
+                self.map_use_cases.build_geocoding_status(target_address, purpose="street_view")
+            )
             coords = geocode_address_arcgis(target_address)
             if coords:
                 lat, lon = coords
                 self.set_map_marker(lat, lon)
-                url = f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={lat},{lon}"
-                QDesktopServices.openUrl(QUrl(url))
+                QDesktopServices.openUrl(QUrl(self.map_use_cases.build_street_view_url(lat=lat, lon=lon)))
                 logger.info(f"Street View aberto para {lat}, {lon} ({target_address})")
             else:
-                QMessageBox.warning(self.window, "Erro", f"Não foi possível localizar o endereço: {target_address}")
+                failure = self.map_use_cases.build_street_view_lookup_failure(target_address)
+                QMessageBox.warning(self.window, failure.warning_title, failure.warning_message)
 
     def load_custom_layer(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -121,34 +110,18 @@ class MapController:
         if not path:
             return
 
-        self.window.statusBar().showMessage(f"Carregando camada: {os.path.basename(path)}...")
+        self.window.statusBar().showMessage(self.map_layer_use_cases.build_custom_layer_loading_message(path))
         try:
-            import fiona
-            import geopandas as gpd
-
-            fiona.drvsupport.supported_drivers["KML"] = "rw"
-            gdf = gpd.read_file(path)
-            if gdf.crs and gdf.crs.to_epsg() != 4326:
-                gdf = gdf.to_crs(epsg=4326)
-
-            geojson_obj = json.loads(gdf.to_json())
-            script = f"""
-            if(window.map) {{
-                if(window.customLayer) window.map.removeLayer(window.customLayer);
-                window.customLayer = L.geoJSON({json.dumps(geojson_obj)}, {{
-                    style: function(feature) {{
-                        return {{color: "#e74c3c", weight: 2, fillOpacity: 0.1, dashArray: '5, 5'}};
-                    }}
-                }}).addTo(window.map);
-                window.map.fitBounds(window.customLayer.getBounds());
-            }}
-            """
-            self.run_map_js(script, "load-custom-layer")
-            QMessageBox.information(self.window, "Sucesso", "Camada carregada com sucesso.")
+            presentation = self.map_layer_use_cases.load_custom_layer(
+                path,
+                geojson_loader=self._read_custom_layer_geojson,
+            )
+            self.run_map_js(presentation.command.script, presentation.command.context)
+            QMessageBox.information(self.window, presentation.success_title, presentation.success_message)
             logger.info(f"Camada GIS carregada: {path}")
         except Exception as exc:
             logger.error(f"Erro ao carregar camada GIS: {exc}")
-            QMessageBox.critical(self.window, "Erro", f"Não foi possível ler o arquivo GIS:\n{exc}")
+            QMessageBox.critical(self.window, "Erro", f"Nao foi possivel ler o arquivo GIS:\n{exc}")
         finally:
             self.window.statusBar().showMessage("Pronto")
 
@@ -158,19 +131,21 @@ class MapController:
 
     def initial_map_sync(self):
         self.window._apply_theme_to_map()
-        layer = self.window.settings_controller.current_map_layer()
-        self.run_map_js(f"if(window.setBaseLayer) window.setBaseLayer('{layer}');", "restore-layer")
-        if self.window.gis:
-            self.load_microbacias_layer()
-        self.toggle_heatmap()
+        heatmap_points = self._current_heatmap_points()
+        commands = self.map_rendering_use_cases.build_initial_sync_commands(
+            theme="dark" if self.window.is_dark_mode else "light",
+            geojson_data=self.window.gis.to_geojson_obj() if self.window.gis else None,
+            current_layer=self.window.settings_controller.current_map_layer(),
+            marker_coords=self.window.last_marker_coords,
+            heatmap_points=heatmap_points if self.window.data_tab.chk_heatmap.isChecked() else None,
+        )
+        for command in commands:
+            self.run_map_js(command.script, command.context)
 
     def load_microbacias_layer(self):
         if self.window.gis:
-            geojson = self.window.gis.to_geojson_obj()
-            self.run_map_js(
-                f"if(window.setMicrobacias) window.setMicrobacias({json.dumps(geojson)});",
-                "load-microbacias",
-            )
+            command = self.map_rendering_use_cases.build_microbacias_command(self.window.gis.to_geojson_obj())
+            self.run_map_js(command.script, command.context)
 
     def run_map_js(self, script: str, context: str):
         try:
@@ -198,68 +173,80 @@ class MapController:
         lat = float(lat)
         lon = float(lon)
         self.window.last_marker_coords = (lat, lon)
-        self.run_map_js(f"if(window.setMarker) window.setMarker({lat}, {lon});", "marker")
+        command = self.map_rendering_use_cases.build_marker_command(lat, lon)
+        self.run_map_js(command.script, command.context)
         self.update_address_search_enabled()
 
     def highlight_microbacia(self, name: str):
-        self.run_map_js(
-            f"if(window.highlightGeoJsonByName) window.highlightGeoJsonByName('{self.window.MICROB_NAME_FIELD}', {json.dumps(name)});",
-            "highlight",
-        )
+        command = self.map_rendering_use_cases.build_highlight_command(self.window.MICROB_NAME_FIELD, name)
+        self.run_map_js(command.script, command.context)
 
     def set_map_status(self, message: str):
-        self.run_map_js(f"if(window.setStatus) window.setStatus({json.dumps(message)});", "status")
+        command = self.map_rendering_use_cases.build_status_command(message)
+        self.run_map_js(command.script, command.context)
 
     def search_on_map(self):
         addr = self.window.data_tab.in_end.text().strip()
         if not addr:
-            QMessageBox.warning(self.window, "Atenção", "Digite um endereço para pesquisar.")
+            QMessageBox.warning(self.window, "Atencao", "Digite um endereco para pesquisar.")
             return
-        self.window.statusBar().showMessage("Pesquisando endereço...")
+        self.window.statusBar().showMessage(self.map_use_cases.build_geocoding_status(addr, purpose="main_search"))
         self.perform_geocode(addr)
 
     def search_on_map_plantio(self):
-        plantios = self._current_form_plantios()
-        if not plantios:
-            QMessageBox.warning(self.window, "Atenção", "Cadastre ao menos um endereço de plantio para pesquisar.")
+        plan = self.map_use_cases.build_plantio_search_plan(self._current_form_plantios())
+        if not plan.choices:
+            QMessageBox.warning(self.window, plan.empty_title, plan.empty_message)
             return
 
-        if len(plantios) == 1:
-            target = plantios[0]
+        if len(plan.choices) == 1:
+            target_address = plan.choices[0].address
         else:
-            target = self._choose_plantio_item(
-                "Escolher Plantio",
-                "Qual endereço de plantio você deseja buscar?",
-                plantios,
+            labels = [choice.label for choice in plan.choices]
+            selected, ok = QInputDialog.getItem(
+                self.window,
+                plan.chooser_title,
+                plan.chooser_prompt,
+                labels,
+                0,
+                False,
             )
-            if target is None:
+            if not ok or not selected:
                 return
+            target_address = self.map_use_cases.resolve_choice(plan, selected)
 
-        self.window.statusBar().showMessage("Pesquisando endereço de plantio...")
-        self.perform_geocode(target.endereco)
+        self.window.statusBar().showMessage(
+            self.map_use_cases.build_geocoding_status(target_address, purpose="plantio_search")
+        )
+        self.perform_geocode(target_address)
 
     def perform_geocode(self, address: str):
-        main_window_module = self._main_window_module()
-        coords = main_window_module.geocode_address_arcgis(address)
+        coords = geocode_address_arcgis(address)
         if coords:
             self.set_map_marker(coords[0], coords[1])
             if self.window.gis:
                 micro = self.window.gis.find_microbacia(*coords)
-                if micro:
-                    self.window.data_tab.in_micro.setCurrentText(micro)
-                    self.highlight_microbacia(micro)
-                    self.window.statusBar().showMessage(f"Localizado. Microbacia: {micro}")
-                else:
-                    self.window.statusBar().showMessage("Localizado (fora de microbacia)")
+            else:
+                micro = ""
+            presentation = self.map_use_cases.build_geocode_presentation(
+                address=address,
+                coords=coords,
+                microbacia=str(micro or ""),
+            )
+            if presentation.microbacia:
+                self.window.data_tab.in_micro.setCurrentText(presentation.microbacia)
+                self.highlight_microbacia(presentation.microbacia)
+            self.window.statusBar().showMessage(presentation.status_message)
             self.window._update_form_action_buttons()
-        else:
-            QMessageBox.warning(self.window, "Não encontrado", "Não consegui localizar esse endereço.")
-            self.window.statusBar().showMessage("Endereço não encontrado")
+            return
+
+        presentation = self.map_use_cases.build_geocode_presentation(address=address, coords=None, microbacia="")
+        QMessageBox.warning(self.window, presentation.warning_title, presentation.warning_message)
+        self.window.statusBar().showMessage(presentation.status_message)
 
     def open_map_fullscreen(self):
-        main_window_module = self._main_window_module()
         path = resource_path("app", "ui", "map_leaflet.html")
-        dialog = main_window_module.MapFullScreenDialog(
+        dialog = MapFullScreenDialog(
             self.window,
             path,
             self.window.gis.to_geojson_obj() if self.window.gis else None,
@@ -267,12 +254,11 @@ class MapController:
             self.window.last_marker_coords,
             self.window.gis,
             self.window.settings_controller.current_map_layer(),
-            [],
+            self._current_heatmap_points(),
         )
         dialog.exec()
 
     def open_table_fullscreen(self):
-        main_window_module = self._main_window_module()
         splitter = self.window.data_tab.splitter
         left_panel = self.window.data_tab.left_panel
         target_index = splitter.indexOf(left_panel)
@@ -280,9 +266,9 @@ class MapController:
 
         def restore_panel(widget):
             splitter.insertWidget(target_index if target_index >= 0 else 0, widget)
-            main_window_module.QTimer.singleShot(0, lambda: splitter.setSizes(previous_sizes))
+            QTimer.singleShot(0, lambda: splitter.setSizes(previous_sizes))
 
-        dialog = main_window_module.TableFullScreenDialog(self.window, left_panel, restore_panel)
+        dialog = TableFullScreenDialog(self.window, left_panel, restore_panel)
         dialog.exec()
 
     def record_needs_batch_geocode(self, record: Compensacao) -> bool:
@@ -306,97 +292,135 @@ class MapController:
             return 0
 
         micro_finder = build_cached_microbacia_finder(self.window.gis.find_microbacia) if self.window.gis else None
-        updated_records: List[Compensacao] = []
+        persistence_plan = self.batch_geocode_use_cases.apply_results(
+            self.window.records,
+            results,
+            micro_finder=micro_finder,
+        )
+        if not persistence_plan.updated_records:
+            return 0
+        save_result = self.window.excel.save_batch_edits(list(persistence_plan.updated_records))
+        if isinstance(save_result, int):
+            return save_result
+        return persistence_plan.total_updated_records
 
-        for excel_row, geocode_data in results.items():
-            record = find_record_by_excel_row(self.window.records, excel_row)
-            if not record:
-                continue
+    def _on_batch_geocode_progress(self, current: int, message: str):
+        self.window.update_busy_operation(current, message)
 
-            changed = False
-            main_coords = geocode_data.get("main")
-            if main_coords:
-                lat, lon = float(main_coords[0]), float(main_coords[1])
-                apply_geocode_to_record(record, lat, lon, micro_finder)
-                changed = True
+    def _clear_geocode_worker(self):
+        self.window.release_background_worker(BATCH_GEOCODE_JOB_NAME)
+        self.window.geo_worker = None
 
-            plantio_coords = geocode_data.get("plantios", {}) or {}
-            legacy_plantio_coords = geocode_data.get("plantio")
-            if legacy_plantio_coords:
-                first_plantio = next(iter(record_plantio_items(record)), None)
-                if first_plantio:
-                    plantio_coords[int(first_plantio.sequence)] = legacy_plantio_coords
-            if plantio_coords:
-                updated_plantios = []
-                for plantio in record_plantio_items(record):
-                    coords = plantio_coords.get(int(plantio.sequence))
-                    if coords:
-                        plantio.latitude = str(float(coords[0]))
-                        plantio.longitude = str(float(coords[1]))
-                        changed = True
-                    updated_plantios.append(plantio)
-                record.plantios = updated_plantios
-                sync_legacy_plantio_fields(record)
+    def cancel_batch_geocode(self):
+        worker = self.window.geo_worker
+        if worker is None:
+            return
+        self.window.statusBar().showMessage("Cancelando geocodificacao em lote...")
+        if hasattr(worker, "stop"):
+            worker.stop()
 
-                if not (record.microbacia or "").strip() and not main_coords and micro_finder:
-                    first_coords = next(iter(plantio_coords.values()), None)
-                    if first_coords:
-                        try:
-                            micro = micro_finder(float(first_coords[0]), float(first_coords[1]))
-                        except Exception:
-                            micro = ""
-                        if micro and str(micro).strip():
-                            record.microbacia = str(micro).strip()
-
-            if changed:
-                updated_records.append(record)
-
-        return self.window.excel.save_batch_edits(updated_records)
+    def on_geocode_cancelled(self, message: str):
+        resolved_message = self.batch_geocode_use_cases.build_cancelled_message(message)
+        self._clear_geocode_worker()
+        self.window.mark_job_cancelled(BATCH_GEOCODE_JOB_NAME, resolved_message)
+        self.window.end_busy_operation(resolved_message)
+        QMessageBox.information(
+            self.window,
+            "Concluido",
+            resolved_message,
+        )
 
     def run_batch_geocode(self):
-        pending = [record for record in self.window.records if self.record_needs_batch_geocode(record)]
-        if not pending:
-            QMessageBox.information(self.window, "Sucesso", "Tudo georreferenciado!")
+        plan = self.batch_geocode_use_cases.build_batch_plan(
+            self.window.records,
+            needs_batch_geocode=self.record_needs_batch_geocode,
+        )
+        if not plan.pending_records:
+            QMessageBox.information(self.window, "Sucesso", plan.empty_message)
             return
-        if msg_confirm(self.window, "GPS em Lote", f"Deseja buscar coordenadas para {len(pending)} registros?"):
-            self.window.progress_bar.setVisible(True)
-            self.window.progress_bar.setRange(0, len(pending))
-            self.window.progress_bar.setValue(0)
-            self.window.statusBar().showMessage("Iniciando geocodificação em lote...")
-            self.window.geo_worker = GeocodeWorker(pending)
-            self.window.geo_worker.progress_update.connect(
-                lambda i, msg: (self.window.progress_bar.setValue(i), self.window.statusBar().showMessage(msg))
+        if msg_confirm(self.window, plan.confirmation_title, plan.confirmation_message):
+            self.window.start_background_job(self._build_batch_geocode_job_spec(list(plan.pending_records)))
+
+    def _build_batch_geocode_job_spec(self, pending) -> BackgroundJobSpec:
+        worker = self._create_geocode_worker(pending)
+        worker.progress_update.connect(self._on_batch_geocode_progress)
+        worker.finished_process.connect(self.on_geocode_finished)
+
+        disconnect_callbacks = [
+            build_disconnect_callback(worker.progress_update, self._on_batch_geocode_progress),
+            build_disconnect_callback(worker.finished_process, self.on_geocode_finished),
+        ]
+        if hasattr(worker, "cancelled_process"):
+            worker.cancelled_process.connect(self.on_geocode_cancelled)
+            disconnect_callbacks.append(
+                build_disconnect_callback(worker.cancelled_process, self.on_geocode_cancelled)
             )
-            self.window.geo_worker.finished_process.connect(self.on_geocode_finished)
-            self.window.geo_worker.start()
+
+        return BackgroundJobSpec(
+            name=BATCH_GEOCODE_JOB_NAME,
+            worker=worker,
+            disconnect_callbacks=disconnect_callbacks,
+            stop_callback=getattr(worker, "stop", None),
+            wait_ms=10000,
+            busy_message="Iniciando geocodificacao em lote...",
+            total=len(pending),
+            cancellable=True,
+            cancel_callback=self.cancel_batch_geocode,
+            on_tracked=self._track_geocode_worker,
+        )
+
+    def _track_geocode_worker(self, worker) -> None:
+        self.window.geo_worker = worker
+
+    def _create_geocode_worker(self, pending):
+        factory = self.geocode_worker_factory or GeocodeWorker
+        return factory(pending)
 
     def on_geocode_finished(self, results):
-        self.window.progress_bar.setVisible(False)
-        self.window.statusBar().showMessage("Geoprocessamento concluído.")
-        if not results:
-            QMessageBox.information(self.window, "Concluído", "Nenhum endereço pôde ser processado.")
-            return
+        self._clear_geocode_worker()
+        self.window.end_busy_operation("Geoprocessamento concluido.")
 
         try:
             updated = self.persist_batch_geocode_results(results)
         except Exception as exc:
-            logger.error(f"Falha ao salvar geocodificação em lote: {exc}", exc_info=True)
+            self.window.mark_job_failed(
+                BATCH_GEOCODE_JOB_NAME,
+                self.batch_geocode_use_cases.build_failure_runtime_message(exc),
+            )
+            logger.error(f"Falha ao salvar geocodificacao em lote: {exc}", exc_info=True)
             QMessageBox.critical(self.window, "Erro", f"Falha ao salvar coordenadas do GPS em lote: {exc}")
             return
 
-        if updated:
-            QMessageBox.information(self.window, "Concluído", f"{updated} registros tiveram coordenadas salvas.")
+        presentation = self.batch_geocode_use_cases.build_completion_presentation(
+            results or {},
+            updated_count=updated,
+        )
+        self.window.mark_job_completed(BATCH_GEOCODE_JOB_NAME, presentation.runtime_message)
+        QMessageBox.information(self.window, presentation.dialog_title, presentation.dialog_message)
+        if presentation.should_reload:
             self.window.reload()
-        else:
-            QMessageBox.information(self.window, "Concluído", "Nenhuma coordenada nova foi salva.")
 
     def toggle_heatmap(self):
-        if not self.window.data_tab.chk_heatmap.isChecked():
-            self.run_map_js("if(window.setHeatmap) window.setHeatmap([]);", "clear-heatmap")
-            return
+        command = self.map_rendering_use_cases.build_heatmap_command(
+            self._current_heatmap_points(),
+            context="update-heatmap" if self.window.data_tab.chk_heatmap.isChecked() else "clear-heatmap",
+        )
+        self.run_map_js(command.script, command.context)
 
-        typ = self.window.data_tab.combo_heatmap_type.currentText()
-        points = []
-        for record in self.window.filtered_records:
-            points.extend(build_heatmap_points(record, typ))
-        self.run_map_js(f"if(window.setHeatmap) window.setHeatmap({json.dumps(points)});", "update-heatmap")
+    def _current_heatmap_points(self) -> list[list[float]]:
+        return self.map_rendering_use_cases.build_heatmap_points(
+            self.window.filtered_records,
+            self.window.data_tab.combo_heatmap_type.currentText(),
+            enabled=self.window.data_tab.chk_heatmap.isChecked(),
+        )
+
+    @staticmethod
+    def _read_custom_layer_geojson(path: str) -> dict:
+        import fiona
+        import geopandas as gpd
+
+        fiona.drvsupport.supported_drivers["KML"] = "rw"
+        gdf = gpd.read_file(path)
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        return json.loads(gdf.to_json())

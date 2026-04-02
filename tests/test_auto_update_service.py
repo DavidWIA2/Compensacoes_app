@@ -59,6 +59,8 @@ def test_prepare_staged_update_downloads_validates_and_writes_launcher(tmp_path)
     assert "/SILENT" in script_text
     assert "Start-UpdateCleanup" in script_text
     assert "Relancando aplicativo atualizado." in script_text
+    assert "Instalacao retornou codigo de falha" in script_text
+    assert "exit $exitCode" in script_text
     assert "Compensacoes.exe" in script_text
     assert staged.restart_executable.endswith("Compensacoes.exe")
 

@@ -5,6 +5,12 @@ from typing import Dict, Iterable, List, Sequence, Optional
 from app.models.compensacao import Compensacao
 from app.services.plantio_service import record_plantio_addresses
 
+TIPO_NULO = "Nulo"
+TIPO_OFICIO = "Ofício"
+TIPO_FISICO = "Físico"
+TIPO_ELETRONICO = "Eletrônico"
+STANDARD_TIPO_OPTIONS = (TIPO_NULO, TIPO_OFICIO, TIPO_FISICO, TIPO_ELETRONICO)
+
 
 def remove_accents(input_str: str) -> str:
     """Remove acentos e caracteres especiais de uma string."""
@@ -16,6 +22,34 @@ def remove_accents(input_str: str) -> str:
 
 def safe_upper(s: str) -> str:
     return str(s).strip().upper() if s is not None else ""
+
+
+def normalize_tipo_key(value: object) -> str:
+    return remove_accents(str(value or "").strip()).upper()
+
+
+def display_tipo_value(value: object) -> str:
+    normalized = normalize_tipo_key(value)
+    if normalized in {"", "NULO"}:
+        return TIPO_NULO
+    if normalized == "OFICIO":
+        return TIPO_OFICIO
+    if normalized in {"NAO", "FISICO"}:
+        return TIPO_FISICO
+    if normalized in {"SIM", "ELETRONICO"}:
+        return TIPO_ELETRONICO
+    return str(value or "").strip()
+
+
+def storage_tipo_value(value: object) -> str:
+    display_value = display_tipo_value(value)
+    if display_value == TIPO_NULO:
+        return ""
+    return display_value
+
+
+def tipo_is_eletronico(value: object) -> bool:
+    return display_tipo_value(value) == TIPO_ELETRONICO
 
 
 def unique_non_empty(values: Iterable[str]) -> List[str]:
@@ -40,7 +74,7 @@ def build_search_blob(record: Compensacao) -> str:
     plantio_addresses = " ".join(record_plantio_addresses(record))
     blob = (
         f"{record.oficio_processo} {record.endereco} {record.endereco_plantio} {plantio_addresses} "
-        f"{record.microbacia} {record.av_tec} {record.caixa} {record.eletronico}"
+        f"{record.microbacia} {record.av_tec} {record.caixa} {display_tipo_value(record.eletronico)}"
     ).lower()
     return remove_accents(blob)
 
@@ -104,7 +138,7 @@ def compute_metrics(records: Sequence[Compensacao]) -> Dict[str, object]:
             count_pend += 1
             micro = (r.microbacia or "").strip() or "(Sem microbacia)"
             pend_micro[micro] = pend_micro.get(micro, 0.0) + val
-            ele = (r.eletronico or "").strip() or "(Sem eletrônico)"
+            ele = display_tipo_value(r.eletronico) or TIPO_NULO
             pend_ele[ele] = pend_ele.get(ele, 0.0) + val
 
     micro_sorted = sorted(pend_micro.items(), key=lambda x: x[1], reverse=True)
@@ -138,7 +172,7 @@ def filter_records(
     search_query = remove_accents(text or "").lower()
     
     selected_micros_set = {m.strip().upper() for m in (selected_micros or [])}
-    selected_ele_set = {e.strip().upper() for e in (selected_eletronicos or [])}
+    selected_ele_set = {normalize_tipo_key(e) for e in (selected_eletronicos or [])}
 
     filtered = []
     for r in records:
@@ -168,7 +202,7 @@ def filter_records(
                 continue
 
         if not eletronico_all_selected:
-            row_ele = (r.eletronico or "").strip().upper()
+            row_ele = normalize_tipo_key(display_tipo_value(r.eletronico))
             if row_ele not in selected_ele_set:
                 continue
 

@@ -10,6 +10,7 @@ from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, 
 
 from app.models.compensacao import Compensacao
 from app.services.coordinates import format_coordinate_pair
+from app.services.records_service import display_tipo_value
 from app.services.plantio_service import record_plantio_items
 from app.ui.components.ui_utils import resource_path
 
@@ -88,7 +89,7 @@ def _status_label(record: Compensacao) -> str:
 
 def _build_ficha_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
     rows = [
-        ["Of\u00edcio/Processo:", str(record.oficio_processo or ""), "Eletr\u00f4nico:", str(record.eletronico or "")],
+        ["Of\u00edcio/Processo:", str(record.oficio_processo or ""), "Tipo:", display_tipo_value(record.eletronico)],
         ["Av. T\u00e9cnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
         ["Status:", _status_label(record), "Microbacia:", str(record.microbacia or "")],
         ["Volume (Mudas):", str(record.compensacao or ""), "", ""],

@@ -2,6 +2,8 @@
 
 import requests
 
+from app.services.excel_service import WorkbookModifiedExternallyError
+
 
 def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[str, str]:
     if isinstance(exc, PermissionError):
@@ -14,6 +16,12 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
         return (
             "Arquivo Nao Encontrado",
             "O arquivo selecionado nao foi encontrado. Confira o caminho e tente novamente.",
+        )
+
+    if isinstance(exc, WorkbookModifiedExternallyError):
+        return (
+            "Planilha Desatualizada",
+            "A planilha foi alterada fora do aplicativo. Recarregue antes de continuar.",
         )
 
     if isinstance(exc, requests.exceptions.Timeout):

@@ -59,3 +59,29 @@ def ensure_dir(path: str | Path) -> Path:
     target = Path(path)
     target.mkdir(parents=True, exist_ok=True)
     return target
+
+
+def resolve_resource_path(
+    *parts: str | Path,
+    frozen: bool | None = None,
+    executable_path: str | Path | None = None,
+    meipass: str | Path | None = None,
+    project_root: str | Path | None = None,
+) -> str:
+    if frozen is None:
+        frozen = bool(getattr(sys, "frozen", False))
+
+    relative_path = os.path.join(*(str(part) for part in parts))
+    if frozen:
+        base_path = Path(meipass or getattr(sys, "_MEIPASS", "") or Path(executable_path or sys.executable).parent)
+        candidates = [
+            base_path / relative_path,
+            base_path / "_internal" / relative_path,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return str(candidates[0])
+
+    root = Path(project_root or PROJECT_ROOT)
+    return str(root / relative_path)

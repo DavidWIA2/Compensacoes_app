@@ -58,3 +58,32 @@ def test_plantios_dialog_edit_button_opens_row_editor_and_updates_values(monkeyp
     assert dialog.table.item(0, 1).text() == "12"
 
     dialog.close()
+
+
+def test_plantios_dialog_updates_total_and_validates_before_accept(monkeypatch):
+    get_app()
+    dialog = PlantiosDialog(
+        None,
+        [PlantioItem(sequence=1, endereco="Rua XV de Novembro, 100", qtd_mudas="8")],
+        "8",
+    )
+    warnings = []
+
+    monkeypatch.setattr(
+        "app.ui.components.dialogs.QMessageBox.warning",
+        lambda *args, **kwargs: warnings.append(args[2]),
+    )
+
+    dialog.table.item(0, 1).setText("12")
+    assert dialog.lbl_total.text() == "Soma dos plantios: 12 mudas | Compensacao: 8"
+
+    dialog._accept_with_validation()
+
+    assert dialog.plantios[0].qtd_mudas == "12"
+    assert warnings == []
+
+    dialog.table.item(0, 1).setText("0")
+    dialog._accept_with_validation()
+
+    assert warnings[-1] == "A quantidade de mudas do Plantio 1 deve ser maior que zero."
+    dialog.close()

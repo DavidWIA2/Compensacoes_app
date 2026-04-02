@@ -1,13 +1,12 @@
 import os
-import json
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableView, QHeaderView,
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
-    QPushButton, QSizePolicy, QRadioButton, QButtonGroup, QFrame,
+    QPushButton, QSizePolicy, QButtonGroup,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
@@ -21,6 +20,7 @@ from app.ui.components.ui_utils import resource_path
 
 class DataTab(QWidget):
     OFICIO_COLUMN_INDEX = display_column_index("oficio_processo")
+    TIPO_COLUMN_INDEX = display_column_index("eletronico")
     PLANTIO_COLUMN_INDEX = display_column_index("endereco_plantio")
 
     def __init__(self, parent=None):
@@ -36,12 +36,14 @@ class DataTab(QWidget):
         super().showEvent(event)
         if not self._map_loaded:
             self.load_map()
+        self._update_form_group_height()
         self._sync_left_panel_heights()
         self._update_responsive_constraints()
         QTimer.singleShot(0, self.align_splitter_to_table_width)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._update_form_group_height()
         self._sync_left_panel_heights()
         self._update_responsive_constraints()
 
@@ -67,7 +69,7 @@ class DataTab(QWidget):
 
         self.filter_micro = CheckableComboBox("Todas as Microbacias")
         self.filter_micro.setMinimumWidth(int(220 * self.sf))
-        self.filter_eletronico = CheckableComboBox("Eletrônico")
+        self.filter_eletronico = CheckableComboBox("Todos os Tipos")
         self.filter_eletronico.setMinimumWidth(int(140 * self.sf))
         self.filter_status = QComboBox()
         self.filter_status.addItems(["Todos", "Compensados", "Pendentes"])
@@ -85,7 +87,7 @@ class DataTab(QWidget):
             b.setMinimumHeight(int(28 * self.sf))
 
         mk_f("MICROBACIAS", self.filter_micro)
-        mk_f("ELETRÔNICO", self.filter_eletronico)
+        mk_f("TIPO", self.filter_eletronico)
         mk_f("STATUS", self.filter_status)
         mk_f("ANO", self.filter_year)
 
@@ -129,6 +131,7 @@ class DataTab(QWidget):
         self.table.setMinimumHeight(0)
         self.table.setMinimumWidth(0)
         self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self._resize_column_to_texts(self.TIPO_COLUMN_INDEX, ["Eletrônico", "Ofício", "Físico", "Nulo"])
         self._resize_column_to_texts(self.PLANTIO_COLUMN_INDEX, [])
         l_lay.addWidget(self.table, 1)
 
@@ -144,9 +147,11 @@ class DataTab(QWidget):
         r_lay.setContentsMargins(panel_gap, 0, 0, 0)
         r_lay.setSpacing(int(8 * self.sf))
         self.form_group = self._create_form_group()
+        self._update_form_group_height()
         r_lay.addWidget(self.form_group, 0)
 
         crud = QHBoxLayout()
+        crud.setContentsMargins(0, int(8 * self.sf), 0, 0)
         crud.setSpacing(int(8 * self.sf))
         self._crud_spacing = crud.spacing()
         self.btn_clear = QPushButton("Limpar Form")
@@ -176,8 +181,8 @@ class DataTab(QWidget):
         s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
         self.channel = QWebChannel(self.web.page())
         self.bridge = MapBridge(
-            self.main_window._on_map_click if self.main_window else None,
-            self.main_window.save_map_layer_preference if self.main_window else None,
+            getattr(self.main_window, "_on_map_click", None) if self.main_window else None,
+            getattr(self.main_window, "save_map_layer_preference", None) if self.main_window else None,
         )
         self.channel.registerObject("bridge", self.bridge)
         self.web.page().setWebChannel(self.channel)
@@ -264,9 +269,7 @@ class DataTab(QWidget):
         return sum(button.minimumSizeHint().width() for button in buttons) + (self._crud_spacing * (len(buttons) - 1))
 
     def preferred_right_panel_width(self) -> int:
-        widths = [max(int(700 * self.sf), 620)]
-        if hasattr(self, "form_group"):
-            widths.append(self.form_group.minimumSizeHint().width())
+        widths = [max(int(620 * self.sf), 560)]
         if hasattr(self, "map_group"):
             widths.append(self.map_group.minimumSizeHint().width())
         if hasattr(self, "btn_ficha_pdf"):
@@ -455,7 +458,7 @@ class DataTab(QWidget):
 
         lbl_oficio = mk_lbl("Ofício/Processo:")
         lbl_avtec = mk_lbl("Av. Tec.:")
-        lbl_eletronico = mk_lbl("Eletrônico:")
+        lbl_eletronico = mk_lbl("Tipo:")
         lbl_compensacao = mk_lbl("Compensação:")
         lbl_endereco = mk_lbl("Endereço:")
         lbl_microbacia = mk_lbl("Microbacia:")
@@ -498,7 +501,16 @@ class DataTab(QWidget):
         l.setColumnStretch(1, 1)
         l.setColumnStretch(2, 0)
         l.setColumnStretch(4, 1)
+        g.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         return g
+
+    def _update_form_group_height(self):
+        if not hasattr(self, "form_group") or self.form_group is None:
+            return
+
+        target_height = self.form_group.minimumSizeHint().height()
+        if target_height > 0 and self.form_group.minimumHeight() != target_height:
+            self.form_group.setMinimumHeight(target_height)
 
     def _create_map_group(self):
         g = QGroupBox("Mapa")
@@ -517,6 +529,10 @@ class DataTab(QWidget):
         self.combo_heatmap_type = QComboBox()
         self.combo_heatmap_type.addItems(["Pendentes", "Realizadas", "Tudo"])
         self.combo_heatmap_type.setMinimumWidth(max(int(150 * self.sf), 120))
+        self.map_notice_label = QLabel("")
+        self.map_notice_label.setObjectName("MapNoticeLabel")
+        self.map_notice_label.setWordWrap(True)
+        self.map_notice_label.setVisible(False)
         for b in [self.btn_maps, self.btn_maps_plantio, self.btn_batch_geo, self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
             b.setMinimumHeight(int(24 * self.sf))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -529,6 +545,12 @@ class DataTab(QWidget):
         l.addWidget(self.btn_add_layer, 2, 1)
         l.addWidget(self.chk_heatmap, 3, 0)
         l.addWidget(self.combo_heatmap_type, 3, 1)
+        l.addWidget(self.map_notice_label, 4, 0, 1, 2)
         l.setColumnStretch(0, 1)
         l.setColumnStretch(1, 1)
         return g
+
+    def set_map_notice(self, message: str = ""):
+        text = str(message or "").strip()
+        self.map_notice_label.setText(text)
+        self.map_notice_label.setVisible(bool(text))

@@ -33,6 +33,7 @@ def make_record(**overrides) -> Compensacao:
 def test_build_ficha_rows_include_observation():
     rows = _build_ficha_rows(make_record(), "Linha 1\nLinha 2")
 
+    assert rows[0] == ["Ofício/Processo:", "123/2026", "Tipo:", "Eletrônico"]
     assert ["Observações:", "Linha 1\nLinha 2", "", ""] in rows
 
 

@@ -1,4 +1,5 @@
-﻿from app.services.error_service import friendly_error_message
+from app.services.error_service import friendly_error_message
+from app.services.excel_service import WorkbookModifiedExternallyError
 
 
 class FakeConnectionError(Exception):
@@ -17,6 +18,13 @@ def test_friendly_error_message_handles_file_not_found():
 
     assert title == "Arquivo Nao Encontrado"
     assert "nao foi encontrado" in msg.lower()
+
+
+def test_friendly_error_message_handles_external_workbook_change():
+    title, msg = friendly_error_message(WorkbookModifiedExternallyError("stale"), "salvar")
+
+    assert title == "Planilha Desatualizada"
+    assert "recarregue" in msg.lower()
 
 
 def test_friendly_error_message_handles_file_in_use_text():

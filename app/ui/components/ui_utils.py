@@ -2,6 +2,7 @@ import os
 import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QLibraryInfo, QTranslator
+from app.utils.app_paths import resolve_resource_path
 from app.utils.logger import logger
 
 def _ajustar_ambiente_pyinstaller():
@@ -18,19 +19,7 @@ def _ajustar_ambiente_pyinstaller():
 
 def resource_path(*partes: str) -> str:
     """Resolve caminhos em desenvolvimento e no executavel PyInstaller."""
-    rel = os.path.join(*partes)
-    if getattr(sys, "frozen", False):
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-        opcoes = [
-            os.path.join(base_path, rel),
-            os.path.join(base_path, "_internal", rel)
-        ]
-        for p in opcoes:
-            if os.path.exists(p):
-                return p
-        return opcoes[0]
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    return os.path.join(base_dir, rel)
+    return resolve_resource_path(*partes)
 
 def _setup_i18n():
     """Configura a tradução global para Português nos diálogos do sistema."""

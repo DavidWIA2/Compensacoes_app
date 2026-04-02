@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 import pytest
 import openpyxl
 
 from app.models.compensacao import Compensacao
 from app.models.plantio_item import PlantioItem
-from app.services.excel_service import BACKUP_FOLDER_NAME, ExcelService
+from app.services.excel_service import BACKUP_FOLDER_NAME, ExcelService, WorkbookModifiedExternallyError
 from app.services.records_service import remove_accents
 
 
@@ -29,6 +30,13 @@ def build_workbook(path: Path) -> None:
     )
     ws.append(["123/2026", "SIM", "CX-1", "AT-1", 8, "Rua A", "Gregorio", ""])
     wb.save(path)
+
+
+def modify_workbook_on_disk(path: Path) -> None:
+    workbook = openpyxl.load_workbook(path)
+    sheet = workbook[SHEET_NAME]
+    sheet.cell(row=2, column=1).value = "999/2026"
+    workbook.save(path)
 
 
 def build_legacy_workbook(path: Path) -> None:
@@ -77,6 +85,7 @@ def test_load_exposes_lat_lon_headers_and_migrates_workbook(tmp_path):
     records = service.load(str(path))
 
     assert len(records) == 1
+    assert records[0].eletronico == "Eletrônico"
     # Na nova estrutura, Latitude e Longitude estao nas colunas 12 e 13
     assert service.ws.cell(row=1, column=12).value == "Latitude"
     assert service.ws.cell(row=1, column=13).value == "Longitude"
@@ -135,9 +144,57 @@ def test_add_new_persists_record_and_creates_backup(tmp_path):
     assert ws.cell(row=1, column=12).value == "Latitude"
     assert ws.cell(row=1, column=13).value == "Longitude"
     assert ws.cell(row=3, column=1).value == "456/2026"
+    assert ws.cell(row=3, column=2).value == "Físico"
     assert ws.cell(row=3, column=12).value == "-22.01"
     assert ws.cell(row=3, column=13).value == "-47.89"
     assert (tmp_path / BACKUP_FOLDER_NAME).exists()
+
+
+def test_add_new_raises_when_workbook_changes_externally(tmp_path):
+    path = tmp_path / "compensacoes_stale_add.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    service.load(str(path))
+    modify_workbook_on_disk(path)
+
+    with pytest.raises(WorkbookModifiedExternallyError, match="Recarregue"):
+        service.add_new(make_record())
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.max_row == 2
+    assert ws.cell(row=2, column=1).value == "999/2026"
+
+
+def test_load_maps_tipo_header_without_creating_duplicate_column(tmp_path):
+    path = tmp_path / "compensacoes_tipo.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = SHEET_NAME
+    ws.append(
+        [
+            "Ofício/ Processo",
+            "Tipo",
+            "Caixa",
+            "Av. Tec.",
+            "Compensação",
+            "Endereço",
+            "Microbacia",
+            "Compensado",
+        ]
+    )
+    ws.append(["123/2026", "FISICO", "CX-1", "AT-1", 8, "Rua A", "Gregorio", ""])
+    wb.save(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+
+    persisted = openpyxl.load_workbook(path)
+    headers = [cell.value for cell in persisted[SHEET_NAME][1]]
+
+    assert records[0].eletronico == "Físico"
+    assert headers.count("Tipo") == 1
 
 
 def test_add_new_skips_partially_filled_rows(tmp_path):
@@ -161,6 +218,23 @@ def test_add_new_skips_partially_filled_rows(tmp_path):
     assert ws.cell(row=3, column=4).value == "AT-2"
     assert ws.cell(row=4, column=1).value == "789/2026"
     assert ws.cell(row=4, column=4).value == "AT-3"
+
+
+def test_create_operation_backup_forces_distinct_snapshots(tmp_path):
+    path = tmp_path / "compensacoes_backup.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    service.load(str(path))
+
+    first_backup = service.create_operation_backup("add")
+    second_backup = service.create_operation_backup("edit")
+
+    assert first_backup is not None
+    assert second_backup is not None
+    assert first_backup != second_backup
+    assert os.path.exists(first_backup)
+    assert os.path.exists(second_backup)
 
 
 def test_delete_record_shift_up_removes_row(tmp_path):
@@ -194,6 +268,75 @@ def test_delete_record_shift_up_raises_when_uid_is_missing(tmp_path):
     ws = reloaded[SHEET_NAME]
     assert ws.max_row == 2
     assert ws.cell(row=2, column=1).value == "123/2026"
+
+
+def test_save_edit_raises_when_uid_is_missing_and_preserves_workbook(tmp_path):
+    path = tmp_path / "compensacoes_save_uid.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+    record = records[0]
+    record.uid = f"{record.uid}-missing"
+    record.caixa = "CX-ALTERADA"
+
+    with pytest.raises(LookupError, match="UID"):
+        service.save_edit(record)
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.cell(row=2, column=3).value == "CX-1"
+
+
+def test_save_edit_raises_when_workbook_changes_externally(tmp_path):
+    path = tmp_path / "compensacoes_stale_edit.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    records = service.load(str(path))
+    record = records[0]
+    record.caixa = "CX-ALTERADA"
+    modify_workbook_on_disk(path)
+
+    with pytest.raises(WorkbookModifiedExternallyError, match="Recarregue"):
+        service.save_edit(record)
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.cell(row=2, column=1).value == "999/2026"
+    assert ws.cell(row=2, column=3).value == "CX-1"
+
+
+def test_import_records_atomic_does_not_persist_partial_rows_on_failure(tmp_path, monkeypatch):
+    path = tmp_path / "compensacoes_atomic.xlsx"
+    build_workbook(path)
+
+    service = ExcelService()
+    service.load(str(path))
+
+    original_append = ExcelService._append_new_without_save
+    calls = {"count": 0}
+
+    def flaky_append(self, record):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("boom")
+        return original_append(self, record)
+
+    monkeypatch.setattr(ExcelService, "_append_new_without_save", flaky_append)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        service.import_records_atomic(
+            [
+                make_record(uid="import-uid-1", av_tec="AT-2"),
+                make_record(uid="import-uid-2", av_tec="AT-3", oficio_processo="789/2026"),
+            ]
+        )
+
+    reloaded = openpyxl.load_workbook(path)
+    ws = reloaded[SHEET_NAME]
+    assert ws.max_row == 2
+    assert ws.cell(row=2, column=4).value == "AT-1"
 
 
 def test_save_workbook_cleans_temp_file_when_replace_fails(tmp_path, monkeypatch):

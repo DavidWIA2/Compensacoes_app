@@ -1,5 +1,4 @@
 import os
-import sys
 import glob
 import json
 import re
@@ -10,30 +9,12 @@ import geopandas as gpd
 from shapely.geometry import Point
 from shapely import force_2d
 
+from app.utils.app_paths import resolve_resource_path
+from app.utils.logger import get_logger
 
-# =====================================================================
-# UTILITÁRIO DE CAMINHO PARA PYINSTALLER
-# =====================================================================
-def resource_path(*partes: str) -> str:
-    rel = os.path.join(*partes)
-    # Se estiver rodando como executável
-    if getattr(sys, "frozen", False):
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
 
-        # Tenta encontrar direto no MEIPASS ou dentro de _internal (conforme seu .spec)
-        opcoes = [
-            os.path.join(base_path, rel),
-            os.path.join(base_path, "_internal", rel)
-        ]
+logger = get_logger("GIS")
 
-        for p in opcoes:
-            if os.path.exists(p):
-                return p
-        return opcoes[0]  # Retorno padrão para erro
-
-    # Modo desenvolvimento: assume a raiz do projeto
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    return os.path.join(base_dir, rel)
 
 class GisService:
     DE_PARA_NOMES = {
@@ -50,13 +31,13 @@ class GisService:
             self.microbacias_dir = microbacias_dir
         else:
             # Se for relativo (ex: "data/microbacias"), resolve via PyInstaller/dev
-            self.microbacias_dir = resource_path(microbacias_dir)
+            self.microbacias_dir = resolve_resource_path(microbacias_dir)
 
         self.name_field = name_field
 
         # Log de depuração essencial para ver o caminho final no executável
         if not os.path.isdir(self.microbacias_dir):
-            print(f"ERRO GIS: Pasta não encontrada em: {self.microbacias_dir}")
+            logger.error(f"ERRO GIS: Pasta nao encontrada em: {self.microbacias_dir}")
             raise ValueError(f"Diretório de microbacias não encontrado: {self.microbacias_dir}")
 
         # Carrega os arquivos .shp encontrados na pasta resolvida

@@ -1,5 +1,4 @@
 import json
-import os
 import re
 import time
 from typing import Callable, Dict, Optional, Tuple
@@ -19,6 +18,7 @@ from app.utils.logger import logger
 class GeocodeWorker(QThread):
     progress_update = Signal(int, str)
     finished_process = Signal(object)
+    cancelled_process = Signal(str)
 
     def __init__(self, records_to_process):
         super().__init__()
@@ -91,8 +91,11 @@ class GeocodeWorker(QThread):
             if result:
                 self.resultados[record.excel_row] = result
 
-        if not cancelled:
-            self.finished_process.emit(self.resultados)
+        if cancelled:
+            self.cancelled_process.emit("Geocodificacao em lote cancelada.")
+            return
+
+        self.finished_process.emit(self.resultados)
 
     def stop(self):
         self.is_running = False
@@ -127,7 +130,7 @@ class UpdaterWorker(QThread):
         fetch_json: Optional[Callable[[str], Dict[str, object]]] = None,
     ):
         super().__init__()
-        self.update_url = resolve_update_manifest_url(update_url)
+        self.update_url = resolve_update_manifest_url(update_url or "")
         self.current_version = current_version
         self._fetch_json = fetch_json or self._default_fetch_json
 

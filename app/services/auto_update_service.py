@@ -248,13 +248,16 @@ try {{
             Start-Process -FilePath $restartExecutable -WorkingDirectory ([System.IO.Path]::GetDirectoryName($restartExecutable))
         }}
         Start-UpdateCleanup
+    }} else {{
+        Write-UpdateLog ("Instalacao retornou codigo de falha {{0}}." -f $exitCode)
+        exit $exitCode
     }}
 }} catch {{
     Write-UpdateLog "ERRO FATAL DURANTE A ATUALIZACAO: $_"
     exit 1
 }}
 
-exit 0
+exit $exitCode
 """
 
     ensure_dir(launcher.parent)
@@ -277,17 +280,24 @@ def launch_update_installer(launcher_path: str | Path, *, powershell_executable:
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-    kwargs = {
-        "cwd": str(Path(launcher_path).resolve().parent),
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
-    if os.name == "nt":
-        kwargs["creationflags"] = creationflags
-
     try:
-        subprocess.Popen(command, **kwargs)
+        if os.name == "nt":
+            subprocess.Popen(
+                command,
+                cwd=str(Path(launcher_path).resolve().parent),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+        else:
+            subprocess.Popen(
+                command,
+                cwd=str(Path(launcher_path).resolve().parent),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     except OSError as exc:
         raise AutoUpdateError(f"Nao foi possivel iniciar o instalador da atualizacao: {exc}") from exc
 

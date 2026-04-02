@@ -2,7 +2,9 @@
 from app.services.records_service import (
     build_record_search_index,
     compute_metrics,
+    display_tipo_value,
     filter_records,
+    storage_tipo_value,
     to_float,
     unique_non_empty,
 )
@@ -35,6 +37,13 @@ def test_unique_non_empty_deduplicates_case_insensitive():
 def test_to_float_handles_comma_and_invalid_values():
     assert to_float("2,5") == 2.5
     assert to_float("abc") == 0.0
+
+
+def test_tipo_helpers_normalize_legacy_values():
+    assert display_tipo_value("SIM") == "Eletrônico"
+    assert display_tipo_value("NAO") == "Físico"
+    assert display_tipo_value("") == "Nulo"
+    assert storage_tipo_value("Nulo") == ""
 
 
 def test_compute_metrics_matches_expected_totals():
@@ -87,3 +96,22 @@ def test_filter_records_uses_precomputed_search_index_for_endereco_plantio():
     )
 
     assert filtered == records
+
+
+def test_filter_records_accepts_display_tipo_filter_for_legacy_values():
+    records = [
+        make_record(eletronico="SIM", uid="u-1"),
+        make_record(excel_row=3, eletronico="NAO", uid="u-2", av_tec="AT-2"),
+    ]
+
+    filtered = filter_records(
+        records,
+        text="",
+        status="Todos",
+        selected_micros=[],
+        selected_eletronicos=["Eletrônico"],
+        micro_all_selected=True,
+        eletronico_all_selected=False,
+    )
+
+    assert [record.uid for record in filtered] == ["u-1"]

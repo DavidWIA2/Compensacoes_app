@@ -99,7 +99,7 @@ def main() -> int:
     if splash is not None:
         splash.update_status("Abrindo painel principal...")
 
-    window.showMaximized()
+    window.show()
     if splash is not None:
         QApplication.processEvents()
         splash.finish(window)

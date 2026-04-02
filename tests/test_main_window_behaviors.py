@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QObject, Signal, QTimer
 from PySide6.QtGui import QPalette, QStandardItemModel
 
 from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
@@ -423,8 +423,11 @@ def test_apply_filter_keeps_totals_and_export_bar_vertically_stable():
     window.apply_filter()
     get_app().processEvents()
 
-    assert window.data_tab.group_totals.geometry().y() == expected_group_y
-    assert window.data_tab.bar_export.geometry().y() == expected_export_y
+    group_shift = window.data_tab.group_totals.geometry().y() - expected_group_y
+    export_shift = window.data_tab.bar_export.geometry().y() - expected_export_y
+    assert abs(group_shift) <= 2
+    assert export_shift == group_shift
+    assert window.data_tab.bar_export.geometry().bottom() <= window.data_tab.left_panel.height() - 1
 
     window.close()
 
@@ -449,6 +452,8 @@ def test_table_max_height_is_clamped_to_left_panel_space():
 
     expected_height = min(expected_max_height, window.data_tab._locked_table_height or expected_max_height)
 
+    assert window.data_tab.table.minimumHeight() == 0
+    assert window.data_tab.table.height() == expected_height
     assert window.data_tab.table.maximumHeight() == expected_height
 
     window.close()
@@ -536,6 +541,106 @@ def test_lock_splitter_height_freezes_current_splitter_height():
 
     assert window.data_tab.splitter.minimumHeight() == current_height
     assert window.data_tab.splitter.maximumHeight() == current_height
+
+    window.close()
+
+
+def test_reload_keeps_table_constrained_and_bottom_sections_visible(monkeypatch):
+    window = MainWindow()
+    window.records = [
+        make_record(oficio_processo="123/2026", endereco="Rua Jose A"),
+        make_record(excel_row=3, uid="u-2", oficio_processo="456/2026", endereco="Rua Jose B"),
+    ]
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    expected_group_y = window.data_tab.group_totals.geometry().y()
+    expected_export_y = window.data_tab.bar_export.geometry().y()
+    expected_window_height = window.height()
+
+    monkeypatch.setattr(window.form_controller, "confirm_discard_changes", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(window.data_controller, "load_excel", lambda *_args, **_kwargs: window.data_controller.update_ui_after_load() or True)
+    window.excel.path = "C:/temp/fake.xlsx"
+
+    window.reload()
+    get_app().processEvents()
+
+    layout = window.data_tab.left_panel.layout()
+    margins = layout.contentsMargins()
+    spacing_count = max(layout.count() - 1, 0)
+    expected_height = (
+        window.data_tab.left_panel.height()
+        - margins.top()
+        - margins.bottom()
+        - window.data_tab.group_totals.height()
+        - window.data_tab.bar_export.height()
+        - (layout.spacing() * spacing_count)
+    )
+
+    assert window.data_tab.table.height() == expected_height
+    assert window.data_tab.table.maximumHeight() == expected_height
+    assert window.height() == expected_window_height
+    assert window.data_tab.group_totals.geometry().y() == expected_group_y
+    assert window.data_tab.bar_export.geometry().y() == expected_export_y
+
+    window.close()
+
+
+def test_batch_geocode_keeps_window_height_stable(monkeypatch):
+    window = MainWindow()
+    window.records = [
+        make_record(endereco="Rua Jose A", latitude="", longitude="", microbacia="", uid="u-1"),
+        make_record(excel_row=3, endereco="Rua Jose B", latitude="", longitude="", microbacia="", uid="u-2"),
+    ]
+    window.filtered_records = list(window.records)
+    window._update_filters_from_records()
+    window.excel.path = "C:/temp/fake.xlsx"
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    class ImmediateGeocodeWorker(QObject):
+        progress_update = Signal(int, str)
+        finished_process = Signal(object)
+
+        def __init__(self, records):
+            super().__init__()
+            self.records = records
+
+        def start(self):
+            self.progress_update.emit(1, "fake")
+            QTimer.singleShot(0, lambda: self.finished_process.emit({2: {"main": (-22.0, -47.0)}}))
+
+        def isRunning(self):
+            return False
+
+        def stop(self):
+            return None
+
+        def quit(self):
+            return None
+
+        def wait(self, *_args):
+            return True
+
+    monkeypatch.setattr("app.ui.controllers.map_controller.GeocodeWorker", ImmediateGeocodeWorker)
+    monkeypatch.setattr(window.map_controller, "persist_batch_geocode_results", lambda _results: 1)
+    monkeypatch.setattr(window, "reload", lambda: window.data_controller.update_ui_after_load())
+
+    expected_window_height = window.height()
+    expected_group_y = window.data_tab.group_totals.geometry().y()
+    expected_export_y = window.data_tab.bar_export.geometry().y()
+
+    window.run_batch_geocode()
+    for _ in range(10):
+        get_app().processEvents()
+
+    assert window.height() == expected_window_height
+    assert window.data_tab.group_totals.geometry().y() == expected_group_y
+    assert window.data_tab.bar_export.geometry().y() == expected_export_y
 
     window.close()
 

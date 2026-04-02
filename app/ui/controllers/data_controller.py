@@ -301,6 +301,7 @@ class DataController:
         self.apply_filter()
         self.window.data_tab.align_splitter_to_table_width()
         QTimer.singleShot(0, self.window.data_tab.align_splitter_to_table_width)
+        QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
         self.window.data_tab.table.clearSelection()
         self.window.clear_form(force=True)
         self.window.refresh_operations_overview()

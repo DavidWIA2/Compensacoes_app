@@ -212,21 +212,32 @@ class DataTab(QWidget):
 
         fixed_children_height = 0
         if hasattr(self, "group_totals") and self.group_totals:
-            fixed_children_height += self.group_totals.height() or self.group_totals.sizeHint().height()
+            if self.group_totals.minimumHeight() == self.group_totals.maximumHeight():
+                fixed_children_height += self.group_totals.maximumHeight()
+            else:
+                fixed_children_height += self.group_totals.height() or self.group_totals.sizeHint().height()
         if hasattr(self, "bar_export") and self.bar_export:
-            fixed_children_height += self.bar_export.height() or self.bar_export.sizeHint().height()
+            if self.bar_export.minimumHeight() == self.bar_export.maximumHeight():
+                fixed_children_height += self.bar_export.maximumHeight()
+            else:
+                fixed_children_height += self.bar_export.height() or self.bar_export.sizeHint().height()
 
         spacing_count = max(layout.count() - 1, 0)
         available_table_height = available - fixed_children_height - (layout.spacing() * spacing_count)
         target_height = max(available_table_height, 0)
         if self._locked_table_height is not None:
             target_height = min(target_height, self._locked_table_height)
-            self.table.setMinimumHeight(0)
-            self.table.setMaximumHeight(target_height)
+            self.table.setFixedHeight(target_height)
+            self.table.updateGeometry()
             return
 
+        # Keep the table bounded by the free space, but do not fix its height:
+        # a fixed height raises the window's minimum size after reloads and can
+        # push the totals/export area below the screen.
         self.table.setMinimumHeight(0)
         self.table.setMaximumHeight(target_height)
+        self.table.updateGeometry()
+        layout.activate()
 
     def lock_table_height(self):
         current_height = self.table.height()

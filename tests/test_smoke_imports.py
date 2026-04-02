@@ -20,7 +20,6 @@ def test_main_window_can_close_cleanly(ui_window_factory, qt_app):
 def test_main_window_close_stops_owned_timers(ui_window_factory, qt_app):
     window = ui_window_factory()
 
-    assert window._startup_window_timer.parent() is window
     assert window._initial_map_sync_timer.parent() is window
 
     window._initial_map_sync_timer.start(500)

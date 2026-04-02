@@ -97,10 +97,10 @@ class SettingsController:
             return
 
         self.window._startup_window_state_applied = True
-        self.window.setWindowState(self.window.windowState() & ~(Qt.WindowMinimized | Qt.WindowFullScreen))
-        self.window.showNormal()
+        state = self.window.windowState() & ~(Qt.WindowMinimized | Qt.WindowFullScreen)
         if not self.window._startup_geometry_restored:
-            self.window.showMaximized()
+            state |= Qt.WindowMaximized
+        self.window.setWindowState(state)
         self.window._startup_layout_pending = True
 
     def load_sort_settings(self):

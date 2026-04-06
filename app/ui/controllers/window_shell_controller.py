@@ -20,23 +20,59 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.application.use_cases.local_record_queries import LocalRecordQueriesUseCases
+from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
+from app.application.use_cases.local_record_queries import (
+    LocalFilterFacetsResult,
+    LocalRecordQueriesUseCases,
+)
+from app.application.use_cases.persistence_monitoring import (
+    PersistenceRecordOverviewReport,
+    PersistenceStatusReport,
+)
 from app.config import APP_WINDOW_TITLE
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
 from app.services.records_service import (
     STANDARD_TIPO_OPTIONS,
     TIPO_NULO,
+    compute_metrics,
     display_tipo_value,
     tipo_is_eletronico,
 )
 from app.ui.components.themes import THEME_DARK, THEME_LIGHT, get_app_qss
 from app.ui.components.widgets import ColumnsDialog
+from app.ui.controllers.window_shell_support import (
+    COMPENSACOES_SEARCH_PLACEHOLDER as SUPPORT_COMPENSACOES_SEARCH_PLACEHOLDER,
+    TCRA_SEARCH_PLACEHOLDER as SUPPORT_TCRA_SEARCH_PLACEHOLDER,
+    build_window_chrome_snapshot,
+)
+from app.utils.logger import get_logger
+
+
+logger = get_logger("UI.WindowShell")
 
 
 class WindowShellController:
+    TCRA_SEARCH_PLACEHOLDER = SUPPORT_TCRA_SEARCH_PLACEHOLDER
+    COMPENSACOES_SEARCH_PLACEHOLDER = SUPPORT_COMPENSACOES_SEARCH_PLACEHOLDER
+
     def __init__(self, window):
         self.window = window
-        self.local_record_queries = LocalRecordQueriesUseCases(getattr(window, "persistence_service", None))
+        self.persistence = getattr(window, "authoritative_persistence", None)
+        self.persistence_use_cases = getattr(window, "persistence_monitoring_use_cases", None)
+        self.local_record_queries = (
+            self.persistence.local_record_queries
+            if isinstance(self.persistence, AuthoritativePersistenceUseCases)
+            else LocalRecordQueriesUseCases(getattr(window, "persistence_service", None))
+        )
+        self._search_context = "compensacoes"
+        self._compensacoes_search_text = ""
+        self._syncing_global_search = False
+
+    def _bind_runtime_persistence_service(self) -> None:
+        if isinstance(self.persistence, AuthoritativePersistenceUseCases):
+            self.persistence.bind_runtime_window(self.window)
+            return
+        self.local_record_queries.snapshot_reader = getattr(self.window, "persistence_service", None)
 
     def setup_ui(self):
         central = QWidget()
@@ -45,21 +81,15 @@ class WindowShellController:
         layout.setContentsMargins(5, 5, 5, 5)
 
         top = QHBoxLayout()
-        self.window.btn_open = QPushButton("Abrir Excel")
-        self.window.btn_reload = QPushButton("Recarregar")
-        self.window.btn_open.setProperty("kind", "primary")
-        self.window.btn_reload.setProperty("kind", "secondary")
 
         self.window.search = QLineEdit()
-        self.window.search.setPlaceholderText("Buscar (of\u00edcio, av. tec., endere\u00e7o...)")
+        self.window.search.setPlaceholderText(self.COMPENSACOES_SEARCH_PLACEHOLDER)
         self.window.search.setClearButtonEnabled(True)
 
         self.window.btn_theme = QPushButton("Tema")
         self.window.btn_theme.setProperty("kind", "secondary")
         self.window.btn_theme.setFixedWidth(int(70 * self.window.scale_factor))
 
-        top.addWidget(self.window.btn_open)
-        top.addWidget(self.window.btn_reload)
         top.addWidget(self.window.search, 1)
         top.addWidget(self.window.btn_theme)
         layout.addLayout(top)
@@ -68,10 +98,15 @@ class WindowShellController:
         self.window.data_tab = self.window._data_tab_cls(self.window)
         self.window.dash_tab = self.window._dashboard_tab_cls(self.window)
         self.window.operations_tab = self.window._operations_tab_cls(self.window)
+        self.window.tcra_tab = self.window._tcra_tab_cls(self.window)
         self.window.data_tab.search = self.window.search
+        self.window.search.textChanged.connect(self._on_global_search_changed)
+        if hasattr(self.window.tcra_tab, "search_input"):
+            self.window.tcra_tab.search_input.textChanged.connect(self._on_tcra_search_changed)
         self.window.tabs.addTab(self.window.data_tab, "Dados & Cadastro")
         self.window.tabs.addTab(self.window.dash_tab, "Painel")
         self.window.tabs.addTab(self.window.operations_tab, "Opera\u00e7\u00f5es")
+        self.window.tabs.addTab(self.window.tcra_tab, "TCRAs")
         layout.addWidget(self.window.tabs)
 
         self.window.progress_bar = QProgressBar()
@@ -90,7 +125,7 @@ class WindowShellController:
         self.window.statusBar().addPermanentWidget(self.window.progress_cancel_button)
         self.window.statusBar().addPermanentWidget(self.window.form_state_label)
 
-        self.window.session_file_label = QLabel("Planilha: nenhuma")
+        self.window.session_file_label = QLabel("Banco: local")
         self.window.session_file_label.setObjectName("StatusChip")
         self.window.session_file_label.setMinimumWidth(int(220 * self.window.scale_factor))
         self.window.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -98,77 +133,314 @@ class WindowShellController:
         self.window.session_records_label = QLabel("Registros: 0")
         self.window.session_records_label.setObjectName("StatusChip")
 
+        self.window.session_write_label = QLabel("Escrita: aguardando")
+        self.window.session_write_label.setObjectName("StatusChip")
+
         self.window.session_selection_label = QLabel("Modo: novo cadastro")
         self.window.session_selection_label.setObjectName("StatusChip")
 
         self.window.statusBar().addPermanentWidget(self.window.session_file_label)
         self.window.statusBar().addPermanentWidget(self.window.session_records_label)
+        self.window.statusBar().addPermanentWidget(self.window.session_write_label)
         self.window.statusBar().addPermanentWidget(self.window.session_selection_label)
         self.window.statusBar().setSizeGripEnabled(False)
         self.window.statusBar().setStyleSheet("QStatusBar::item { border: none; }")
         self.update_filters_from_records()
         self.setup_dynamic_form_options_from_records()
+        self.sync_global_search_context()
+
+    def _resolve_session_availability(self, path: str | None = None):
+        target_path = str(path if path is not None else self.current_session_path() or "").strip()
+        persistence = getattr(self.window, "authoritative_persistence", None)
+        if isinstance(persistence, AuthoritativePersistenceUseCases):
+            return persistence.resolve_session_availability(target_path)
+
+        class _FallbackAvailability:
+            def __init__(self, current_path: str):
+                self.path = current_path
+                self.display_name = os.path.basename(current_path) or current_path
+                self.has_workbook_file = bool(current_path and os.path.exists(current_path))
+                self.has_local_snapshot = False
+                self.source_kind = "workbook_only" if self.has_workbook_file else "missing"
+
+            @property
+            def display_label(self) -> str:
+                return self.display_name or "nenhuma"
+
+            @property
+            def detail_message(self) -> str:
+                if not self.path:
+                    return "Banco local ainda não inicializado."
+                return f"Banco local vinculado a {self.path}."
+
+        return _FallbackAvailability(target_path)
+
+    def current_session_availability(self):
+        return self._resolve_session_availability(self.current_session_path())
 
     def current_file_label_text(self) -> str:
-        path = str(getattr(self.window.excel, "path", "") or "").strip()
-        if not path:
-            return "Planilha: nenhuma"
-        return f"Planilha: {os.path.basename(path) or path}"
+        return self._build_window_chrome_snapshot().file_label
+
+    def current_file_tooltip_text(self) -> str:
+        return self._build_window_chrome_snapshot().file_tooltip
+
+    def current_session_path(self) -> str:
+        session_runtime = getattr(self.window, "session_runtime", None)
+        if session_runtime is not None:
+            return str(
+                getattr(session_runtime, "session_path", getattr(session_runtime, "path", "")) or ""
+            ).strip()
+        return ""
+
+    def current_workbook_path(self) -> str:
+        return self.current_session_path()
+
+    def has_active_workbook(self) -> bool:
+        return bool(self.current_session_path())
+
+    def _set_global_search_text(self, text: str) -> None:
+        normalized = str(text or "")
+        if self.window.search.text() == normalized:
+            return
+        self._syncing_global_search = True
+        try:
+            self.window.search.setText(normalized)
+        finally:
+            self._syncing_global_search = False
+
+    def _on_global_search_changed(self, text: str) -> None:
+        if self._syncing_global_search:
+            return
+        if self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None):
+            tcra_search = getattr(getattr(self.window, "tcra_tab", None), "search_input", None)
+            if tcra_search is not None and tcra_search.text() != text:
+                tcra_search.setText(text)
+            return
+        self._compensacoes_search_text = str(text or "")
+
+    def _on_tcra_search_changed(self, text: str) -> None:
+        if self._syncing_global_search:
+            return
+        if self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None):
+            self._set_global_search_text(text)
+
+    def resolved_filter_facets(self, *, refresh: bool = False) -> LocalFilterFacetsResult:
+        cached_facets = getattr(self.window, "_local_filter_facets_result", None)
+        if cached_facets is not None and not refresh:
+            return cached_facets
+
+        self._bind_runtime_persistence_service()
+        if isinstance(self.persistence, AuthoritativePersistenceUseCases):
+            facets = self.persistence.resolve_filter_facets(
+                self.current_session_path(),
+                fallback_records=self.window.records,
+            )
+            self.window._local_filter_facets_status = self.persistence.build_filter_facets_status(facets)
+        else:
+            facets = self.local_record_queries.resolve_filter_facets(
+                self.current_session_path(),
+                fallback_records=self.window.records,
+            )
+            self.window._local_filter_facets_status = self.local_record_queries.build_filter_facets_status(facets)
+        self.window._local_filter_facets_result = facets
+        return facets
+
+    def resolved_filtered_metrics(self) -> dict[str, object]:
+        cached_metrics = getattr(self.window, "_filtered_metrics", None)
+        if cached_metrics is not None:
+            return dict(cached_metrics)
+        return compute_metrics(self.window.filtered_records)
+
+    def resolved_dashboard_record_overview(
+        self,
+        *,
+        refresh: bool = False,
+        top_microbacias_limit: int = 3,
+        sample_limit: int = 0,
+    ) -> PersistenceRecordOverviewReport | None:
+        cached_report = getattr(self.window, "_dashboard_record_overview", None)
+        if cached_report is not None and not refresh:
+            return cached_report
+
+        self._bind_runtime_persistence_service()
+        workbook_path = self.current_session_path()
+        if not workbook_path:
+            self.window._dashboard_record_overview = None
+            return None
+
+        if isinstance(self.persistence, AuthoritativePersistenceUseCases):
+            report = self.persistence.resolve_dashboard_record_overview(
+                workbook_path,
+                cached_report=cached_report,
+                refresh=refresh,
+                top_microbacias_limit=int(top_microbacias_limit),
+                sample_limit=int(sample_limit),
+            )
+        elif self.persistence_use_cases is not None:
+            try:
+                report = self.persistence_use_cases.build_record_overview_report(
+                    workbook_path,
+                    top_microbacias_limit=int(top_microbacias_limit),
+                    sample_limit=int(sample_limit),
+                )
+            except Exception as exc:
+                logger.warning("Falha ao montar resumo local do dashboard: %s", exc, exc_info=True)
+                self.window._dashboard_record_overview = None
+                return None
+        else:
+            self.window._dashboard_record_overview = None
+            return None
+
+        self.window._dashboard_record_overview = report
+        return report
+
+    def resolved_persistence_status_report(
+        self,
+        *,
+        refresh: bool = False,
+        expected_audit_events: int = 0,
+    ) -> PersistenceStatusReport | None:
+        cached_report = getattr(self.window, "_persistence_status_report", None)
+        expected_records = self.resolved_total_records()
+        if (
+            cached_report is not None
+            and not refresh
+            and int(getattr(cached_report, "expected_records", 0) or 0) == int(expected_records)
+            and int(getattr(cached_report, "expected_audit_events", 0) or 0) == int(expected_audit_events)
+        ):
+            return cached_report
+
+        self._bind_runtime_persistence_service()
+        workbook_path = self.current_session_path()
+        if not workbook_path:
+            self.window._persistence_status_report = None
+            return None
+
+        if isinstance(self.persistence, AuthoritativePersistenceUseCases):
+            report = self.persistence.build_persistence_status_report(
+                workbook_path,
+                expected_records=expected_records,
+                expected_audit_events=int(expected_audit_events),
+            )
+        elif self.persistence_use_cases is not None:
+            try:
+                report = self.persistence_use_cases.build_status_report(
+                    workbook_path,
+                    expected_records=expected_records,
+                    expected_audit_events=int(expected_audit_events),
+                )
+            except Exception as exc:
+                logger.warning("Falha ao montar status operacional do espelho local: %s", exc, exc_info=True)
+                self.window._persistence_status_report = None
+                return None
+        else:
+            self.window._persistence_status_report = None
+            return None
+
+        self.window._persistence_status_report = report
+        return report
+
+    def resolved_total_records(self) -> int:
+        session_status = getattr(self.window, "_local_session_source_status", None)
+        total = int(getattr(session_status, "filtered_records", 0) or 0) if session_status is not None else 0
+        if total > 0:
+            return total
+
+        read_status = getattr(self.window, "_local_record_read_status", None)
+        total = int(getattr(read_status, "session_records", 0) or 0) if read_status is not None else 0
+        if total > 0:
+            return total
+
+        return len(self.window.records)
+
+    def resolved_filtered_records(self) -> int:
+        read_status = getattr(self.window, "_local_record_read_status", None)
+        filtered = int(getattr(read_status, "filtered_records", 0) or 0) if read_status is not None else 0
+        if filtered > 0:
+            return filtered
+        if self.window.filtered_records:
+            return len(self.window.filtered_records)
+
+        total = self.resolved_total_records()
+        if total > 0 and not self.has_active_record_filters():
+            return total
+        return 0
 
     def current_records_label_text(self) -> str:
-        total = len(self.window.records)
-        filtered = len(self.window.filtered_records)
-        if total <= 0:
-            return "Registros: 0"
-        if filtered == total:
-            return f"Registros: {total}"
-        return f"Registros: {filtered} de {total}"
+        return self._build_window_chrome_snapshot().records_label
+
+    def current_results_label_text(self) -> str:
+        return f"{self.resolved_filtered_records()} registros"
+
+    def current_filter_status_message_text(self) -> str:
+        return f"Filtro aplicado: {self.resolved_filtered_records()} registros"
+
+    def oficio_resize_candidates(self) -> list[str]:
+        return [str(getattr(record, "oficio_processo", "") or "") for record in self.window.records]
+
+    def tipo_resize_candidates(self) -> list[str]:
+        return ["Eletrônico", "Ofício", "Físico", "Nulo"] + [
+            display_tipo_value(getattr(record, "eletronico", ""))
+            for record in self.window.records
+        ]
+
+    def visible_records(self) -> list:
+        return list(self.window.filtered_records)
+
+    def has_active_record_filters(self) -> bool:
+        if self.window.search.text().strip():
+            return True
+        if self.window.data_tab.filter_status.currentText().strip() not in {"", "Todos"}:
+            return True
+        if self.window.data_tab.filter_year.currentText().strip() not in {"", "Todos"}:
+            return True
+        if not self.window.data_tab.filter_micro.is_all_selected():
+            return True
+        if not self.window.data_tab.filter_eletronico.is_all_selected():
+            return True
+        return False
 
     def current_selection_label_text(self) -> str:
-        if self.window.selected is None:
-            return "Modo: novo cadastro"
+        return self._build_window_chrome_snapshot().selection_label
 
-        summary = (self.window.selected.av_tec or "").strip()
-        if not summary:
-            summary = (self.window.selected.oficio_processo or "").strip()
-        if not summary:
-            row_number = max(int(getattr(self.window.selected, "excel_row", 0)) - 1, 0)
-            summary = f"linha {row_number}" if row_number else "registro ativo"
-        return f"Selecionado: {summary}"
+    def current_write_label_text(self) -> str:
+        return self._build_window_chrome_snapshot().write_label
+
+    def current_write_tooltip_text(self) -> str:
+        return self._build_window_chrome_snapshot().write_tooltip
+
+    def _build_window_chrome_snapshot(self):
+        return build_window_chrome_snapshot(
+            APP_WINDOW_TITLE,
+            session_path=self.current_session_path(),
+            availability=self.current_session_availability(),
+            total_records=self.resolved_total_records(),
+            filtered_records=self.resolved_filtered_records(),
+            search_text=self.window.search.text(),
+            selected=self.window.selected,
+            write_status=getattr(self.window, "_authoritative_write_status", None),
+        )
 
     def refresh_window_chrome(self):
-        path = str(getattr(self.window.excel, "path", "") or "").strip()
-        title = APP_WINDOW_TITLE
-        if path:
-            title = f"{APP_WINDOW_TITLE}[*] - {os.path.basename(path) or path}"
-            if self.window.records:
-                title = f"{title} ({len(self.window.filtered_records)}/{len(self.window.records)})"
-        self.window.setWindowTitle(title)
-
-        self.window.session_file_label.setText(self.current_file_label_text())
-        self.window.session_file_label.setToolTip(path or "Nenhuma planilha carregada.")
-
-        self.window.session_records_label.setText(self.current_records_label_text())
-        search_text = self.window.search.text().strip()
-        if search_text:
-            self.window.session_records_label.setToolTip(f"Busca atual: {search_text}")
-        else:
-            self.window.session_records_label.setToolTip("Resumo do conjunto filtrado na tela.")
-
-        self.window.session_selection_label.setText(self.current_selection_label_text())
-        if self.window.selected is None:
-            self.window.session_selection_label.setToolTip("Formulario pronto para novo cadastro.")
-        else:
-            self.window.session_selection_label.setToolTip("Registro atualmente carregado no formulario.")
+        snapshot = self._build_window_chrome_snapshot()
+        self.window.setWindowTitle(snapshot.window_title)
+        self.window.session_file_label.setText(snapshot.file_label)
+        self.window.session_file_label.setToolTip(snapshot.file_tooltip)
+        self.window.session_records_label.setText(snapshot.records_label)
+        self.window.session_records_label.setToolTip(snapshot.records_tooltip)
+        self.window.session_write_label.setText(snapshot.write_label)
+        self.window.session_write_label.setToolTip(snapshot.write_tooltip)
+        self.window.session_selection_label.setText(snapshot.selection_label)
+        self.window.session_selection_label.setToolTip(snapshot.selection_tooltip)
 
     def setup_menus(self):
         build_command = self.window.command_controller.build_handler
         menubar = self.window.menuBar()
         file_menu = menubar.addMenu("Arquivo")
 
-        self.window.action_import = QAction("Importar Excel (Mesclar)", self.window)
-        self.window.action_import.triggered.connect(build_command("import_excel_data"))
-        file_menu.addAction(self.window.action_import)
+        self.window.action_reload = QAction("Recarregar", self.window)
+        self.window.action_reload.triggered.connect(build_command("reload"))
+        file_menu.addAction(self.window.action_reload)
 
         self.window.action_rollback = QAction("M\u00e1quina do Tempo (Restaurar Backup)", self.window)
         self.window.action_rollback.triggered.connect(build_command("show_rollback_dialog"))
@@ -179,9 +451,6 @@ class WindowShellController:
         file_menu.addAction(self.window.action_operation_history)
 
         file_menu.addSeparator()
-
-        self.window.menu_recent = file_menu.addMenu("Recentes")
-        self.window._update_recent_files_menu()
 
         help_menu = menubar.addMenu("Ajuda")
         self.window.action_check_updates = QAction("Verificar Atualizacoes", self.window)
@@ -206,8 +475,6 @@ class WindowShellController:
     def connect_signals(self):
         build_command = self.window.command_controller.build_handler
 
-        self.window.btn_open.clicked.connect(build_command("open_excel"))
-        self.window.btn_reload.clicked.connect(build_command("reload"))
         self.window.btn_theme.clicked.connect(build_command("toggle_theme"))
 
         self.window.search.textChanged.connect(self.window.schedule_apply_filter)
@@ -256,7 +523,7 @@ class WindowShellController:
         self.window.data_tab.chk_arquivado.toggled.connect(self.window._on_form_field_changed)
 
         self.window.data_tab.btn_export_csv.clicked.connect(build_command("export_csv_clicked"))
-        self.window.data_tab.btn_export_excel.clicked.connect(build_command("export_excel_clicked"))
+        self.window.data_tab.btn_export_spreadsheet.clicked.connect(build_command("export_spreadsheet_clicked"))
         self.window.data_tab.btn_export_pdf.clicked.connect(build_command("export_pdf_clicked"))
         self.window.dash_tab.btn_export_pdf.clicked.connect(build_command("export_dashboard_pdf_clicked"))
 
@@ -264,6 +531,28 @@ class WindowShellController:
         self.window.operations_tab.btn_history.clicked.connect(build_command("show_operation_history"))
         self.window.operations_tab.btn_rollback.clicked.connect(build_command("show_rollback_dialog"))
         self.window.operations_tab.btn_open_backup.clicked.connect(build_command("open_selected_operation_backup"))
+
+    def sync_global_search_context(self):
+        is_tcra_tab_active = getattr(self.window, "tabs", None) is not None and (
+            self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None)
+        )
+        tcra_tab = getattr(self.window, "tcra_tab", None)
+        self.window.search.setEnabled(True)
+        if is_tcra_tab_active:
+            if self._search_context != "tcra":
+                self._compensacoes_search_text = self.window.search.text()
+            self._search_context = "tcra"
+            self.window.search.setPlaceholderText(self.TCRA_SEARCH_PLACEHOLDER)
+            if tcra_tab is not None and hasattr(tcra_tab, "set_global_search_mode"):
+                tcra_tab.set_global_search_mode(True)
+                self._set_global_search_text(tcra_tab.search_input.text())
+            return
+
+        self._search_context = "compensacoes"
+        self.window.search.setPlaceholderText(self.COMPENSACOES_SEARCH_PLACEHOLDER)
+        if tcra_tab is not None and hasattr(tcra_tab, "set_global_search_mode"):
+            tcra_tab.set_global_search_mode(False)
+        self._set_global_search_text(self._compensacoes_search_text)
 
     def setup_shortcuts(self):
         build_command = self.window.command_controller.build_handler
@@ -359,6 +648,7 @@ class WindowShellController:
         self.window.data_tab.table_model.set_dark_mode(self.window.is_dark_mode)
         self.window.dash_tab.apply_theme(theme)
         self.window.operations_tab.apply_theme(theme)
+        self.window.tcra_tab.apply_theme(theme)
         self.apply_theme_to_map()
 
     def apply_theme_to_map(self):
@@ -366,11 +656,7 @@ class WindowShellController:
         self.window._run_map_js(f"if(window.setTheme) window.setTheme('{mode}');", "theme")
 
     def update_filters_from_records(self):
-        facets = self.local_record_queries.resolve_filter_facets(
-            str(getattr(self.window.excel, "path", "") or ""),
-            fallback_records=self.window.records,
-        )
-        self.window._local_filter_facets_status = self.local_record_queries.build_filter_facets_status(facets)
+        facets = self.resolved_filter_facets(refresh=True)
         self.window.data_tab.filter_micro.set_items(list(facets.microbacias))
         self.window.data_tab.filter_eletronico.set_items(list(STANDARD_TIPO_OPTIONS))
         self.window.data_tab.filter_year.blockSignals(True)
@@ -379,11 +665,7 @@ class WindowShellController:
         self.window.data_tab.filter_year.blockSignals(False)
 
     def setup_dynamic_form_options_from_records(self):
-        facets = self.local_record_queries.resolve_filter_facets(
-            str(getattr(self.window.excel, "path", "") or ""),
-            fallback_records=self.window.records,
-        )
-        self.window._local_filter_facets_status = self.local_record_queries.build_filter_facets_status(facets)
+        facets = self.resolved_filter_facets()
         current_micro = self.window.data_tab.in_micro.currentText()
         self.window.data_tab.in_micro.blockSignals(True)
         self.window.data_tab.in_micro.clear()
@@ -494,12 +776,21 @@ class WindowShellController:
 
     def _resolve_filtered_record_selection(self, row_index: int):
         fallback_record = self.window.filtered_records[row_index]
-        selected_result = self.local_record_queries.resolve_selected_record(
-            str(getattr(self.window.excel, "path", "") or ""),
-            fallback_records=self.window.records,
-            uid=str(getattr(fallback_record, "uid", "") or ""),
-            excel_row=int(getattr(fallback_record, "excel_row", 0) or 0),
-        )
+        self._bind_runtime_persistence_service()
+        if isinstance(self.persistence, AuthoritativePersistenceUseCases):
+            selected_result = self.persistence.resolve_selected_record(
+                self.current_session_path(),
+                fallback_records=self.window.records,
+                uid=str(getattr(fallback_record, "uid", "") or ""),
+                excel_row=int(getattr(fallback_record, "excel_row", 0) or 0),
+            )
+        else:
+            selected_result = self.local_record_queries.resolve_selected_record(
+                self.current_session_path(),
+                fallback_records=self.window.records,
+                uid=str(getattr(fallback_record, "uid", "") or ""),
+                excel_row=int(getattr(fallback_record, "excel_row", 0) or 0),
+            )
         return selected_result.record or fallback_record
 
     def get_visible_column_attrs(self) -> List[str]:

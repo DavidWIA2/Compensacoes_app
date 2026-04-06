@@ -32,6 +32,19 @@ from app.services.audit_service import (
     format_audit_timestamp,
 )
 from app.ui.components.widgets import KPICard
+from app.ui.tabs.operations_tab_support import (
+    build_authoritative_write_text,
+    build_backup_status_text,
+    build_context_text,
+    build_mutation_sync_text,
+    build_persistence_status_text,
+    build_read_source_text,
+    build_record_overview_text,
+    build_runtime_overview_texts,
+    build_session_source_text,
+    build_visible_counter_text,
+    build_visible_summary_text,
+)
 
 
 class OperationsTab(QWidget):
@@ -59,7 +72,7 @@ class OperationsTab(QWidget):
             cards_layout.addWidget(card)
         layout.addLayout(cards_layout)
 
-        self.lbl_context = QLabel("Abra uma planilha para acompanhar as operações recentes.")
+        self.lbl_context = QLabel("Abra uma sessão para acompanhar as operações recentes.")
         self.lbl_context.setWordWrap(True)
         layout.addWidget(self.lbl_context)
 
@@ -79,15 +92,19 @@ class OperationsTab(QWidget):
         self.lbl_records_overview.setWordWrap(True)
         self.lbl_records_overview.setObjectName("FormStateLabel")
         layout.addWidget(self.lbl_records_overview)
-        self.lbl_session_source = QLabel("Sessao carregada: aguardando leitura inicial da planilha.")
+        self.lbl_session_source = QLabel("Sessão carregada: aguardando leitura inicial da sessão.")
         self.lbl_session_source.setWordWrap(True)
         self.lbl_session_source.setObjectName("FormStateLabel")
         layout.addWidget(self.lbl_session_source)
-        self.lbl_mutation_sync = QLabel("Escrita local (SQLite): aguardando mutacoes da sessao.")
+        self.lbl_authoritative_write = QLabel("Escrita autoritativa: aguardando mutações da sessão.")
+        self.lbl_authoritative_write.setWordWrap(True)
+        self.lbl_authoritative_write.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_authoritative_write)
+        self.lbl_mutation_sync = QLabel("Escrita local (SQLite): aguardando mutações da sessão.")
         self.lbl_mutation_sync.setWordWrap(True)
         self.lbl_mutation_sync.setObjectName("FormStateLabel")
         layout.addWidget(self.lbl_mutation_sync)
-        self.lbl_read_source = QLabel("Leitura operacional atual: aguardando aplicacao dos filtros.")
+        self.lbl_read_source = QLabel("Leitura operacional atual: aguardando aplicação dos filtros.")
         self.lbl_read_source.setWordWrap(True)
         self.lbl_read_source.setObjectName("FormStateLabel")
         layout.addWidget(self.lbl_read_source)
@@ -194,7 +211,7 @@ class OperationsTab(QWidget):
         for card in [self.card_total, self.card_today, self.card_backups, self.card_latest]:
             card.update_style(theme)
 
-    def clear_overview(self, message: str = "Abra uma planilha para acompanhar as operações recentes."):
+    def clear_overview(self, message: str = "Abra uma sessão para acompanhar as operações recentes."):
         self.all_events = []
         self.events = []
         self.selected_event = None
@@ -204,13 +221,14 @@ class OperationsTab(QWidget):
         self.card_latest.update_value("--")
         self.lbl_context.setText(message)
         self.lbl_summary.setText("Sem dados operacionais no momento.")
-        self.lbl_persistence.setText("Espelho local (SQLite): nenhuma planilha ativa.")
-        self.lbl_records_overview.setText("Resumo local (SQLite): nenhuma planilha ativa.")
-        self.lbl_session_source.setText("Sessao carregada: nenhuma planilha ativa.")
-        self.lbl_mutation_sync.setText("Escrita local (SQLite): nenhuma planilha ativa.")
-        self.lbl_read_source.setText("Leitura operacional atual: nenhuma planilha ativa.")
+        self.lbl_persistence.setText("Espelho local (SQLite): nenhuma sessão ativa.")
+        self.lbl_records_overview.setText("Resumo local (SQLite): nenhuma sessão ativa.")
+        self.lbl_session_source.setText("Sessão carregada: nenhuma sessão ativa.")
+        self.lbl_authoritative_write.setText("Escrita autoritativa: nenhuma sessão ativa.")
+        self.lbl_mutation_sync.setText("Escrita local (SQLite): nenhuma sessão ativa.")
+        self.lbl_read_source.setText("Leitura operacional atual: nenhuma sessão ativa.")
         self.clear_runtime_overview()
-        self.lbl_visible.setText("Mostrando 0 de 0 operações")
+        self.lbl_visible.setText(build_visible_counter_text(0, 0))
         self.filter_action.blockSignals(True)
         self.filter_action.clear()
         self.filter_action.addItem("Todas")
@@ -229,6 +247,7 @@ class OperationsTab(QWidget):
         persistence_report: Optional[PersistenceStatusReport] = None,
         record_overview_report: Optional[PersistenceRecordOverviewReport] = None,
         session_source_status: object | None = None,
+        authoritative_write_status: object | None = None,
         mutation_sync_status: object | None = None,
         record_read_status: Optional[LocalRecordReadStatus] = None,
     ):
@@ -236,80 +255,28 @@ class OperationsTab(QWidget):
         self.events = list(events)
         self.selected_event = None
         self._sync_action_filter()
-
-        workbook_label = workbook_path or "nenhuma"
-        self.lbl_context.setText(
-            "\n".join(
-                [
-                    f"Planilha monitorada: {workbook_label}",
-                    (
-                        f"Última operação: {overview.latest_timestamp or '--'} | "
-                        f"{overview.latest_summary or 'Nenhuma operação registrada.'}"
-                    ),
-                ]
-            )
-        )
-        self._update_persistence_status(persistence_report)
-        self._update_record_overview(record_overview_report)
-        self._update_session_source(session_source_status)
-        self._update_mutation_sync(mutation_sync_status)
-        self._update_read_source(record_read_status)
+        self.lbl_context.setText(build_context_text(workbook_path, overview))
+        self.lbl_persistence.setText(build_persistence_status_text(persistence_report))
+        self.lbl_records_overview.setText(build_record_overview_text(record_overview_report))
+        self.lbl_session_source.setText(build_session_source_text(session_source_status))
+        self.lbl_authoritative_write.setText(build_authoritative_write_text(authoritative_write_status))
+        self.lbl_mutation_sync.setText(build_mutation_sync_text(mutation_sync_status))
+        self.lbl_read_source.setText(build_read_source_text(record_read_status))
         self._apply_filters()
 
     def update_runtime_overview(self, report: RuntimeJobOverviewReport):
-        if report.total_jobs <= 0:
-            self.clear_runtime_overview()
-            return
-
-        status_map = {
-            "running": "Em execução",
-            "completed": "Concluído",
-            "failed": "Falhou",
-            "cancelled": "Cancelado",
-        }
-        latest_status = status_map.get(report.latest_status, report.latest_status or "--")
-        self.lbl_runtime_summary.setText(
-            "\n".join(
-                [
-                    (
-                        f"Jobs da sessão: {report.total_jobs} | "
-                        f"{report.running_jobs} em execução | "
-                        f"{report.completed_jobs} concluídos | "
-                        f"{report.failed_jobs} falharam | "
-                        f"{report.cancelled_jobs} cancelados"
-                    ),
-                    (
-                        f"Último job: {latest_status} | "
-                        f"{report.latest_label or '--'} | "
-                        f"{report.latest_detail_message or 'Sem detalhes adicionais.'}"
-                    ),
-                ]
-            )
-        )
-
-        if report.active_jobs:
-            active_lines = []
-            for job in report.active_jobs:
-                progress_suffix = f" ({job.progress_value}/{job.total})" if job.total > 0 else ""
-                active_lines.append(f"{job.label}{progress_suffix}: {job.detail_message or 'Em andamento'}")
-            self.lbl_runtime_active.setText("Jobs ativos: " + " | ".join(active_lines))
-        else:
-            self.lbl_runtime_active.setText("Jobs ativos: nenhum.")
-
-        recent_lines = []
-        for job in report.recent_jobs[:3]:
-            status_text = status_map.get(job.status, job.status or "--")
-            recent_lines.append(f"[{status_text}] {job.label} - {job.detail_message or 'Sem detalhes'}")
-        self.lbl_runtime_recent.setText(
-            "Jobs recentes: " + (" | ".join(recent_lines) if recent_lines else "nenhum.")
-        )
-        self.btn_cancel_runtime.setEnabled(report.cancellable_jobs > 0)
+        payload = build_runtime_overview_texts(report)
+        self.lbl_runtime_summary.setText(payload.summary)
+        self.lbl_runtime_active.setText(payload.active)
+        self.lbl_runtime_recent.setText(payload.recent)
+        self.btn_cancel_runtime.setEnabled(payload.cancel_enabled)
 
     def clear_runtime_overview(self):
-        self.lbl_runtime_summary.setText("Jobs da sessão: nenhuma operação executada ainda.")
-        self.lbl_runtime_active.setText("Jobs ativos: nenhum.")
-        self.lbl_runtime_recent.setText("Jobs recentes: nenhum.")
-        self.btn_cancel_runtime.setEnabled(False)
+        payload = build_runtime_overview_texts(None)
+        self.lbl_runtime_summary.setText(payload.summary)
+        self.lbl_runtime_active.setText(payload.active)
+        self.lbl_runtime_recent.setText(payload.recent)
+        self.btn_cancel_runtime.setEnabled(payload.cancel_enabled)
 
     def _sync_action_filter(self):
         current_text = self.filter_action.currentText()
@@ -373,21 +340,16 @@ class OperationsTab(QWidget):
         for event in self.events:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            status = (
-                "Disponível"
-                if audit_backup_available(event)
-                else ("Configurado" if audit_backup_path(event) else "Sem backup")
-            )
             values = [
                 format_audit_timestamp(event.timestamp),
                 str(event.action or "").strip().upper(),
                 str(event.summary or ""),
-                status,
+                build_backup_status_text(event),
             ]
             for column, value in enumerate(values):
                 self.table.setItem(row, column, QTableWidgetItem(value))
 
-        self.lbl_visible.setText(f"Mostrando {len(self.events)} de {len(self.all_events)} operações")
+        self.lbl_visible.setText(build_visible_counter_text(len(self.events), len(self.all_events)))
 
         if not self.events:
             self.selected_event = None
@@ -412,195 +374,7 @@ class OperationsTab(QWidget):
         if self.events:
             latest_value = str(self.events[0].action or "").strip().upper() or "--"
         self.card_latest.update_value(latest_value)
-
-        if overview.action_counts:
-            actions_text = " | ".join(f"{action}: {count}" for action, count in overview.action_counts)
-        else:
-            actions_text = "Nenhuma operação corresponde aos filtros atuais."
-        self.lbl_summary.setText(
-            "\n".join(
-                [
-                    (
-                        f"Resumo visível: {overview.total_events} operações | "
-                        f"{overview.events_today} hoje | "
-                        f"{overview.available_backups}/{overview.configured_backups} backups disponíveis"
-                    ),
-                    f"Ações visíveis: {actions_text}",
-                ]
-            )
-        )
-
-    def _update_persistence_status(self, report: Optional[PersistenceStatusReport]):
-        if report is None:
-            self.lbl_persistence.setText("Espelho local (SQLite): indisponível nesta sessão.")
-            return
-
-        status_map = {
-            "sincronizado": "Sincronizado",
-            "atencao": "Em atenção",
-            "ausente": "Ainda não sincronizado",
-            "indisponivel": "Indisponível",
-        }
-        status_text = status_map.get(report.status, report.status.title())
-        synced_at = format_audit_timestamp(report.synced_at) if report.synced_at else "--"
-        lines = [
-            f"Espelho local (SQLite): {status_text} | Última sincronização: {synced_at}",
-            (
-                f"Registros espelhados: {report.mirrored_records}/{report.expected_records} | "
-                f"Eventos auditados: {report.mirrored_audit_events}/{report.expected_audit_events} | "
-                f"Plantios espelhados: {report.mirrored_plantios}"
-            ),
-        ]
-        if report.issues:
-            lines.append("Pendências: " + " | ".join(report.issues))
-        self.lbl_persistence.setText("\n".join(lines))
-
-    def _update_record_overview(self, report: Optional[PersistenceRecordOverviewReport]):
-        if report is None:
-            self.lbl_records_overview.setText("Resumo local (SQLite): indisponível nesta sessão.")
-            return
-
-        if report.status == "indisponivel":
-            self.lbl_records_overview.setText(
-                "Resumo local (SQLite): o espelho local não está disponível nesta sessão."
-            )
-            return
-
-        if report.status == "ausente":
-            self.lbl_records_overview.setText(
-                "Resumo local (SQLite): a planilha ainda não foi sincronizada para consultas locais."
-            )
-            return
-
-        lines = [
-            (
-                f"Resumo local (SQLite): {report.total_records} registros | "
-                f"{report.compensados_count} compensados | "
-                f"{report.pendentes_count} pendentes | "
-                f"{report.records_with_plantios_count} com plantios"
-            ),
-            (
-                f"Qualidade do espelho: {report.records_without_microbacia_count} sem microbacia | "
-                f"{report.records_without_coordinates_count} sem coordenadas"
-            ),
-        ]
-        if report.top_microbacias:
-            lines.append(
-                "Microbacias em destaque: "
-                + " | ".join(f"{label}: {count}" for label, count in report.top_microbacias)
-            )
-        if report.sample_records:
-            lines.append(
-                "Amostra do espelho: "
-                + " | ".join(self._format_sample_record(sample) for sample in report.sample_records)
-            )
-        self.lbl_records_overview.setText("\n".join(lines))
-
-    def _update_read_source(self, status: Optional[LocalRecordReadStatus]):
-        if status is None or status.status == "indisponivel":
-            self.lbl_read_source.setText("Leitura operacional atual: sessao em memoria.")
-            return
-
-        if status.uses_sqlite:
-            lines = [
-                (
-                    f"Leitura operacional atual: espelho local (SQLite) | "
-                    f"{status.filtered_records} registro(s) no recorte"
-                )
-            ]
-            if status.strategy == "sqlite_query":
-                lines.append("Modo de leitura local: consulta indexada.")
-            if status.synced_at:
-                lines.append(
-                    f"Ultima sincronizacao valida: {format_audit_timestamp(status.synced_at)}"
-                )
-            self.lbl_read_source.setText("\n".join(lines))
-            return
-
-        lines = [
-            (
-                f"Leitura operacional atual: sessao em memoria | "
-                f"{status.filtered_records} registro(s) no recorte"
-            )
-        ]
-        if status.issues:
-            lines.append("Motivos do fallback: " + " | ".join(status.issues))
-        self.lbl_read_source.setText("\n".join(lines))
-
-    def _update_session_source(self, status: object | None):
-        if status is None:
-            self.lbl_session_source.setText("Sessao carregada: aguardando leitura inicial da planilha.")
-            return
-
-        source = str(getattr(status, "source", "") or "").strip()
-        strategy = str(getattr(status, "strategy", "") or "").strip()
-        synced_at = str(getattr(status, "synced_at", "") or "").strip()
-        filtered_records = int(getattr(status, "filtered_records", 0) or 0)
-        issues = tuple(getattr(status, "issues", ()) or ())
-
-        if source == "sqlite":
-            lines = [f"Sessao carregada: espelho local (SQLite) com {filtered_records} registro(s)."]
-            if strategy == "sqlite_snapshot":
-                lines.append("Modo de carga da sessao: snapshot local validado.")
-            if synced_at:
-                lines.append(f"Ultima sincronizacao usada na carga: {format_audit_timestamp(synced_at)}")
-            self.lbl_session_source.setText("\n".join(lines))
-            return
-
-        lines = [f"Sessao carregada: memoria da sessao com {filtered_records} registro(s)."]
-        if issues:
-            lines.append("Motivos do fallback: " + " | ".join(str(issue) for issue in issues))
-        self.lbl_session_source.setText("\n".join(lines))
-
-    def _update_mutation_sync(self, status: object | None):
-        if status is None:
-            self.lbl_mutation_sync.setText("Escrita local (SQLite): nenhuma mutacao registrada nesta sessao.")
-            return
-
-        sync_status = str(getattr(status, "status", "") or "").strip()
-        operation = str(getattr(status, "operation", "") or "").strip() or "mutacao"
-        strategy = str(getattr(status, "strategy", "") or "").strip()
-        record_count = int(getattr(status, "record_count", 0) or 0)
-        synced_at = str(getattr(status, "synced_at", "") or "").strip()
-        issues = tuple(getattr(status, "issues", ()) or ())
-
-        if sync_status == "sqlite":
-            lines = [f"Escrita local (SQLite): {operation} sincronizada com {record_count} registro(s)."]
-            if strategy == "incremental":
-                lines.append("Modo de escrita local: sincronizacao incremental.")
-            elif strategy == "snapshot_rebuild":
-                lines.append("Modo de escrita local: reconstrucao completa do snapshot.")
-            if synced_at:
-                lines.append(f"Ultima sincronizacao de escrita: {format_audit_timestamp(synced_at)}")
-            if issues:
-                lines.append("Observacoes: " + " | ".join(str(issue) for issue in issues))
-            self.lbl_mutation_sync.setText("\n".join(lines))
-            return
-
-        if sync_status == "falha":
-            lines = [f"Escrita local (SQLite): falha na sincronizacao da operacao {operation}."]
-            if issues:
-                lines.append("Detalhes: " + " | ".join(str(issue) for issue in issues))
-            self.lbl_mutation_sync.setText("\n".join(lines))
-            return
-
-        if sync_status == "indisponivel":
-            lines = [f"Escrita local (SQLite): indisponivel para a operacao {operation}."]
-            if issues:
-                lines.append("Detalhes: " + " | ".join(str(issue) for issue in issues))
-            self.lbl_mutation_sync.setText("\n".join(lines))
-            return
-
-        self.lbl_mutation_sync.setText("Escrita local (SQLite): aguardando mutacoes da sessao.")
-
-    @staticmethod
-    def _format_sample_record(sample) -> str:
-        status = str(sample.compensado or "").strip().upper() or "PENDENTE"
-        return (
-            f"Linha {int(sample.excel_row)} | {sample.av_tec or '--'} | "
-            f"{sample.uid or '--'} | {sample.microbacia or '(sem microbacia)'} | "
-            f"{status} | plantios {int(sample.plantio_count)}"
-        )
+        self.lbl_summary.setText(build_visible_summary_text(overview))
 
     def _clear_filters(self):
         self.filter_action.setCurrentText("Todas")

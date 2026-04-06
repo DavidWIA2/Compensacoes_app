@@ -4,7 +4,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from app.ui.components.job_specs import BackgroundJobSpec
-from app.ui.components.ui_utils import _setup_i18n
+from app.ui.controllers.window_lifecycle_support import (
+    build_update_disconnect_callbacks,
+    build_update_prompt_content,
+    run_startup_sequence,
+    stop_active_timer,
+)
 
 
 class WindowLifecycleController:
@@ -42,40 +47,13 @@ class WindowLifecycleController:
         self.window.data_tab.bridge._on_layer_changed = self.window.save_map_layer_preference
 
     def finalize_initialization(self):
-        self.window._setup_menus()
-        self.window._load_settings()
-        self.window._connect_signals()
-        self.window._setup_shortcuts()
-        self.window.form_controller.setup_form_state_ui()
-        self.window._startup_window_timer.start(0)
-
-        _setup_i18n()
-        self.window._load_last_excel()
-        self.window._apply_theme()
-
-        self.window._update_form_action_buttons()
-        self.window._update_address_search_enabled()
-        self.window._refresh_window_chrome()
-        self.window.refresh_operations_overview()
-        self.window.setWindowModified(False)
-        self.window.statusBar().showMessage("Pronto")
-
+        run_startup_sequence(self.window)
         self.start_background_update_check()
 
     def start_background_update_check(self):
         updater = self.window._updater_cls()
         self.window._updater = updater
-        disconnect_callbacks = []
-        if hasattr(updater, "update_ready"):
-            updater.update_ready.connect(self.window.present_update_offer)
-            disconnect_callbacks.append(
-                lambda updater=updater: updater.update_ready.disconnect(self.window.present_update_offer)
-            )
-        elif hasattr(updater, "update_available"):
-            updater.update_available.connect(self.window._prompt_update)
-            disconnect_callbacks.append(
-                lambda updater=updater: updater.update_available.disconnect(self.window._prompt_update)
-            )
+        disconnect_callbacks = build_update_disconnect_callbacks(self.window, updater)
         self.window.start_background_job(
             BackgroundJobSpec(
                 name="startup_update_check",
@@ -92,18 +70,15 @@ class WindowLifecycleController:
             self.window._finalize_startup_layout()
 
     def prompt_update(self, version: str, notes: str):
-        msg = (
-            f"Uma nova vers\u00e3o do aplicativo ({version}) est\u00e1 dispon\u00edvel!\n\n"
-            f"Novidades:\n{notes}\n\nDeseja atualizar agora?"
-        )
+        prompt = build_update_prompt_content(version, notes)
         buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        reply = QMessageBox.question(self.window, "Atualiza\u00e7\u00e3o Dispon\u00edvel", msg, buttons)
+        reply = QMessageBox.question(self.window, prompt.title, prompt.question_message, buttons)
         if reply == QMessageBox.StandardButton.Yes:
-            self.window.statusBar().showMessage("Baixando atualiza\u00e7\u00e3o em segundo plano...")
+            self.window.statusBar().showMessage(prompt.accepted_status_message)
             QMessageBox.information(
                 self.window,
-                "Atualizador",
-                "A atualiza\u00e7\u00e3o ser\u00e1 baixada. O aplicativo ser\u00e1 reiniciado em breve.",
+                prompt.accepted_info_title,
+                prompt.accepted_info_message,
             )
 
     def prepare_close(self, event) -> bool:
@@ -125,10 +100,5 @@ class WindowLifecycleController:
         return True
 
     def stop_owned_timers(self):
-        if getattr(self.window, "_startup_window_timer", None) is not None and self.window._startup_window_timer.isActive():
-            self.window._startup_window_timer.stop()
-        if (
-            getattr(self.window, "_initial_map_sync_timer", None) is not None
-            and self.window._initial_map_sync_timer.isActive()
-        ):
-            self.window._initial_map_sync_timer.stop()
+        stop_active_timer(getattr(self.window, "_startup_window_timer", None))
+        stop_active_timer(getattr(self.window, "_initial_map_sync_timer", None))

@@ -3,6 +3,7 @@ from PySide6.QtCore import Signal
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
+from app.services.tcra_records_service import TcraAgendaItem, TcraRecordOverview
 
 
 class _DummyPage:
@@ -37,6 +38,7 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     parent.is_dark_mode = False
 
     tab = dashboard_tab_module.DashboardTab(parent)
+    assert tab.scope_tabs.count() == 2
     report = PersistenceRecordOverviewReport(
         status="sincronizado",
         workbook_path="dummy.xlsx",
@@ -79,6 +81,99 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     assert "Top microbacias: Gregorio: 7 | Medeiros: 5" in text
     assert "espelho local (SQLite)" in tab.lbl_read_source.text()
     assert "6 registro(s) no recorte" in tab.lbl_read_source.text()
+
+    tab.close()
+    parent.close()
+
+
+def test_dashboard_tab_shows_tcra_overview_and_agenda(monkeypatch, qt_app):
+    import app.ui.tabs.dashboard_tab as dashboard_tab_module
+
+    monkeypatch.setattr(dashboard_tab_module, "QWebEngineView", MockQWebEngineView)
+
+    parent = QtWidgets.QWidget()
+    parent.scale_factor = 1.0
+    parent.is_dark_mode = False
+
+    tab = dashboard_tab_module.DashboardTab(parent)
+    overview = TcraRecordOverview(
+        total_count=18,
+        ativos_count=12,
+        cumpridos_count=6,
+        prazo_vencido_count=2,
+        relatorio_pendente_count=3,
+        mpsp_relacionados_count=5,
+        com_eventos_count=10,
+        sem_numero_tcra_count=4,
+        upcoming_30d_count=2,
+        sem_responsavel_count=3,
+        alertas_count=5,
+    )
+    agenda = (
+        TcraAgendaItem(
+            uid="tcra-1",
+            priority_rank=0,
+            prioridade_label="Prazo vencido",
+            termo_label="TCRA-2024-001",
+            local="Parque Linear",
+            detalhe="Prazo final em 01/04/2026.",
+            status_operacional="Prazo vencido",
+        ),
+        TcraAgendaItem(
+            uid="tcra-2",
+            priority_rank=1,
+            prioridade_label="Relatorio pendente",
+            termo_label="26207/2019",
+            local="Sistema de Lazer",
+            detalhe="Relatorio previsto em 03/04/2026.",
+            status_operacional="Relatorio pendente",
+        ),
+    )
+
+    tab.update_tcra_overview(overview, agenda)
+    tab.scope_tabs.setCurrentWidget(tab.tcra_page)
+
+    assert tab.card_tcra_total.lbl_value.text() == "18"
+    assert tab.card_tcra_alertas.lbl_value.text() == "5"
+    assert tab.card_tcra_proximos.lbl_value.text() == "2"
+    assert tab.card_tcra_cumpridos.lbl_value.text() == "6"
+    assert "18 | 12 ativos" in tab.lbl_tcra_summary.text()
+    assert "Prazo vencido: TCRA-2024-001" in tab.lbl_tcra_agenda.text()
+    assert "Relatorio pendente: 26207/2019" in tab.lbl_tcra_agenda.text()
+    assert "TCRAs: 5 alerta(s)" in tab.lbl_agenda_summary.text()
+    assert tab.current_export_context() is not None
+
+    tab.close()
+    parent.close()
+
+
+def test_dashboard_tab_agenda_buttons_navigate_to_target_tabs(monkeypatch, qt_app):
+    import app.ui.tabs.dashboard_tab as dashboard_tab_module
+
+    monkeypatch.setattr(dashboard_tab_module, "QWebEngineView", MockQWebEngineView)
+
+    tabs = QtWidgets.QTabWidget()
+    parent = QtWidgets.QWidget()
+    parent.scale_factor = 1.0
+    parent.is_dark_mode = False
+    parent.tabs = tabs
+    parent.operations_tab = QtWidgets.QWidget()
+    parent.tcra_tab = QtWidgets.QWidget()
+    tabs.addTab(QtWidgets.QWidget(), "Dados")
+    tabs.addTab(parent.operations_tab, "Operacoes")
+    tabs.addTab(parent.tcra_tab, "TCRAs")
+
+    tab = dashboard_tab_module.DashboardTab(parent)
+    parent.tcra_tab._set_agenda_scope = lambda scope: setattr(parent, "_last_scope", scope)
+    parent.tcra_tab._open_inbox_overview = lambda: setattr(parent, "_opened_inbox", True)
+
+    tab.btn_open_operations.click()
+    assert tabs.currentWidget() is parent.operations_tab
+
+    tab.btn_open_tcra_agenda.click()
+    assert tabs.currentWidget() is parent.tcra_tab
+    assert parent._last_scope == "hoje"
+    assert parent._opened_inbox is True
 
     tab.close()
     parent.close()

@@ -15,3 +15,7 @@ __pycache__/
 # Logs and local diagnostics
 logs/
 tmp_debug*/
+tcra_test_run*.log
+tmp_tcra_debug.db*
+data/audit/
+data/state/

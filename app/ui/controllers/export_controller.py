@@ -14,7 +14,7 @@ from app.services.records_service import compute_metrics
 from app.services.report_service import (
     export_csv,
     export_dashboard_pdf,
-    export_excel_two_sheets,
+    export_spreadsheet_two_sheets,
     export_pdf,
 )
 from app.ui.components.job_specs import BlockingJobSpec
@@ -27,6 +27,7 @@ logger = get_logger("UI.Export")
 class ExportController:
     def __init__(self, window):
         self.window = window
+        self.persistence = getattr(window, "authoritative_persistence", None)
         self.persistence_use_cases = getattr(window, "persistence_monitoring_use_cases", None)
         self.reporting_use_cases = ExportReportingUseCases(self.persistence_use_cases)
 
@@ -70,28 +71,67 @@ class ExportController:
             year=self.window.data_tab.filter_year.currentText(),
         )
 
+    def _visible_records(self):
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.visible_records()
+        return list(self.window.filtered_records)
+
+    def _visible_columns(self):
+        return self.window._get_visible_column_attrs()
+
+    def _current_session_path(self) -> str:
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.current_session_path()
+        return str(getattr(getattr(self.window, "session_runtime", None), "path", "") or "")
+
+    def _current_grid_export_payload(self):
+        return self.reporting_use_cases.build_grid_export_payload(
+            records=self._visible_records(),
+            selected_cols=self._visible_columns(),
+            metrics=self._current_filtered_metrics(),
+            filter_state=self._current_filter_state(),
+        )
+
     def metrics_to_kpi_rows(self, metrics):
         return self.reporting_use_cases.build_metrics_kpi_rows(metrics)
 
     def _current_filtered_metrics(self):
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.resolved_filtered_metrics()
+
         cached_metrics = getattr(self.window, "_filtered_metrics", None)
         if cached_metrics is not None:
             return dict(cached_metrics)
         return compute_metrics(self.window.filtered_records)
 
     def _current_dashboard_record_overview(self) -> PersistenceRecordOverviewReport | None:
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.resolved_dashboard_record_overview(
+                top_microbacias_limit=3,
+                sample_limit=0,
+            )
+
         cached_report = getattr(self.window, "_dashboard_record_overview", None)
-        workbook_path = str(getattr(getattr(self.window, "excel", None), "path", "") or "").strip()
-        try:
-            report = self.reporting_use_cases.resolve_dashboard_record_overview(
-                workbook_path=workbook_path,
+        session_path = str(getattr(getattr(self.window, "session_runtime", None), "path", "") or "").strip()
+        if self.persistence is not None:
+            self.persistence.bind_runtime_window(self.window)
+            report = self.persistence.resolve_dashboard_record_overview(
+                session_path,
                 cached_report=cached_report,
                 top_microbacias_limit=3,
                 sample_limit=0,
             )
-        except Exception as exc:
-            logger.warning("Falha ao montar resumo local para exportacao do painel: %s", exc, exc_info=True)
-            return None
+        else:
+            try:
+                report = self.reporting_use_cases.resolve_dashboard_record_overview(
+                    workbook_path=session_path,
+                    cached_report=cached_report,
+                    top_microbacias_limit=3,
+                    sample_limit=0,
+                )
+            except Exception as exc:
+                logger.warning("Falha ao montar resumo local para exportacao do painel: %s", exc, exc_info=True)
+                return None
 
         if cached_report is None and report is not None:
             self.window._dashboard_record_overview = report
@@ -116,6 +156,7 @@ class ExportController:
         path = self.window._get_save_path("Salvar CSV", "CSV (*.csv)")
         if not path:
             return
+        payload = self._current_grid_export_payload()
         self._perform_export(
             job_name="export_csv",
             path=path,
@@ -124,30 +165,30 @@ class ExportController:
             error_action="exportar o CSV",
             operation=lambda: export_csv(
                 path,
-                self.window.filtered_records,
-                self.window._get_visible_column_attrs(),
+                list(payload.records),
+                list(payload.visible_columns),
             ),
         )
 
-    def export_excel_clicked(self):
-        path = self.window._get_save_path("Salvar Excel", "Excel (*.xlsx)")
+    def export_spreadsheet_clicked(self):
+        path = self.window._get_save_path("Salvar Planilha", "Planilha (*.xlsx)")
         if not path:
             return
-        metrics = self._current_filtered_metrics()
+        payload = self._current_grid_export_payload()
         self._perform_export(
-            job_name="export_excel",
+            job_name="export_spreadsheet",
             path=path,
-            busy_message="Exportando Excel...",
-            success_message="Excel exportado com sucesso.",
-            error_action="exportar o Excel",
-            operation=lambda: export_excel_two_sheets(
+            busy_message="Exportando planilha...",
+            success_message="Planilha exportada com sucesso.",
+            error_action="exportar a planilha",
+            operation=lambda: export_spreadsheet_two_sheets(
                 path,
-                self.window.filtered_records,
-                self.build_filter_summary(),
-                self.window._get_visible_column_attrs(),
-                self.metrics_to_kpi_rows(metrics),
-                metrics["pend_micro_sorted"],
-                metrics["pend_ele_sorted"],
+                list(payload.records),
+                payload.filter_summary,
+                list(payload.visible_columns),
+                list(payload.metrics_kpi_rows),
+                list(payload.pend_micro_sorted),
+                list(payload.pend_ele_sorted),
             ),
         )
 
@@ -155,7 +196,7 @@ class ExportController:
         path = self.window._get_save_path("Salvar PDF", "PDF (*.pdf)")
         if not path:
             return
-        metrics = self._current_filtered_metrics()
+        payload = self._current_grid_export_payload()
         self._perform_export(
             job_name="export_pdf",
             path=path,
@@ -164,11 +205,11 @@ class ExportController:
             error_action="exportar o PDF",
             operation=lambda: export_pdf(
                 path,
-                self.window.filtered_records,
-                self.build_filter_summary(),
-                self.window._get_visible_column_attrs(),
-                self.metrics_to_kpi_rows(metrics),
-                metrics["pend_micro_sorted"],
+                list(payload.records),
+                payload.filter_summary,
+                list(payload.visible_columns),
+                list(payload.metrics_kpi_rows),
+                list(payload.pend_micro_sorted),
             ),
         )
 
@@ -199,14 +240,36 @@ class ExportController:
         path = self.window._get_save_path("Salvar PDF", "PDF (*.pdf)")
         if not path:
             return
+        export_context_getter = getattr(self.window.dash_tab, "current_export_context", None)
+        if callable(export_context_getter):
+            export_context = export_context_getter()
+        else:
+            export_context = None
+        if export_context is not None:
+            pie, bar = self.window.dash_tab.export_images()
+            self._perform_export(
+                job_name="export_dashboard_pdf",
+                path=path,
+                busy_message="Gerando relatorio do painel...",
+                success_message="Relatorio de Painel exportado.",
+                error_action="exportar o painel em PDF",
+                operation=lambda: export_dashboard_pdf(
+                    path,
+                    export_context.title,
+                    list(export_context.kpi_lines),
+                    export_context.filter_summary,
+                    [image for image in [pie, bar] if image],
+                ),
+            )
+            return
         metrics = self._current_filtered_metrics()
         pie, bar = self.window.dash_tab.export_images()
         payload = self.reporting_use_cases.build_dashboard_export_payload(
             metrics=metrics,
             filter_state=self._current_filter_state(),
             chart_images=[pie, bar],
-            workbook_path=str(getattr(getattr(self.window, "excel", None), "path", "") or ""),
-            cached_report=getattr(self.window, "_dashboard_record_overview", None),
+            workbook_path=self._current_session_path(),
+            cached_report=self._current_dashboard_record_overview(),
             record_read_status=getattr(self.window, "_local_record_read_status", None),
         )
         if payload.record_overview is not None:

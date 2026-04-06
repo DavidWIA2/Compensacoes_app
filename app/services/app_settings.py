@@ -4,6 +4,10 @@ from typing import List, Optional, Tuple
 from PySide6.QtCore import QSettings
 
 from app.config import APP_SETTINGS_NAME, APP_SETTINGS_ORG, DEFAULT_MAP_LAYER, DEFAULT_THEME_DARK_MODE
+from app.utils.logger import get_logger
+
+
+logger = get_logger("Settings")
 
 
 class AppSettings:
@@ -31,30 +35,69 @@ class AppSettings:
     def set_active_tab_index(self, index: int):
         self.setValue("active_tab_index", int(index))
 
-    def recent_files(self) -> List[str]:
-        recents = self.value("recent_files")
-        if not recents:
+    def _read_json_list(self, key: str) -> List[str]:
+        raw_value = self.value(key)
+        if not raw_value:
             return []
-        if isinstance(recents, str):
+        if isinstance(raw_value, list):
+            return list(raw_value)
+        if isinstance(raw_value, str):
             try:
-                return list(json.loads(recents))
-            except Exception:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError as exc:
+                logger.warning("Falha ao ler lista em QSettings para '%s': %s", key, exc, exc_info=True)
                 return []
-        if isinstance(recents, list):
-            return list(recents)
+            if isinstance(decoded, list):
+                return list(decoded)
+        logger.warning("Valor inesperado em QSettings para lista '%s': %s", key, type(raw_value).__name__)
         return []
+
+    def _read_mapping(self, key: str) -> dict:
+        raw_value = self.value(key, {})
+        if isinstance(raw_value, dict):
+            return dict(raw_value)
+        if isinstance(raw_value, str):
+            try:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError as exc:
+                logger.warning("Falha ao ler dicionario em QSettings para '%s': %s", key, exc, exc_info=True)
+                return {}
+            if isinstance(decoded, dict):
+                return dict(decoded)
+        if raw_value not in ({}, None, ""):
+            logger.warning("Valor inesperado em QSettings para dicionario '%s': %s", key, type(raw_value).__name__)
+        return {}
+
+    def recent_files(self) -> List[str]:
+        return self._read_json_list("recent_files")
 
     def set_recent_files(self, paths: List[str]):
         self.setValue("recent_files", list(paths))
 
-    def last_excel_path(self) -> str:
-        return str(self.value("last_excel_path", "") or "")
+    def last_session_path(self) -> str:
+        return str(self.value("last_session_path", "") or "").strip()
 
-    def set_last_excel_path(self, path: str):
-        self.setValue("last_excel_path", path)
+    def set_last_session_path(self, path: str):
+        normalized = str(path or "")
+        self.setValue("last_session_path", normalized)
 
-    def clear_last_excel_path(self):
+    def clear_last_session_path(self):
+        self.remove("last_session_path")
+
+    def legacy_workbook_path(self) -> str:
+        return str(self.value("last_excel_path", "") or "").strip()
+
+    def clear_legacy_workbook_path(self):
         self.remove("last_excel_path")
+
+    def database_bootstrap_source_path(self) -> str:
+        return str(self.value("database_bootstrap_source_path", "") or "").strip()
+
+    def set_database_bootstrap_source_path(self, path: str):
+        self.setValue("database_bootstrap_source_path", str(path or "").strip())
+
+    def clear_database_bootstrap_source_path(self):
+        self.remove("database_bootstrap_source_path")
 
     def last_export_dir(self) -> str:
         return str(self.value("last_export_dir", "") or "")
@@ -86,10 +129,22 @@ class AppSettings:
         self.setValue("window_geometry", geometry)
 
     def operation_history_filter_state(self) -> dict:
-        state = self.value("operation_history_filter_state", {})
-        if isinstance(state, dict):
-            return dict(state)
-        return {}
+        return self._read_mapping("operation_history_filter_state")
 
     def set_operation_history_filter_state(self, state: dict):
         self.setValue("operation_history_filter_state", dict(state or {}))
+
+    def tcra_filter_state(self) -> dict:
+        return self._read_mapping("tcra_filter_state")
+
+    def set_tcra_filter_state(self, state: dict):
+        self.setValue("tcra_filter_state", dict(state or {}))
+
+    def tcra_form_draft(self) -> dict:
+        return self._read_mapping("tcra_form_draft")
+
+    def set_tcra_form_draft(self, state: dict):
+        self.setValue("tcra_form_draft", dict(state or {}))
+
+    def clear_tcra_form_draft(self):
+        self.remove("tcra_form_draft")

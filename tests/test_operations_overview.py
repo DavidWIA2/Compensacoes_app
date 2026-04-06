@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 
 from app.ui.components.job_specs import BackgroundJobSpec
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
@@ -87,7 +87,7 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
         ),
     )
     window.records = [object()] * 8
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window._local_record_read_status = LocalRecordReadStatus(
         status="sqlite",
         source="sqlite",
@@ -120,11 +120,27 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
             "issues": (),
         },
     )()
+    window._authoritative_write_status = type(
+        "WriteStatus",
+        (),
+        {
+            "status": "sqlite_primary",
+            "operation": "edit",
+            "authority_source": "sqlite",
+            "sqlite_strategy": "incremental",
+            "synced_at": now.isoformat(),
+            "record_count": 8,
+            "finalized": True,
+            "rollback_applied": False,
+            "issues": (),
+        },
+    )()
 
     window.refresh_operations_overview()
 
-    assert window.tabs.count() == 3
+    assert window.tabs.count() == 4
     assert window.tabs.tabText(2) == "Operações"
+    assert window.tabs.tabText(3) == "TCRAs"
     assert window.operations_tab.card_total.lbl_value.text() == "2"
     assert window.operations_tab.card_today.lbl_value.text() == "1"
     assert window.operations_tab.card_backups.lbl_value.text() == "1"
@@ -136,9 +152,11 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert "Espelho local (SQLite): Sincronizado" in window.operations_tab.lbl_persistence.text()
     assert "Registros espelhados: 8/8" in window.operations_tab.lbl_persistence.text()
     assert "Resumo local (SQLite): 8 registros" in window.operations_tab.lbl_records_overview.text()
-    assert "Sessao carregada: espelho local (SQLite) com 8 registro(s)." in window.operations_tab.lbl_session_source.text()
+    assert "Sessão carregada: espelho local (SQLite) com 8 registro(s)." in window.operations_tab.lbl_session_source.text()
+    assert "Escrita autoritativa: SQLite primário | edit confirmada no espelho de planilha." in window.operations_tab.lbl_authoritative_write.text()
+    assert "Identidade final reconciliada" in window.operations_tab.lbl_authoritative_write.text()
     assert "Escrita local (SQLite): edit sincronizada com 8 registro(s)." in window.operations_tab.lbl_mutation_sync.text()
-    assert "Modo de escrita local: sincronizacao incremental." in window.operations_tab.lbl_mutation_sync.text()
+    assert "Modo de escrita local: sincronização incremental." in window.operations_tab.lbl_mutation_sync.text()
     assert "espelho local (SQLite)" in window.operations_tab.lbl_read_source.text()
     assert "2 registro(s) no recorte" in window.operations_tab.lbl_read_source.text()
     assert "Gregorio: 5" in window.operations_tab.lbl_records_overview.text()
@@ -158,6 +176,128 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert window.operations_tab.selected_event.event_id == "evt-2"
     assert window.operations_tab.btn_open_backup.isEnabled() is False
     assert window.operations_tab.lbl_visible.text() == "Mostrando 1 de 2 operações"
+    window.close()
+
+
+def test_operations_overview_uses_authoritative_total_record_count(ui_window_factory, monkeypatch):
+    window = ui_window_factory()
+    captured = {}
+    window.session_runtime.path = "dummy.xlsx"
+    window.records = [object()]
+    window._local_session_source_status = LocalRecordReadStatus(
+        status="sqlite",
+        source="sqlite",
+        strategy="sqlite_snapshot",
+        workbook_path="dummy.xlsx",
+        synced_at="2026-03-31T12:00:00+00:00",
+        mirrored_records=6,
+        session_records=1,
+        filtered_records=6,
+    )
+
+    monkeypatch.setattr(window.audit_service, "list_events_for_workbook", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        window.operations_controller.persistence_use_cases,
+        "build_status_report",
+        lambda workbook_path, **kwargs: captured.update(
+            {
+                "workbook_path": workbook_path,
+                "expected_records": kwargs["expected_records"],
+                "expected_audit_events": kwargs["expected_audit_events"],
+            }
+        )
+        or PersistenceStatusReport(
+            status="ausente",
+            workbook_path=workbook_path,
+            synced_at="",
+            mirrored_records=0,
+            mirrored_plantios=0,
+            mirrored_audit_events=0,
+            expected_records=kwargs["expected_records"],
+            expected_audit_events=kwargs["expected_audit_events"],
+        ),
+    )
+    monkeypatch.setattr(
+        window.operations_controller.persistence_use_cases,
+        "build_record_overview_report",
+        lambda workbook_path, **_kwargs: PersistenceRecordOverviewReport(
+            status="ausente",
+            workbook_path=workbook_path,
+            synced_at="",
+            total_records=0,
+            compensados_count=0,
+            pendentes_count=0,
+            records_with_plantios_count=0,
+            records_without_microbacia_count=0,
+            records_without_coordinates_count=0,
+        ),
+    )
+
+    window.refresh_operations_overview()
+
+    assert captured == {
+        "workbook_path": "dummy.xlsx",
+        "expected_records": 6,
+        "expected_audit_events": 0,
+    }
+    window.close()
+
+
+def test_operations_overview_prefers_shell_monitoring_resolvers(ui_window_factory, monkeypatch):
+    window = ui_window_factory()
+    now = datetime.now(timezone.utc)
+    calls = {"status": 0, "overview": 0}
+    window.session_runtime.path = "dummy.xlsx"
+    window.records = [object()] * 3
+    window._local_session_source_status = LocalRecordReadStatus(
+        status="sqlite",
+        source="sqlite",
+        strategy="sqlite_snapshot",
+        workbook_path="dummy.xlsx",
+        synced_at=now.isoformat(),
+        mirrored_records=3,
+        session_records=3,
+        filtered_records=3,
+    )
+
+    monkeypatch.setattr(window.audit_service, "list_events_for_workbook", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        window.shell_controller,
+        "resolved_persistence_status_report",
+        lambda **kwargs: calls.__setitem__("status", calls["status"] + 1)
+        or PersistenceStatusReport(
+            status="sincronizado",
+            workbook_path="dummy.xlsx",
+            synced_at=now.isoformat(),
+            mirrored_records=3,
+            mirrored_plantios=1,
+            mirrored_audit_events=0,
+            expected_records=3,
+            expected_audit_events=kwargs["expected_audit_events"],
+        ),
+    )
+    monkeypatch.setattr(
+        window.shell_controller,
+        "resolved_dashboard_record_overview",
+        lambda **_kwargs: calls.__setitem__("overview", calls["overview"] + 1)
+        or PersistenceRecordOverviewReport(
+            status="sincronizado",
+            workbook_path="dummy.xlsx",
+            synced_at=now.isoformat(),
+            total_records=3,
+            compensados_count=1,
+            pendentes_count=2,
+            records_with_plantios_count=1,
+            records_without_microbacia_count=0,
+            records_without_coordinates_count=1,
+        ),
+    )
+
+    window.refresh_operations_overview()
+
+    assert calls == {"status": 1, "overview": 1}
+    assert window.operations_tab.lbl_persistence.text().startswith("Espelho local (SQLite): Sincronizado")
+    assert window.operations_tab.lbl_records_overview.text().startswith("Resumo local (SQLite): 3 registros")
     window.close()
 
 
@@ -266,3 +406,6 @@ def test_operations_tab_shows_runtime_jobs_and_cancel_action(ui_window_factory):
     assert "Espelho sincronizado." in window.operations_tab.lbl_runtime_recent.text()
     assert window.operations_tab.btn_cancel_runtime.isEnabled() is False
     window.close()
+
+
+

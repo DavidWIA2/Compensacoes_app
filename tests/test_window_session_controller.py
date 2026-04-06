@@ -37,9 +37,12 @@ def test_main_window_session_properties_proxy_state(ui_window_factory):
     window._record_search_index = {"abc": "record"}
     window._local_record_read_status = {"source": "sqlite"}
     window._local_session_source_status = {"source": "sqlite", "strategy": "sqlite_snapshot"}
+    window._local_filter_facets_result = {"source": "sqlite", "microbacias": ("Gregorio",)}
     window._local_filter_facets_status = {"source": "sqlite", "micro_count": 2}
     window._local_mutation_sync_status = {"status": "sqlite", "operation": "edit"}
+    window._authoritative_write_status = {"status": "sqlite_primary", "operation": "edit"}
     window._filtered_metrics = {"count_total": 1, "total_geral": 10.0}
+    window._persistence_status_report = {"status": "sincronizado", "expected_records": 1}
     window._dashboard_dirty = False
     window._pending_dashboard_metrics = {"count_total": 1}
     marker = object()
@@ -55,9 +58,12 @@ def test_main_window_session_properties_proxy_state(ui_window_factory):
     assert state.record_search_index == {"abc": "record"}
     assert state.local_record_read_status == {"source": "sqlite"}
     assert state.local_session_source_status == {"source": "sqlite", "strategy": "sqlite_snapshot"}
+    assert state.local_filter_facets_result == {"source": "sqlite", "microbacias": ("Gregorio",)}
     assert state.local_filter_facets_status == {"source": "sqlite", "micro_count": 2}
     assert state.local_mutation_sync_status == {"status": "sqlite", "operation": "edit"}
+    assert state.authoritative_write_status == {"status": "sqlite_primary", "operation": "edit"}
     assert state.filtered_metrics == {"count_total": 1, "total_geral": 10.0}
+    assert state.persistence_status_report == {"status": "sincronizado", "expected_records": 1}
     assert state.dashboard_dirty is False
     assert state.pending_dashboard_metrics == {"count_total": 1}
     assert state.dashboard_record_overview is marker
@@ -78,9 +84,12 @@ def test_window_session_snapshot_restores_previous_state(ui_window_factory):
     window._record_search_index = {"PROC": "123/2026"}
     window._local_record_read_status = {"source": "sqlite", "filtered_records": 1}
     window._local_session_source_status = {"source": "session", "issues": ["fallback"]}
+    window._local_filter_facets_result = {"source": "sqlite", "microbacias": ("Gregorio",)}
     window._local_filter_facets_status = {"source": "sqlite", "micro_count": 1}
     window._local_mutation_sync_status = {"status": "sqlite", "operation": "delete"}
+    window._authoritative_write_status = {"status": "session_fallback", "operation": "import"}
     window._filtered_metrics = {"count_total": 5, "total_geral": 50.0}
+    window._persistence_status_report = {"status": "atencao", "expected_records": 5}
     window._dashboard_dirty = False
     window._pending_dashboard_metrics = {"count_total": 5}
     window._dashboard_record_overview = marker
@@ -102,9 +111,12 @@ def test_window_session_snapshot_restores_previous_state(ui_window_factory):
     assert window._record_search_index == {"PROC": "123/2026"}
     assert window._local_record_read_status == {"source": "sqlite", "filtered_records": 1}
     assert window._local_session_source_status == {"source": "session", "issues": ["fallback"]}
+    assert window._local_filter_facets_result == {"source": "sqlite", "microbacias": ("Gregorio",)}
     assert window._local_filter_facets_status == {"source": "sqlite", "micro_count": 1}
     assert window._local_mutation_sync_status == {"status": "sqlite", "operation": "delete"}
+    assert window._authoritative_write_status == {"status": "session_fallback", "operation": "import"}
     assert window._filtered_metrics == {"count_total": 5, "total_geral": 50.0}
+    assert window._persistence_status_report == {"status": "atencao", "expected_records": 5}
     assert window._dashboard_dirty is False
     assert window._pending_dashboard_metrics == {"count_total": 5}
     assert window._dashboard_record_overview is marker

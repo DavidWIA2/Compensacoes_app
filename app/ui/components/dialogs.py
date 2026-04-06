@@ -39,12 +39,118 @@ from app.application.use_cases.table_fullscreen_layout import (
 )
 from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.display_columns import display_column_index
+from app.services.tcra_excel_service import TcraWorkbookAnalysis
+from app.services.tcra_records_service import (
+    STATUS_ARQUIVADO,
+    STATUS_CUMPRIDO,
+    STATUS_EM_ACOMPANHAMENTO,
+    normalize_status_label,
+)
+from app.ui.components.import_preview_dialog_support import (
+    build_import_preview_button_plan,
+    build_import_preview_row_values,
+    resolve_import_preview_current_key,
+    resolve_import_preview_target_index,
+)
+from app.ui.components.map_fullscreen_dialog_support import (
+    build_fullscreen_current_points,
+    build_fullscreen_heatmap_sync_view,
+    run_fullscreen_map_script,
+)
+from app.ui.components.operation_history_dialog_support import (
+    BACKUP_FILTER_OPTIONS,
+    PERIOD_FILTER_OPTIONS,
+    build_operation_history_filter_state_payload,
+    build_operation_history_selection_state,
+    date_to_qdate,
+    load_operation_history_filter_state,
+    persist_operation_history_filter_state,
+    qdate_to_date,
+    resolve_operation_history_current_event,
+    resolve_operation_history_default_export_path,
+    resolve_operation_history_target_index,
+    write_operation_history_export,
+)
+from app.ui.components.plantios_dialog_support import (
+    append_plantio_row,
+    apply_plantio_row_view,
+    build_plantios_row_action_state,
+    read_plantio_rows_from_table,
+    resolve_plantio_next_row_after_removal,
+    resolve_plantio_selected_row,
+    update_plantios_total_label,
+)
+from app.ui.components.table_fullscreen_dialog_support import (
+    apply_fullscreen_filter_state_to_dialog,
+    apply_fullscreen_filter_state_to_main,
+    apply_fullscreen_preferred_widths,
+    blocked_qt_signals,
+    build_fullscreen_filter_state_from_dialog,
+    build_fullscreen_filter_state_from_main,
+    build_fullscreen_header_widths,
+    capture_fullscreen_table_layout,
+    resolve_fullscreen_primary_table,
+    resolve_fullscreen_visible_columns,
+    restore_fullscreen_table_layout,
+)
 from app.ui.components.widgets import CheckableComboBox, MapBridge, DebugPage
 from app.services.geocode_service import geocode_address_arcgis
 from app.services.plantio_service import clone_plantios
 from app.utils.logger import get_logger
 
 map_dialog_logger = get_logger("UI.MapDialog")
+
+TCRA_EVENT_PRESETS = (
+    {
+        "key": "personalizado",
+        "label": "Personalizado",
+        "tipo_evento": "",
+        "status_resultante": "",
+        "descricao": "",
+    },
+    {
+        "key": "relatorio_entregue",
+        "label": "Relatorio entregue",
+        "tipo_evento": "Relatorio entregue",
+        "status_resultante": STATUS_EM_ACOMPANHAMENTO,
+        "descricao": "Relatorio periodico protocolado e anexado ao acompanhamento.",
+    },
+    {
+        "key": "vistoria",
+        "label": "Vistoria",
+        "tipo_evento": "Vistoria",
+        "status_resultante": STATUS_EM_ACOMPANHAMENTO,
+        "descricao": "Vistoria tecnica realizada no local do termo.",
+    },
+    {
+        "key": "despacho",
+        "label": "Despacho",
+        "tipo_evento": "Despacho",
+        "status_resultante": STATUS_EM_ACOMPANHAMENTO,
+        "descricao": "Despacho ou manifestacao administrativa registrado.",
+    },
+    {
+        "key": "prorrogacao",
+        "label": "Prorrogacao",
+        "tipo_evento": "Prorrogacao",
+        "status_resultante": STATUS_EM_ACOMPANHAMENTO,
+        "descricao": "Prazo do termo prorrogado por novo despacho.",
+    },
+    {
+        "key": "cumprimento",
+        "label": "Cumprimento",
+        "tipo_evento": "Cumprimento",
+        "status_resultante": STATUS_CUMPRIDO,
+        "descricao": "Termo marcado como cumprido apos validacao administrativa.",
+    },
+    {
+        "key": "arquivamento",
+        "label": "Arquivamento",
+        "tipo_evento": "Arquivamento",
+        "status_resultante": STATUS_ARQUIVADO,
+        "descricao": "Termo arquivado administrativamente.",
+    },
+)
 
 
 class ImportPreviewDialog(QDialog):
@@ -110,15 +216,16 @@ class ImportPreviewDialog(QDialog):
         self.search_input.textChanged.connect(self._apply_filters)
         self._apply_filters()
 
+        button_plan = build_import_preview_button_plan(total_invalid=analysis.total_invalid)
         self.button_box = QDialogButtonBox(self)
-        if analysis.total_invalid:
+        if not button_plan.allows_import:
             self.button_box.setStandardButtons(QDialogButtonBox.Close)
             self.button_box.rejected.connect(self.reject)
         else:
             self.button_box.setStandardButtons(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
             ok_button = self.button_box.button(QDialogButtonBox.Ok)
             if ok_button is not None:
-                ok_button.setText("Importar")
+                ok_button.setText(button_plan.accept_label)
             self.button_box.accepted.connect(self.accept)
             self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
@@ -126,21 +233,15 @@ class ImportPreviewDialog(QDialog):
     def _insert_table_row(self, row_data: ImportPreviewRowView):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        values = [
-            row_data.line_number,
-            row_data.uid,
-            row_data.av_tec,
-            row_data.status,
-            row_data.detail,
-        ]
+        values = build_import_preview_row_values(row_data)
         for column, value in enumerate(values):
             self.table.setItem(row, column, QTableWidgetItem(value))
 
     def _apply_filters(self, *_args):
-        current_key = None
-        current_row = self.table.currentRow()
-        if 0 <= current_row < len(self._visible_rows):
-            current_key = self._visible_rows[current_row].key()
+        current_key = resolve_import_preview_current_key(
+            self._visible_rows,
+            current_row=self.table.currentRow(),
+        )
 
         self.table.setRowCount(0)
         self._visible_rows = self.presenter.filter_rows(
@@ -157,12 +258,10 @@ class ImportPreviewDialog(QDialog):
         if not self._visible_rows:
             return
 
-        target_index = 0
-        if current_key is not None:
-            for index, row_data in enumerate(self._visible_rows):
-                if row_data.key() == current_key:
-                    target_index = index
-                    break
+        target_index = resolve_import_preview_target_index(
+            self._visible_rows,
+            current_key=current_key,
+        )
         self.table.setCurrentCell(target_index, 0)
 
 
@@ -200,9 +299,9 @@ class OperationHistoryDialog(QDialog):
         self.filter_action = QComboBox(self)
         self.filter_action.addItems(list(self.presenter.build_action_items(self.events)))
         self.filter_backup = QComboBox(self)
-        self.filter_backup.addItems(["Todos", "Com backup", "Sem backup"])
+        self.filter_backup.addItems(list(BACKUP_FILTER_OPTIONS))
         self.filter_period = QComboBox(self)
-        self.filter_period.addItems(["Todos", "Hoje", "Ultimos 7 dias", "Ultimos 30 dias", "Personalizado"])
+        self.filter_period.addItems(list(PERIOD_FILTER_OPTIONS))
         self.search_input = QLineEdit(self)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setPlaceholderText("Filtrar por resumo, acao, UID ou metadados...")
@@ -315,24 +414,22 @@ class OperationHistoryDialog(QDialog):
             self._refresh_selection()
             return
 
-        target_index = 0
-        if current_event_id:
-            for index, event in enumerate(self.visible_events):
-                if getattr(event, "event_id", "") == current_event_id:
-                    target_index = index
-                    break
+        target_index = resolve_operation_history_target_index(
+            self.visible_events,
+            current_event_id=current_event_id,
+        )
         self.table.setCurrentCell(target_index, 0)
         self._persist_filter_state()
 
     def _current_event(self):
-        row = self.table.currentRow()
-        if row < 0 or row >= len(self.visible_events):
-            return None
-        return self.visible_events[row]
+        return resolve_operation_history_current_event(
+            self.visible_events,
+            current_row=self.table.currentRow(),
+        )
 
     def _resolve_default_date_range(self) -> tuple[QDate, QDate]:
         from_date, to_date = self.presenter.resolve_default_date_range(self.events)
-        return QDate(from_date.year, from_date.month, from_date.day), QDate(to_date.year, to_date.month, to_date.day)
+        return date_to_qdate(from_date), date_to_qdate(to_date)
 
     def _update_summary_label(self):
         self.lbl_summary.setText(
@@ -342,53 +439,16 @@ class OperationHistoryDialog(QDialog):
             )
         )
 
-    @staticmethod
-    def _backup_path(event) -> str:
-        return str(getattr(event, "backup_path", "") or "").strip()
-
-    def _backup_available(self, event) -> bool:
-        return self.presenter.backup_status_label(event) == "Disponivel"
-
-    def _backup_status_label(self, event) -> str:
-        return self.presenter.backup_status_label(event)
-
-    def _settings_store(self):
-        settings = getattr(self.parent(), "settings", None)
-        if settings is None:
-            return None
-        if hasattr(settings, "operation_history_filter_state") and hasattr(settings, "set_operation_history_filter_state"):
-            return settings
-        if hasattr(settings, "value") and hasattr(settings, "setValue"):
-            return settings
-        return None
-
     def _persist_filter_state(self):
-        settings = self._settings_store()
-        if settings is None or self._restoring_filters:
+        if self._restoring_filters:
             return
-        state = {
-            "action": self.filter_action.currentText(),
-            "backup": self.filter_backup.currentText(),
-            "period": self.filter_period.currentText(),
-            "date_from": self.date_from.date().toString(Qt.DateFormat.ISODate),
-            "date_to": self.date_to.date().toString(Qt.DateFormat.ISODate),
-            "search": self.search_input.text(),
-        }
-        if hasattr(settings, "set_operation_history_filter_state"):
-            settings.set_operation_history_filter_state(state)
-        else:
-            settings.setValue("operation_history_filter_state", state)
+        persist_operation_history_filter_state(
+            self.parent(),
+            build_operation_history_filter_state_payload(self._filter_state()),
+        )
 
     def _restore_filter_state(self):
-        settings = self._settings_store()
-        if settings is None:
-            return
-        if hasattr(settings, "operation_history_filter_state"):
-            state = settings.operation_history_filter_state()
-        else:
-            raw_state = settings.value("operation_history_filter_state", {})
-            state = dict(raw_state) if isinstance(raw_state, dict) else {}
-
+        state = load_operation_history_filter_state(self.parent())
         action = str(state.get("action", "Todas") or "Todas")
         backup = str(state.get("backup", "Todos") or "Todos")
         period = str(state.get("period", "Todos") or "Todos")
@@ -436,14 +496,7 @@ class OperationHistoryDialog(QDialog):
         return self.presenter.serialize_event(event)
 
     def _default_export_path(self) -> str:
-        parent = self.parent()
-        initial_dir = ""
-        if parent is not None and hasattr(parent, "settings_controller"):
-            initial_dir = parent.settings_controller.preferred_export_dir()
-        filename = f"historico_operacoes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        if initial_dir:
-            return os.path.join(initial_dir, filename)
-        return filename
+        return resolve_operation_history_default_export_path(self.parent())
 
     def export_history(self):
         if not self.visible_events:
@@ -467,8 +520,7 @@ class OperationHistoryDialog(QDialog):
             summary_text=self.lbl_summary.text(),
         )
 
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=True, indent=2)
+        write_operation_history_export(path, payload)
 
         parent = self.parent()
         if parent is not None and hasattr(parent, "settings_controller"):
@@ -491,30 +543,25 @@ class OperationHistoryDialog(QDialog):
         self._apply_filters()
 
     def _refresh_selection(self):
-        event = self._current_event()
-        self.selected_event = event
-        if event is None:
-            self.btn_open_backup.setEnabled(False)
-            self.btn_restore.setEnabled(False)
-            self.details.clear()
-            return
-
-        backup_available = self._backup_available(event)
-        self.btn_open_backup.setEnabled(backup_available)
-        self.btn_restore.setEnabled(backup_available)
-        self.details.setPlainText(self.presenter.build_details_text(event))
+        selection_state = build_operation_history_selection_state(self.presenter, self._current_event())
+        self.selected_event = selection_state.event
+        self.btn_open_backup.setEnabled(selection_state.can_open_backup)
+        self.btn_restore.setEnabled(selection_state.can_restore)
+        self.details.setPlainText(selection_state.details_text)
 
     def _open_selected_backup(self):
         event = self._current_event()
-        if event is None or not self._backup_available(event):
+        selection_state = build_operation_history_selection_state(self.presenter, event)
+        if selection_state.event is None or not selection_state.can_open_backup:
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self._backup_path(event)))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(getattr(selection_state.event, "backup_path", "") or "")))
 
     def _request_restore(self):
         event = self._current_event()
-        if event is None or not self._backup_available(event):
+        selection_state = build_operation_history_selection_state(self.presenter, event)
+        if selection_state.event is None or not selection_state.can_restore:
             return
-        self.selected_event = event
+        self.selected_event = selection_state.event
         self.restore_requested = True
         self.accept()
 
@@ -523,16 +570,10 @@ class OperationHistoryDialog(QDialog):
             action=self.filter_action.currentText(),
             backup=self.filter_backup.currentText(),
             period=self.filter_period.currentText(),
-            date_from=self._qdate_to_date(self.date_from.date()),
-            date_to=self._qdate_to_date(self.date_to.date()),
+            date_from=qdate_to_date(self.date_from.date()),
+            date_to=qdate_to_date(self.date_to.date()),
             search=self.search_input.text(),
         )
-
-    @staticmethod
-    def _qdate_to_date(value: QDate) -> date | None:
-        if not value.isValid():
-            return None
-        return date(value.year(), value.month(), value.day())
 
 
 class PlantioRowEditorDialog(QDialog):
@@ -564,6 +605,326 @@ class PlantioRowEditorDialog(QDialog):
 
     def values(self):
         return self.in_endereco.text().strip(), self.in_qtd_mudas.text().strip()
+
+
+class TcraEventoEditorDialog(QDialog):
+    def __init__(
+        self,
+        parent,
+        *,
+        data_evento: str = "",
+        tipo_evento: str = "",
+        descricao: str = "",
+        prazo_resultante: str = "",
+        status_resultante: str = "",
+        preset_key: str = "",
+        apply_preset_on_start: bool = False,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Editar Evento do TCRA")
+        self.resize(620, 320)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        self.combo_preset = QComboBox(self)
+        for preset in TCRA_EVENT_PRESETS:
+            self.combo_preset.addItem(str(preset["label"]), str(preset["key"]))
+        self.chk_apply_preset = QCheckBox("Preencher automaticamente os campos do preset")
+        self.chk_apply_preset.setChecked(True)
+        self.in_data_evento = QLineEdit(str(data_evento or ""))
+        self.in_data_evento.setPlaceholderText("dd/mm/aaaa")
+        self.in_tipo_evento = QLineEdit(str(tipo_evento or ""))
+        self.in_status_resultante = QLineEdit(str(status_resultante or ""))
+        self.in_prazo_resultante = QLineEdit(str(prazo_resultante or ""))
+        self.in_prazo_resultante.setPlaceholderText("dd/mm/aaaa")
+        self.in_descricao = QPlainTextEdit(str(descricao or ""))
+        self.in_descricao.setTabChangesFocus(True)
+        self.in_descricao.setMinimumHeight(120)
+
+        form.addRow("Preset:", self.combo_preset)
+        form.addRow("", self.chk_apply_preset)
+        form.addRow("Data do evento:", self.in_data_evento)
+        form.addRow("Tipo do evento:", self.in_tipo_evento)
+        form.addRow("Status resultante:", self.in_status_resultante)
+        form.addRow("Prazo resultante:", self.in_prazo_resultante)
+        form.addRow("Descricao:", self.in_descricao)
+        layout.addLayout(form)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        resolved_preset_key = str(preset_key or self._resolve_preset_key(tipo_evento=tipo_evento, status_resultante=status_resultante))
+        preset_index = self.combo_preset.findData(resolved_preset_key)
+        if preset_index >= 0:
+            self.combo_preset.setCurrentIndex(preset_index)
+        self.combo_preset.currentIndexChanged.connect(self._apply_selected_preset)
+        if apply_preset_on_start and resolved_preset_key and resolved_preset_key != "personalizado":
+            self._apply_selected_preset()
+
+    @staticmethod
+    def _resolve_preset_key(*, tipo_evento: str, status_resultante: str) -> str:
+        normalized_tipo = str(tipo_evento or "").strip().upper()
+        normalized_status = normalize_status_label(status_resultante)
+        if "RELATORIO" in normalized_tipo:
+            return "relatorio_entregue"
+        if "VISTOR" in normalized_tipo:
+            return "vistoria"
+        if "DESPACH" in normalized_tipo:
+            return "despacho"
+        if "PRORROG" in normalized_tipo:
+            return "prorrogacao"
+        if "ARQUIV" in normalized_tipo or normalized_status == STATUS_ARQUIVADO:
+            return "arquivamento"
+        if "CUMPR" in normalized_tipo or normalized_status == STATUS_CUMPRIDO:
+            return "cumprimento"
+        return "personalizado"
+
+    def _apply_selected_preset(self):
+        if not self.chk_apply_preset.isChecked():
+            return
+        preset = next(
+            (item for item in TCRA_EVENT_PRESETS if str(item["key"]) == str(self.combo_preset.currentData() or "")),
+            None,
+        )
+        if not preset or str(preset["key"]) == "personalizado":
+            return
+        if not self.in_data_evento.text().strip():
+            self.in_data_evento.setText(date.today().strftime("%d/%m/%Y"))
+        self.in_tipo_evento.setText(str(preset["tipo_evento"]))
+        self.in_status_resultante.setText(str(preset["status_resultante"]))
+        self.in_descricao.setPlainText(str(preset["descricao"]))
+
+    def values(self):
+        return {
+            "preset_key": str(self.combo_preset.currentData() or ""),
+            "data_evento": self.in_data_evento.text().strip(),
+            "tipo_evento": self.in_tipo_evento.text().strip(),
+            "descricao": self.in_descricao.toPlainText().strip(),
+            "prazo_resultante": self.in_prazo_resultante.text().strip(),
+            "status_resultante": self.in_status_resultante.text().strip(),
+        }
+
+
+class TcraBulkActionDialog(QDialog):
+    def __init__(self, parent, *, selected_count: int, today: date | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Acao em lote para TCRAs")
+        self.resize(560, 280)
+        self._today = today or date.today()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.lbl_hint = QLabel(
+            f"Aplicar a mesma acao em {int(selected_count)} TCRA(s) selecionado(s)."
+        )
+        self.lbl_hint.setWordWrap(True)
+        layout.addWidget(self.lbl_hint)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        self.combo_action = QComboBox(self)
+        self.combo_action.addItem("Atualizar status", "status")
+        self.combo_action.addItem("Definir responsavel", "responsavel")
+        self.combo_action.addItem("Definir orgao", "orgao")
+        self.combo_action.addItem("Definir proximo relatorio", "proximo_relatorio")
+        self.combo_action.addItem("Registrar evento rapido", "evento")
+
+        self.combo_status = QComboBox(self)
+        self.combo_status.setEditable(True)
+        self.combo_status.addItems(
+            [
+                STATUS_EM_ACOMPANHAMENTO,
+                STATUS_RELATORIO_PENDENTE,
+                STATUS_PRAZO_VENCIDO,
+                STATUS_CUMPRIDO,
+                STATUS_ARQUIVADO,
+            ]
+        )
+
+        self.in_text = QLineEdit(self)
+        self.in_text.setPlaceholderText("Informe o novo valor")
+
+        self.in_date = QLineEdit(self)
+        self.in_date.setPlaceholderText("dd/mm/aaaa")
+
+        self.combo_event_preset = QComboBox(self)
+        for preset in TCRA_EVENT_PRESETS:
+            if str(preset.get("key") or "") == "personalizado":
+                continue
+            self.combo_event_preset.addItem(str(preset.get("label") or ""), str(preset.get("key") or ""))
+
+        self.in_event_date = QLineEdit(self._today.strftime("%d/%m/%Y"))
+        self.in_event_date.setPlaceholderText("dd/mm/aaaa")
+        self.in_event_deadline = QLineEdit(self)
+        self.in_event_deadline.setPlaceholderText("dd/mm/aaaa")
+
+        form.addRow("Acao:", self.combo_action)
+        form.addRow("Status:", self.combo_status)
+        form.addRow("Valor textual:", self.in_text)
+        form.addRow("Data:", self.in_date)
+        form.addRow("Preset de evento:", self.combo_event_preset)
+        form.addRow("Data do evento:", self.in_event_date)
+        form.addRow("Prazo resultante:", self.in_event_deadline)
+        layout.addLayout(form)
+
+        self.lbl_mode_hint = QLabel(self)
+        self.lbl_mode_hint.setWordWrap(True)
+        self.lbl_mode_hint.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_mode_hint)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.combo_action.currentIndexChanged.connect(self._refresh_mode)
+        self._refresh_mode()
+
+    def _refresh_mode(self):
+        action = str(self.combo_action.currentData() or "")
+        self.combo_status.setVisible(action == "status")
+        self.in_text.setVisible(action in {"responsavel", "orgao"})
+        self.in_date.setVisible(action == "proximo_relatorio")
+        self.combo_event_preset.setVisible(action == "evento")
+        self.in_event_date.setVisible(action == "evento")
+        self.in_event_deadline.setVisible(action == "evento")
+
+        if action == "status":
+            self.lbl_mode_hint.setText("Atualiza o status operacional informado dos termos selecionados.")
+        elif action == "responsavel":
+            self.lbl_mode_hint.setText("Define o mesmo responsavel de execucao para todos os termos selecionados.")
+        elif action == "orgao":
+            self.lbl_mode_hint.setText("Define o mesmo orgao de acompanhamento para todos os termos selecionados.")
+        elif action == "proximo_relatorio":
+            self.lbl_mode_hint.setText("Substitui a data do proximo relatorio do grupo selecionado.")
+        else:
+            self.lbl_mode_hint.setText(
+                "Registra o mesmo evento rapido em todos os termos selecionados, atualizando status e prazos quando o preset indicar."
+            )
+
+    def values(self) -> dict[str, str]:
+        return {
+            "action": str(self.combo_action.currentData() or ""),
+            "status": self.combo_status.currentText().strip(),
+            "text_value": self.in_text.text().strip(),
+            "date_value": self.in_date.text().strip(),
+            "event_preset": str(self.combo_event_preset.currentData() or ""),
+            "event_date": self.in_event_date.text().strip(),
+            "event_deadline": self.in_event_deadline.text().strip(),
+        }
+
+
+class TcraImportPreviewDialog(QDialog):
+    def __init__(self, parent, analysis: TcraWorkbookAnalysis):
+        super().__init__(parent)
+        self.analysis = analysis
+        self._visible_issues = list(analysis.issues)
+        self.setWindowTitle("Revisao da Importacao de TCRAs")
+        self.resize(920, 520)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.lbl_summary = QLabel("\n".join(analysis.summary_lines()))
+        self.lbl_summary.setWordWrap(True)
+        layout.addWidget(self.lbl_summary)
+
+        self.lbl_hint = QLabel(
+            "Revise as linhas com aviso antes de substituir o conjunto atual de TCRAs no banco local."
+        )
+        self.lbl_hint.setWordWrap(True)
+        self.lbl_hint.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_hint)
+
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(8)
+        self.filter_severity = QComboBox(self)
+        self.filter_severity.addItems(["Todas", "warning", "info"])
+        self.search_input = QLineEdit(self)
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setPlaceholderText("Filtrar por codigo ou mensagem do aviso...")
+        self.lbl_visible = QLabel(self)
+        self.lbl_visible.setObjectName("FormStateLabel")
+        filters_layout.addWidget(QLabel("Severidade:"))
+        filters_layout.addWidget(self.filter_severity)
+        filters_layout.addWidget(QLabel("Busca:"))
+        filters_layout.addWidget(self.search_input, 1)
+        filters_layout.addWidget(self.lbl_visible)
+        layout.addLayout(filters_layout)
+
+        self.table = QTableWidget(0, 4, self)
+        self.table.setHorizontalHeaderLabels(["Linha", "Severidade", "Codigo", "Mensagem"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        layout.addWidget(self.table, 1)
+
+        self.filter_severity.currentTextChanged.connect(self._apply_filters)
+        self.search_input.textChanged.connect(self._apply_filters)
+        self._apply_filters()
+
+        self.button_box = QDialogButtonBox(self)
+        if analysis.importable_count <= 0:
+            self.button_box.setStandardButtons(QDialogButtonBox.Close)
+            self.button_box.rejected.connect(self.reject)
+        else:
+            self.button_box.setStandardButtons(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            ok_button = self.button_box.button(QDialogButtonBox.Ok)
+            if ok_button is not None:
+                ok_button.setText("Importar")
+            self.button_box.accepted.connect(self.accept)
+            self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def _matches_filters(self, issue) -> bool:
+        selected_severity = str(self.filter_severity.currentText() or "Todas").strip().lower()
+        if selected_severity != "todas" and str(issue.severity or "").strip().lower() != selected_severity:
+            return False
+
+        query = str(self.search_input.text() or "").strip().lower()
+        if not query:
+            return True
+        payload = " ".join([str(issue.code or ""), str(issue.message or "")]).lower()
+        return query in payload
+
+    def _apply_filters(self, *_args):
+        self._visible_issues = [issue for issue in self.analysis.issues if self._matches_filters(issue)]
+        self.table.setRowCount(0)
+        for issue in self._visible_issues:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            values = [
+                str(issue.row_index),
+                str(issue.severity or "").strip() or "--",
+                str(issue.code or "").strip() or "--",
+                str(issue.message or "").strip() or "--",
+            ]
+            for column, value in enumerate(values):
+                self.table.setItem(row, column, QTableWidgetItem(value))
+        self.lbl_visible.setText(
+            f"Mostrando {len(self._visible_issues)} de {len(self.analysis.issues)} aviso(s)"
+        )
 
 
 class PlantiosDialog(QDialog):
@@ -639,10 +1000,7 @@ class PlantiosDialog(QDialog):
         return clone_plantios(self._result_plantios)
 
     def _append_row(self, endereco="", qtd_mudas=""):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem(str(endereco or "")))
-        self.table.setItem(row, 1, QTableWidgetItem(str(qtd_mudas or "")))
+        append_plantio_row(self.table, endereco, qtd_mudas)
 
     def add_empty_row(self, start_edit: bool = True):
         empty_row = self.presenter.empty_row()
@@ -657,9 +1015,7 @@ class PlantiosDialog(QDialog):
         if self.table.rowCount() == 0:
             self.add_empty_row(start_edit=False)
 
-        row = self.table.currentRow()
-        if row < 0:
-            row = self.table.rowCount() - 1
+        row = resolve_plantio_selected_row(self.table)
 
         column = self.table.currentColumn()
         if column < 0:
@@ -688,50 +1044,39 @@ class PlantiosDialog(QDialog):
             self.table.setItem(row, 1, qtd_item)
 
         normalized_row = self.presenter.normalize_editor_values(endereco, qtd_mudas)
-        endereco_item.setText(normalized_row.endereco)
-        qtd_item.setText(normalized_row.qtd_mudas)
+        apply_plantio_row_view(self.table, row, normalized_row)
         self.table.setCurrentCell(row, 0)
         self._refresh_totals()
 
     def remove_selected_row(self):
-        row = self.table.currentRow()
-        if row < 0:
-            row = self.table.rowCount() - 1
+        row = resolve_plantio_selected_row(self.table)
         if row < 0:
             return
         self.table.removeRow(row)
         if self.table.rowCount() == 0:
             self.add_empty_row(start_edit=False)
             return
-        next_row = min(row, self.table.rowCount() - 1)
+        next_row = resolve_plantio_next_row_after_removal(row, self.table.rowCount())
         self.table.setCurrentCell(next_row, 0)
         self._refresh_totals()
         self._refresh_row_actions()
 
     def _refresh_row_actions(self):
-        has_rows = self.table.rowCount() > 0
-        self.btn_edit_row.setEnabled(has_rows)
-        self.btn_remove_row.setEnabled(has_rows)
-
-    def _rows_from_table(self) -> list[PlantioRowView]:
-        rows: list[PlantioRowView] = []
-        for row in range(self.table.rowCount()):
-            endereco_item = self.table.item(row, 0)
-            qtd_item = self.table.item(row, 1)
-            rows.append(
-                PlantioRowView(
-                    endereco=endereco_item.text().strip() if endereco_item else "",
-                    qtd_mudas=qtd_item.text().strip() if qtd_item else "",
-                )
-            )
-        return rows
+        actions_state = build_plantios_row_action_state(self.table)
+        self.btn_edit_row.setEnabled(actions_state.has_rows)
+        self.btn_remove_row.setEnabled(actions_state.has_rows)
 
     def _refresh_totals(self, *_args):
-        rows = self._rows_from_table()
-        self.lbl_total.setText(self.presenter.total_text(rows, self._compensacao_total))
+        self.lbl_total.setText(
+            update_plantios_total_label(
+                self.presenter,
+                self.table,
+                compensacao_total=self._compensacao_total,
+            )
+        )
 
     def _accept_with_validation(self):
-        rows = self._rows_from_table()
+        rows = read_plantio_rows_from_table(self.table)
         validation = self.presenter.validate_rows(rows, previous_plantios=self._previous_plantios)
         if not validation.is_valid:
             QMessageBox.warning(self, "Aviso", validation.message)
@@ -842,26 +1187,26 @@ class MapFullScreenDialog(QDialog):
         try:
             self.parent_window.data_tab.chk_heatmap.setChecked(self.chk_fs_heatmap.isChecked())
             self.parent_window.data_tab.combo_heatmap_type.setCurrentText(self.combo_fs_heatmap.currentText())
-            result = self.fullscreen_use_cases.build_heatmap_sync_result(
+            sync_view = build_fullscreen_heatmap_sync_view(
+                use_cases=self.fullscreen_use_cases,
                 records=self.parent_window.filtered_records,
                 mode=self.combo_fs_heatmap.currentText(),
                 enabled=self.chk_fs_heatmap.isChecked(),
             )
-            pts = [list(point) for point in result.points]
-            self.heatmap_points = pts
+            self.heatmap_points = sync_view.points
             self.parent_window.toggle_heatmap()
-            self._run_map_js(result.command.script, result.command.context)
+            self._run_map_js(sync_view.script, sync_view.context)
         finally:
             self._syncing = False
 
     def _get_current_points_fs(self) -> list:
         fullscreen_use_cases = getattr(self, "fullscreen_use_cases", MapFullscreenOperationsUseCases())
-        result = fullscreen_use_cases.build_heatmap_sync_result(
+        return build_fullscreen_current_points(
+            use_cases=fullscreen_use_cases,
             records=self.parent_window.filtered_records,
             mode=self.combo_fs_heatmap.currentText(),
             enabled=bool(hasattr(self, "chk_fs_heatmap") and self.chk_fs_heatmap.isChecked()),
         )
-        return [list(point) for point in result.points]
 
     def _on_map_click_fs(self, lat, lng):
         result = self.fullscreen_use_cases.build_click_result(lat, lng)
@@ -889,10 +1234,12 @@ class MapFullScreenDialog(QDialog):
             self._run_map_js(command.script, command.context)
 
     def _run_map_js(self, script: str, context: str):
-        try:
-            self.web.page().runJavaScript(script)
-        except Exception as exc:
-            map_dialog_logger.error("[FS MAP JS] Falha em %s: %s", context, exc)
+        run_fullscreen_map_script(
+            self.web.page(),
+            script=script,
+            context=context,
+            logger=map_dialog_logger,
+        )
 
     def perform_search(self):
         addr = self.in_search.text().strip()
@@ -938,7 +1285,7 @@ class TableFullScreenDialog(QDialog):
         self._mw = parent
         self._content = content_widget
         self._on_close_callback = on_close_callback
-        self._table = self._find_primary_table()
+        self._table = resolve_fullscreen_primary_table(self._content)
         self._layout_use_cases = TableFullscreenLayoutUseCases()
         self._filter_use_cases = TableFullscreenFiltersUseCases()
         self._table_layout_snapshot: Optional[TableHeaderLayoutSnapshot] = None
@@ -1012,33 +1359,18 @@ class TableFullScreenDialog(QDialog):
         QTimer.singleShot(0, self._expand_table_to_fullscreen)
         self.showMaximized()
 
-    def _find_primary_table(self):
-        tables = self._content.findChildren(QTableView)
-        if not tables:
-            return None
-        return max(
-            tables,
-            key=lambda table: table.model().columnCount() if table.model() else 0
-        )
-
     def _capture_table_layout(self):
         if not self._table:
             return
-        header = self._table.horizontalHeader()
-        self._table_layout_snapshot = self._layout_use_cases.capture_header_layout(
-            stretch_last_section=header.stretchLastSection(),
-            resize_modes=[header.sectionResizeMode(i) for i in range(header.count())],
-            section_sizes=[header.sectionSize(i) for i in range(header.count())],
+        self._table_layout_snapshot = capture_fullscreen_table_layout(
+            self._table,
+            self._layout_use_cases.capture_header_layout,
         )
 
     def _fullscreen_visible_columns(self) -> List[int]:
         if not self._table:
             return []
-        hidden_columns = [
-            self._table.isColumnHidden(index)
-            for index in range(self._table.horizontalHeader().count())
-        ]
-        return self._layout_use_cases.visible_columns(hidden_columns)
+        return resolve_fullscreen_visible_columns(self._table, self._layout_use_cases.visible_columns)
 
     def _preferred_fullscreen_column_widths(self) -> Optional[Dict[int, int]]:
         if not self._table:
@@ -1047,19 +1379,7 @@ class TableFullScreenDialog(QDialog):
         header = self._table.horizontalHeader()
         visible_columns = self._fullscreen_visible_columns()
         available_width = self._table.viewport().width()
-        header_widths = {
-            index: header.fontMetrics().horizontalAdvance(
-                str(
-                    self._table.model().headerData(
-                        index,
-                        Qt.Orientation.Horizontal,
-                        Qt.ItemDataRole.DisplayRole,
-                    )
-                    or ""
-                )
-            )
-            for index in visible_columns
-        }
+        header_widths = build_fullscreen_header_widths(self._table, visible_columns)
         width_plan = self._layout_use_cases.build_width_plan(
             visible_columns=visible_columns,
             header_widths=header_widths,
@@ -1086,83 +1406,17 @@ class TableFullScreenDialog(QDialog):
                     items.append(item.text())
         target.set_items(items)
 
-    @staticmethod
-    def _combo_items(combo: QComboBox) -> List[str]:
-        return [combo.itemText(index) for index in range(combo.count())]
-
-    @staticmethod
-    def _checkable_items(combo: CheckableComboBox) -> List[str]:
-        model = combo.model()
-        item_getter = getattr(model, "item", None)
-        if not callable(item_getter):
-            return []
-        return [
-            item.text()
-            for index in range(1, model.rowCount())
-            if (item := item_getter(index)) is not None
-        ]
-
     def _build_filter_state_from_main(self) -> TableFullscreenFilterState:
-        return self._filter_use_cases.build_state(
-            search_text=self._mw.search.text(),
-            status_options=self._combo_items(self._mw.data_tab.filter_status),
-            status_current_text=self._mw.data_tab.filter_status.currentText(),
-            year_options=self._combo_items(self._mw.data_tab.filter_year),
-            year_current_text=self._mw.data_tab.filter_year.currentText(),
-            micro_items=self._checkable_items(self._mw.data_tab.filter_micro),
-            micro_checked_items=self._mw.data_tab.filter_micro.checked_items(),
-            micro_all_selected=self._mw.data_tab.filter_micro.is_all_selected(),
-            eletronico_items=self._checkable_items(self._mw.data_tab.filter_eletronico),
-            eletronico_checked_items=self._mw.data_tab.filter_eletronico.checked_items(),
-            eletronico_all_selected=self._mw.data_tab.filter_eletronico.is_all_selected(),
-        )
+        return build_fullscreen_filter_state_from_main(self._mw, self._filter_use_cases)
 
     def _build_filter_state_from_dialog(self) -> TableFullscreenFilterState:
-        return self._filter_use_cases.build_state(
-            search_text=self.search_fs.text(),
-            status_options=self._combo_items(self.filter_status_fs),
-            status_current_text=self.filter_status_fs.currentText(),
-            year_options=self._combo_items(self.filter_year_fs),
-            year_current_text=self.filter_year_fs.currentText(),
-            micro_items=self._checkable_items(self.filter_micro_fs),
-            micro_checked_items=self.filter_micro_fs.checked_items(),
-            micro_all_selected=self.filter_micro_fs.is_all_selected(),
-            eletronico_items=self._checkable_items(self.filter_eletronico_fs),
-            eletronico_checked_items=self.filter_eletronico_fs.checked_items(),
-            eletronico_all_selected=self.filter_eletronico_fs.is_all_selected(),
-        )
+        return build_fullscreen_filter_state_from_dialog(self, self._filter_use_cases)
 
     def _apply_filter_state_to_dialog(self, state: TableFullscreenFilterState):
-        self.search_fs.setText(state.search_text)
-        self.filter_status_fs.clear()
-        self.filter_status_fs.addItems(list(state.status.options))
-        self.filter_status_fs.setCurrentText(state.status.current_text)
-        self.filter_year_fs.clear()
-        self.filter_year_fs.addItems(list(state.year.options))
-        self.filter_year_fs.setCurrentText(state.year.current_text)
-        self.filter_micro_fs.set_items(list(state.micro.items))
-        self.filter_micro_fs.set_checked_items(
-            list(state.micro.checked_items),
-            all_selected=state.micro.all_selected,
-        )
-        self.filter_eletronico_fs.set_items(list(state.eletronico.items))
-        self.filter_eletronico_fs.set_checked_items(
-            list(state.eletronico.checked_items),
-            all_selected=state.eletronico.all_selected,
-        )
+        apply_fullscreen_filter_state_to_dialog(self, state)
 
     def _apply_filter_state_to_main(self, state: TableFullscreenFilterState):
-        self._mw.search.setText(state.search_text)
-        self._mw.data_tab.filter_status.setCurrentText(state.status.current_text)
-        self._mw.data_tab.filter_year.setCurrentText(state.year.current_text)
-        self._mw.data_tab.filter_micro.set_checked_items(
-            list(state.micro.checked_items),
-            all_selected=state.micro.all_selected,
-        )
-        self._mw.data_tab.filter_eletronico.set_checked_items(
-            list(state.eletronico.checked_items),
-            all_selected=state.eletronico.all_selected,
-        )
+        apply_fullscreen_filter_state_to_main(self._mw, state)
 
     def _copy_filters_from_main(self):
         if not self._has_filter_source:
@@ -1204,48 +1458,25 @@ class TableFullScreenDialog(QDialog):
         if not self._has_filter_source or self._syncing_filters:
             return
 
-        self._mw.search.blockSignals(True)
-        self._mw.data_tab.filter_status.blockSignals(True)
-        self._mw.data_tab.filter_year.blockSignals(True)
-        self._mw.data_tab.filter_micro.blockSignals(True)
-        self._mw.data_tab.filter_eletronico.blockSignals(True)
-        try:
+        with blocked_qt_signals(
+            self._mw.search,
+            self._mw.data_tab.filter_status,
+            self._mw.data_tab.filter_year,
+            self._mw.data_tab.filter_micro,
+            self._mw.data_tab.filter_eletronico,
+        ):
             self._apply_filter_state_to_main(self._build_filter_state_from_dialog())
-        finally:
-            self._mw.search.blockSignals(False)
-            self._mw.data_tab.filter_status.blockSignals(False)
-            self._mw.data_tab.filter_year.blockSignals(False)
-            self._mw.data_tab.filter_micro.blockSignals(False)
-            self._mw.data_tab.filter_eletronico.blockSignals(False)
         self._mw.apply_filter()
 
     def _expand_table_to_fullscreen(self):
         if not self._table:
             return
-        header = self._table.horizontalHeader()
-        header.setStretchLastSection(False)
-        preferred_widths = self._preferred_fullscreen_column_widths()
-        if not preferred_widths:
-            for i in range(header.count()):
-                header.setSectionResizeMode(i, QHeaderView.Stretch)
-            return
-
-        for i in range(header.count()):
-            header.setSectionResizeMode(i, QHeaderView.Interactive)
-        for index, width in preferred_widths.items():
-            header.resizeSection(index, width)
+        apply_fullscreen_preferred_widths(self._table, self._preferred_fullscreen_column_widths())
 
     def _restore_table_layout(self):
         if not self._table or self._table_layout_snapshot is None:
             return
-        header = self._table.horizontalHeader()
-        interactive_mode = int(getattr(QHeaderView.Interactive, "value", QHeaderView.Interactive))
-        header.setStretchLastSection(self._table_layout_snapshot.stretch_last_section)
-        for i, mode in enumerate(self._table_layout_snapshot.resize_modes):
-            header.setSectionResizeMode(i, QHeaderView.ResizeMode(mode))
-        for i, size in enumerate(self._table_layout_snapshot.section_sizes):
-            if self._table_layout_snapshot.resize_modes[i] == interactive_mode:
-                header.resizeSection(i, size)
+        restore_fullscreen_table_layout(self._table, self._table_layout_snapshot)
 
     def closeEvent(self, event):
         if self._on_close_callback:

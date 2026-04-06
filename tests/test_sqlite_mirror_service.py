@@ -1,10 +1,18 @@
+import os
 import sqlite3
 
 import pytest
 
 from app.models.compensacao import Compensacao
 from app.models.plantio_item import PlantioItem
-from app.services.sqlite_mirror_service import SCHEMA_VERSION, SqliteMirrorService
+from app.services.sqlite_mirror_service import (
+    SCHEMA_VERSION,
+    NamedSessionEntry,
+    SessionFilterFacets,
+    SessionRecordOverview,
+    SessionSnapshotSummary,
+    SqliteMirrorService,
+)
 
 
 def make_record(
@@ -579,3 +587,55 @@ def test_sqlite_mirror_service_migrates_v2_schema_and_backfills_query_columns(tm
         eletronico_all_selected=False,
     )
     assert [record.uid for record in filtered] == ["uid-1"]
+
+
+def test_sqlite_mirror_service_exposes_session_aliases_and_wrappers(tmp_path):
+    service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
+    session_path = tmp_path / "base.xlsx"
+    session_path.write_text("sessao", encoding="utf-8")
+    record = make_record(excel_row=2, uid="uid-1", av_tec="AT-1")
+
+    summary = service.sync_session_snapshot(str(session_path), [record])
+    facets = service.query_filter_facets_for_session(str(session_path))
+    overview = service.build_session_record_overview(str(session_path))
+    diagnostics = service.build_session_diagnostics(str(session_path))
+    listed = service.list_records_for_session(str(session_path))
+
+    assert isinstance(summary, SessionSnapshotSummary)
+    assert isinstance(facets, SessionFilterFacets)
+    assert isinstance(overview, SessionRecordOverview)
+    expected_path = os.path.normcase(str(session_path.resolve()))
+    assert summary.session_path == expected_path
+    assert facets.session_path == expected_path
+    assert overview.session_path == expected_path
+    assert diagnostics.session_path == expected_path
+    assert [item.uid for item in listed] == ["uid-1"]
+
+
+def test_sqlite_mirror_service_catalogs_named_sessions_with_friendly_labels(tmp_path):
+    service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
+
+    created = service.create_named_session("Sessão Operacional")
+    listed = service.list_named_sessions()
+    fetched = service.get_session_entry(created.session_path)
+
+    assert isinstance(created, NamedSessionEntry)
+    assert created.session_path.startswith("session://")
+    assert created.display_name == "Sessão Operacional"
+    assert created.picker_label == "Sessão Operacional [0 registro(s)]"
+    assert fetched is not None
+    assert fetched.session_path == created.session_path
+    assert service.get_session_display_name(created.session_path) == "Sessão Operacional"
+    assert [entry.session_path for entry in listed] == [created.session_path]
+
+
+def test_sqlite_mirror_service_ensures_singleton_database_entry(tmp_path):
+    service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
+
+    singleton = service.ensure_singleton_session()
+    repeated = service.ensure_singleton_session()
+
+    assert singleton.session_path.startswith("session://")
+    assert singleton.display_name == "Banco local"
+    assert repeated.session_path == singleton.session_path
+    assert repeated.display_name == "Banco local"

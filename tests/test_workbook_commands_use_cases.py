@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.application.use_cases.workbook_commands import (
+    SessionImportExecutionResult,
+    SessionImportFlowUseCases,
+    SessionRecoveryUseCases,
     WorkbookImportFlowUseCases,
     WorkbookRecoveryUseCases,
 )
@@ -62,6 +65,9 @@ class FakeAuditTrail:
     def list_events_for_workbook(self, workbook_path: str, *, limit: int = 50) -> list[AuditEvent]:
         return list(self.events)[:limit]
 
+    def list_events_for_session(self, session_path: str, *, limit: int = 50) -> list[AuditEvent]:
+        return self.list_events_for_workbook(session_path, limit=limit)
+
     def append_event(self, **payload) -> AuditEvent:
         self.append_calls.append(payload)
         return AuditEvent(
@@ -75,6 +81,11 @@ class FakeAuditTrail:
             before=payload.get("before"),
             after=payload.get("after"),
         )
+
+    def append_session_event(self, **payload) -> AuditEvent:
+        payload = dict(payload)
+        payload["workbook_path"] = payload.pop("session_path")
+        return self.append_event(**payload)
 
 
 def make_analysis(import_path: str, records_to_add: list[Compensacao]) -> ImportWorkbookAnalysis:
@@ -110,6 +121,7 @@ def test_import_flow_creates_backup_and_audit_entry(tmp_path):
     assert workflow.import_calls == [[imported_record]]
     assert progress_updates == [(1, 1)]
     assert result.imported_count == 1
+    assert result.session_backup_path.endswith("import-backup.xlsx")
     assert result.backup_path.endswith("import-backup.xlsx")
     assert result.imported_records == (imported_record,)
     assert audit_trail.append_calls[0]["action"] == "import"
@@ -166,6 +178,7 @@ def test_recovery_use_cases_restore_backup_and_audit_event(tmp_path):
 
     assert current_workbook.read_text(encoding="utf-8") == "snapshot"
     assert workbook.backup_labels == ["rollback"]
+    assert result.session_path == str(current_workbook)
     assert result.rollback_source == "operation_audit"
     assert Path(result.source_backup_path) == selected_backup.resolve()
     assert audit_trail.append_calls[0]["action"] == "rollback"
@@ -191,3 +204,20 @@ def test_recovery_use_cases_fall_back_to_legacy_backups(tmp_path):
     assert len(plan.options) == 1
     assert plan.options[0].source_type == "legacy_backup"
     assert plan.options[0].metadata["filename"] == "legacy.xlsx"
+
+
+def test_workbook_command_use_cases_expose_session_aliases(tmp_path):
+    current_workbook = tmp_path / "base.xlsx"
+    current_workbook.write_text("base", encoding="utf-8")
+    workflow = FakeImportWorkflow(import_result=1)
+    workbook = FakeWorkbook(str(current_workbook), backup_path=str(tmp_path / "import-backup.xlsx"))
+    audit_trail = FakeAuditTrail()
+    analysis = make_analysis("origem.xlsx", [make_record(uid="uid-10", av_tec="AT-10")])
+
+    import_use_cases = SessionImportFlowUseCases(workflow, workbook, audit_trail)
+    recovery_use_cases = SessionRecoveryUseCases(workbook, audit_trail)
+    result = import_use_cases.execute_import(analysis)
+
+    assert isinstance(result, SessionImportExecutionResult)
+    assert result.session_backup_path.endswith("import-backup.xlsx")
+    assert recovery_use_cases.build_audited_rollback_options(str(current_workbook), limit=10) == ()

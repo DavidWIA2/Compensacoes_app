@@ -2,9 +2,9 @@ import os
 import platform
 import sys
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from app import __version__ as APP_VERSION
 from app.application.use_cases.support_operations import SupportOperationsUseCases
@@ -21,6 +21,14 @@ from app.services.diagnostics_service import (
 from app.services.error_service import friendly_error_message
 from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
 from app.ui.components.workers import UpdateInstallerWorker, UpdaterWorker
+from app.ui.controllers.support_controller_support import (
+    apply_support_job_outcome,
+    build_diagnostics_export_dialog_spec,
+    build_diagnostics_success_message,
+    create_update_progress_dialog,
+    mark_window_job_state,
+    start_window_background_job,
+)
 from app.utils.logger import LOG_DIR, logger
 
 MANUAL_UPDATE_JOB_NAME = "manual_update_check"
@@ -58,16 +66,24 @@ class SupportController:
         QDesktopServices.openUrl(QUrl.fromLocalFile(LOG_DIR))
 
     def export_diagnostics(self):
-        initial_dir = self.window.settings_controller.preferred_export_dir() or LOG_DIR
-        default_path = self.support_use_cases.build_diagnostics_default_path(initial_dir)
-        path, _ = QFileDialog.getSaveFileName(self.window, "Exportar Diagnostico", default_path, "JSON (*.json)")
+        dialog_spec = build_diagnostics_export_dialog_spec(
+            preferred_export_dir=self.window.settings_controller.preferred_export_dir() or "",
+            fallback_dir=LOG_DIR,
+            default_path_builder=self.support_use_cases.build_diagnostics_default_path,
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self.window,
+            dialog_spec.title,
+            dialog_spec.default_path,
+            dialog_spec.name_filter,
+        )
         if not path:
             return
 
         try:
             self.support_use_cases.export_diagnostics_snapshot(self.window, path)
             self.window.settings_controller.save_last_export_dir(path)
-            QMessageBox.information(self.window, "Sucesso", f"Diagnostico exportado para:\n{path}")
+            QMessageBox.information(self.window, "Sucesso", build_diagnostics_success_message(path))
         except Exception as exc:
             logger.error(f"Falha ao exportar diagnostico para {path}: {exc}", exc_info=True)
             title, message = friendly_error_message(exc, "exportar o diagnostico")
@@ -199,35 +215,19 @@ class SupportController:
         self._auto_update_worker = worker
 
     def _start_background_job(self, spec: BackgroundJobSpec):
-        starter = getattr(self.window, "start_background_job", None)
-        if callable(starter):
-            return starter(spec)
-
-        worker = self.window.track_background_worker(
-            spec.name,
-            spec.worker,
-            disconnect_callbacks=spec.disconnect_callbacks,
-            stop_callback=spec.stop_callback,
-            wait_ms=spec.wait_ms,
-        )
-        if spec.on_tracked is not None:
-            spec.on_tracked(worker)
-        if spec.busy_message:
-            self.window.begin_busy_operation(
-                spec.busy_message,
-                total=spec.total,
-                cancellable=spec.cancellable,
-                cancel_callback=spec.cancel_callback,
-            )
-        if spec.auto_start and hasattr(worker, "start"):
-            worker.start()
-        return worker
+        return start_window_background_job(self.window, spec)
 
     def _create_manual_update_worker(self, update_url: str):
         factory = self.updater_worker_factory or UpdaterWorker
         return factory(update_url=update_url, current_version=APP_VERSION)
 
-    def _create_update_installer_worker(self, payload: dict[str, object], *, current_pid: int, current_executable: str):
+    def _create_update_installer_worker(
+        self,
+        payload: dict[str, object],
+        *,
+        current_pid: int,
+        current_executable: str,
+    ):
         factory = self.update_installer_worker_factory or UpdateInstallerWorker
         return factory(
             payload,
@@ -256,14 +256,7 @@ class SupportController:
         self.window.statusBar().showMessage("Link da atualizacao aberto no navegador.")
 
     def _create_update_progress_dialog(self):
-        dialog = QProgressDialog("Baixando atualizacao...", "Cancelar", 0, 100, self.window)
-        dialog.setWindowTitle("Atualizacao Automatica")
-        dialog.setWindowModality(Qt.WindowModal)
-        dialog.setMinimumDuration(0)
-        dialog.setAutoClose(False)
-        dialog.setAutoReset(False)
-        dialog.canceled.connect(self._cancel_automatic_update)
-        return dialog
+        return create_update_progress_dialog(self.window, self._cancel_automatic_update)
 
     def _cancel_manual_update_check(self):
         if self._manual_updater is None or not self._manual_updater.isRunning():
@@ -369,42 +362,16 @@ class SupportController:
         self._update_progress_dialog = None
 
     def _mark_job_completed(self, name: str, message: str = "Pronto") -> None:
-        marker = getattr(self.window, "mark_job_completed", None)
-        if callable(marker):
-            marker(name, message)
+        mark_window_job_state(self.window, name, "completed", message)
 
     def _mark_job_failed(self, name: str, message: str) -> None:
-        marker = getattr(self.window, "mark_job_failed", None)
-        if callable(marker):
-            marker(name, message)
+        mark_window_job_state(self.window, name, "failed", message)
 
     def _mark_job_cancelled(self, name: str, message: str) -> None:
-        marker = getattr(self.window, "mark_job_cancelled", None)
-        if callable(marker):
-            marker(name, message)
+        mark_window_job_state(self.window, name, "cancelled", message)
 
     def _apply_job_outcome(self, name: str, outcome, *, dialog_kind: str = "") -> None:
-        runtime_status = str(getattr(outcome, "runtime_status", "") or "").strip().lower()
-        runtime_message = str(getattr(outcome, "runtime_message", "") or "").strip()
-        status_bar_message = str(getattr(outcome, "status_bar_message", "") or "").strip()
-        dialog_title = str(getattr(outcome, "dialog_title", "") or "").strip()
-        dialog_message = str(getattr(outcome, "dialog_message", "") or "").strip()
-
-        if runtime_status == "completed":
-            self._mark_job_completed(name, runtime_message or "Pronto")
-        elif runtime_status == "failed":
-            self._mark_job_failed(name, runtime_message or "Operacao interrompida.")
-        elif runtime_status == "cancelled":
-            self._mark_job_cancelled(name, runtime_message or "Operacao cancelada.")
-
-        if dialog_title and dialog_message:
-            if dialog_kind == "warning":
-                QMessageBox.warning(self.window, dialog_title, dialog_message)
-            elif dialog_kind == "information":
-                QMessageBox.information(self.window, dialog_title, dialog_message)
-
-        if status_bar_message:
-            self.window.statusBar().showMessage(status_bar_message)
+        apply_support_job_outcome(self.window, name, outcome, dialog_kind=dialog_kind)
 
     @staticmethod
     def _shutdown_worker(worker, *, wait_ms: int):

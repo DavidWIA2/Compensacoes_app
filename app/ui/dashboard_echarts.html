@@ -6,8 +6,11 @@
     <script src="vendor/echarts.min.js"></script>
     <style>
         body, html {
-            margin: 0; padding: 0; width: 100%; height: 100%;
-            background-color: transparent; /* Será alterado via JS se necessário */
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
             display: flex;
             flex-direction: row;
             overflow: hidden;
@@ -23,28 +26,24 @@
     <script>
         var pieChart = echarts.init(document.getElementById('pie_chart'));
         var barChart = echarts.init(document.getElementById('bar_chart'));
-        
+
         window.addEventListener('resize', function() {
             pieChart.resize();
             barChart.resize();
         });
 
-        window.updateDashboard = function(dataStr) {
-            var data = JSON.parse(dataStr);
-            var isDark = data.is_dark;
-            
-            // Ajuste de cores de texto baseadas no tema
-            var textColor = isDark ? '#e9e9ea' : '#333333';
-            var titleColor = isDark ? '#ffffff' : '#111111';
-            
-            // Pie Chart
-            var tot = data.m.total_pendente + data.m.total_compensado;
+        function renderCompensacoes(data, titleColor, textColor, isDark) {
+            var metrics = data.metrics || {};
+            var totalPendente = Number(metrics.total_pendente || 0);
+            var totalCompensado = Number(metrics.total_compensado || 0);
+            var total = totalPendente + totalCompensado;
             var pieData = [];
-            if (tot === 0) {
+
+            if (total === 0) {
                 pieData.push({value: 1, name: 'Sem dados', itemStyle: {color: '#888'}});
             } else {
-                pieData.push({value: data.m.total_pendente, name: 'PENDENTE', itemStyle: {color: '#FF4B2B'}});
-                pieData.push({value: data.m.total_compensado, name: 'REALIZADO', itemStyle: {color: '#00C853'}});
+                pieData.push({value: totalPendente, name: 'PENDENTE', itemStyle: {color: '#FF4B2B'}});
+                pieData.push({value: totalCompensado, name: 'REALIZADO', itemStyle: {color: '#00C853'}});
             }
 
             pieChart.setOption({
@@ -63,17 +62,18 @@
                 ]
             });
 
-            // Bar Chart
-            var pend_sorted = data.m.pend_micro_sorted.slice(0, 10);
-            var categories = pend_sorted.map(function(item) { return item[0]; });
-            var values = pend_sorted.map(function(item) { return item[1]; });
-            
-            var paleta = ["#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4"];
-            var unique_micros = [...new Set(data.records_micros)].sort();
-            var map_c = {};
-            unique_micros.forEach((m, i) => map_c[m] = paleta[i % paleta.length]);
-            
-            var itemStyles = categories.map(c => map_c[c] || "#3388ff");
+            var pendSorted = metrics.pend_micro_sorted || [];
+            var categories = pendSorted.slice(0, 10).map(function(item) { return item[0]; });
+            var values = pendSorted.slice(0, 10).map(function(item) { return item[1]; });
+
+            var palette = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4'];
+            var paletteKeys = data.micro_palette_keys || categories;
+            var uniqueMicros = [...new Set(paletteKeys)].sort();
+            var colorMap = {};
+            uniqueMicros.forEach(function(label, index) {
+                colorMap[label] = palette[index % palette.length];
+            });
+            var itemStyles = categories.map(function(category) { return colorMap[category] || '#3388ff'; });
 
             barChart.setOption({
                 title: { text: 'Top 10 - Mudas Pendentes por Microbacia', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
@@ -86,17 +86,107 @@
                         axisLabel: { color: textColor, interval: 0, rotate: 30, fontSize: 9 }
                     }
                 ],
-                yAxis: [ { type: 'value', axisLabel: { color: textColor, fontSize: 9 }, splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } } } ],
+                yAxis: [
+                    {
+                        type: 'value',
+                        axisLabel: { color: textColor, fontSize: 9 },
+                        splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } }
+                    }
+                ],
                 series: [
                     {
                         name: 'Pendentes',
                         type: 'bar',
                         barWidth: '60%',
-                        data: values.map((v, i) => ({value: v, itemStyle: {color: itemStyles[i]}})),
+                        data: values.map(function(value, index) {
+                            return {value: value, itemStyle: {color: itemStyles[index]}};
+                        }),
                         label: { show: true, position: 'top', color: textColor, fontSize: 10 }
                     }
                 ]
             });
+        }
+
+        function renderTcra(data, titleColor, textColor, isDark) {
+            var statusRows = data.status_rows || [];
+            var attentionRows = data.attention_rows || [];
+            var pieData = statusRows.filter(function(item) { return Number(item.value || 0) > 0; }).map(function(item) {
+                return {
+                    value: Number(item.value || 0),
+                    name: item.name,
+                    itemStyle: { color: item.color || '#3388ff' }
+                };
+            });
+
+            if (!pieData.length) {
+                pieData = [{value: 1, name: 'Sem dados', itemStyle: {color: '#888'}}];
+            }
+
+            pieChart.setOption({
+                title: { text: 'Status Operacional de TCRAs', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
+                legend: { orient: 'horizontal', bottom: '5%', textStyle: {color: textColor, fontSize: 10} },
+                series: [
+                    {
+                        name: 'Status TCRA',
+                        type: 'pie',
+                        radius: ['35%', '65%'],
+                        avoidLabelOverlap: false,
+                        label: { show: false },
+                        data: pieData
+                    }
+                ]
+            });
+
+            var categories = attentionRows.map(function(item) { return item.label; });
+            var values = attentionRows.map(function(item) { return Number(item.value || 0); });
+
+            barChart.setOption({
+                title: { text: 'Radar Administrativo de TCRAs', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { left: '5%', right: '5%', bottom: '15%', containLabel: true },
+                xAxis: [
+                    {
+                        type: 'category',
+                        data: categories,
+                        axisLabel: { color: textColor, interval: 0, rotate: 25, fontSize: 9 }
+                    }
+                ],
+                yAxis: [
+                    {
+                        type: 'value',
+                        axisLabel: { color: textColor, fontSize: 9 },
+                        splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } }
+                    }
+                ],
+                series: [
+                    {
+                        name: 'TCRAs',
+                        type: 'bar',
+                        barWidth: '60%',
+                        data: attentionRows.map(function(item) {
+                            return {
+                                value: Number(item.value || 0),
+                                itemStyle: { color: item.color || '#3388ff' }
+                            };
+                        }),
+                        label: { show: true, position: 'top', color: textColor, fontSize: 10 }
+                    }
+                ]
+            });
+        }
+
+        window.updateDashboard = function(dataStr) {
+            var data = JSON.parse(dataStr);
+            var isDark = !!data.is_dark;
+            var textColor = isDark ? '#e9e9ea' : '#333333';
+            var titleColor = isDark ? '#ffffff' : '#111111';
+
+            if (data.kind === 'tcra') {
+                renderTcra(data, titleColor, textColor, isDark);
+                return;
+            }
+            renderCompensacoes(data, titleColor, textColor, isDark);
         };
     </script>
 </body>

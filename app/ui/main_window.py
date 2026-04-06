@@ -3,18 +3,19 @@ import sys
 from typing import List, Optional, Tuple, Dict
 
 from PySide6.QtCore import QSettings
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow,
 )
 
 # --- Imports do Projeto ---
 from app.config import APP_WINDOW_TITLE, APP_SETTINGS_NAME, APP_SETTINGS_ORG
+from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.persistence_monitoring import PersistenceMonitoringUseCases
 from app.models.compensacao import Compensacao
-from app.services.excel_service import ExcelService
 from app.services.app_settings import AppSettings
 from app.services.audit_service import AuditService
+from app.services.session_spreadsheet_adapter import ExternalSpreadsheetAdapter
+from app.services.session_workbook_runtime import SessionWorkbookRuntime
 from app.services.sqlite_mirror_service import SqliteMirrorService
 from app.services.coordinates import build_heatmap_point, build_heatmap_points
 from app.services.gis_service import GisService
@@ -36,15 +37,22 @@ from app.ui.components.job_runner import WindowJobRunner
 from app.ui.components.job_specs import BackgroundJobSpec, BlockingJobSpec
 from app.ui.components.ui_utils import resource_path, _ajustar_ambiente_pyinstaller
 from app.ui.components.workers import UpdaterWorker
+from app.ui.main_window_support import (
+    apply_window_icon,
+    apply_window_scaling,
+    build_runtime_bundle,
+    configure_window_class_registry,
+)
 from app.ui.tabs.data_tab import DataTab
 from app.ui.tabs.dashboard_tab import DashboardTab
 from app.ui.tabs.operations_tab import OperationsTab
+from app.ui.tabs.tcra_tab import TcraTab
 from app.utils.logger import get_logger
 
 _ajustar_ambiente_pyinstaller()
 
 logger = get_logger("UI.MainWindow")
-# Backward-compatible module attribute kept for tests/helpers that still monkeypatch it.
+
 msg_confirm = None
 
 MICROB_NAME_FIELD = "Nome_Do_Arquivo"
@@ -54,37 +62,41 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_WINDOW_TITLE)
-        self.MICROB_NAME_FIELD = MICROB_NAME_FIELD
-        self.MICROB_DIR = MICROB_DIR
-        self._data_tab_cls = DataTab
-        self._dashboard_tab_cls = DashboardTab
-        self._operations_tab_cls = OperationsTab
-        self._updater_cls = UpdaterWorker
-        
-        # CÃ¡lculo de Escala Proporcional baseada na resoluÃ§Ã£o
-        screen = QApplication.primaryScreen().geometry()
-        self.scale_factor = min(screen.width() / 1920, screen.height() / 1080)
-        self.scale_factor = max(0.7, self.scale_factor) # Piso reduzido para 0.7
-        
-        font = self.font()
-        font.setPointSize(int(10 * self.scale_factor))
-        QApplication.instance().setFont(font)
+        configure_window_class_registry(
+            self,
+            data_tab_cls=DataTab,
+            dashboard_tab_cls=DashboardTab,
+            operations_tab_cls=OperationsTab,
+            tcra_tab_cls=TcraTab,
+            updater_cls=UpdaterWorker,
+            microb_name_field=MICROB_NAME_FIELD,
+            microb_dir=MICROB_DIR,
+        )
+        apply_window_scaling(self, QApplication.instance())
+        apply_window_icon(self, resource_path("assets", "app.ico"))
 
-        icon_path = resource_path("assets", "app.ico")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
-        
-        # Estado
-        self.excel = ExcelService()
+        self.import_adapter_factory = ExternalSpreadsheetAdapter
+        self.external_data_adapter_factory = self.import_adapter_factory
         self.is_dark_mode = False
-        self.settings = AppSettings(QSettings(APP_SETTINGS_ORG, APP_SETTINGS_NAME))
-        self.persistence_service: Optional[SqliteMirrorService] = None
-        try:
-            self.persistence_service = SqliteMirrorService()
-        except Exception as exc:
-            logger.warning("Falha ao inicializar espelho local em SQLite: %s", exc, exc_info=True)
-        self.persistence_monitoring_use_cases = PersistenceMonitoringUseCases(self.persistence_service)
-        self.audit_service = AuditService(persistence_service=self.persistence_service)
+        runtime_bundle = build_runtime_bundle(
+            settings_factory=AppSettings,
+            qsettings_factory=QSettings,
+            qsettings_org=APP_SETTINGS_ORG,
+            qsettings_name=APP_SETTINGS_NAME,
+            loader_factory=self.external_data_adapter_factory,
+            session_runtime_cls=SessionWorkbookRuntime,
+            persistence_service_factory=SqliteMirrorService,
+            audit_service_cls=AuditService,
+            monitoring_use_cases_cls=PersistenceMonitoringUseCases,
+            authoritative_persistence_cls=AuthoritativePersistenceUseCases,
+            logger=logger,
+        )
+        self.settings = runtime_bundle.settings
+        self.session_runtime = runtime_bundle.session_runtime
+        self.persistence_service = runtime_bundle.persistence_service
+        self.audit_service = runtime_bundle.audit_service
+        self.authoritative_persistence = runtime_bundle.authoritative_persistence
+        self.persistence_monitoring_use_cases = runtime_bundle.persistence_monitoring_use_cases
         self.gis: Optional[GisService] = None
         self.geo_worker = None
         self._startup_window_state_applied = False
@@ -270,6 +282,14 @@ class MainWindow(QMainWindow):
         self.session_controller.state.local_session_source_status = value
 
     @property
+    def _local_filter_facets_result(self):
+        return self.session_controller.state.local_filter_facets_result
+
+    @_local_filter_facets_result.setter
+    def _local_filter_facets_result(self, value):
+        self.session_controller.state.local_filter_facets_result = value
+
+    @property
     def _local_filter_facets_status(self):
         return self.session_controller.state.local_filter_facets_status
 
@@ -286,12 +306,28 @@ class MainWindow(QMainWindow):
         self.session_controller.state.local_mutation_sync_status = value
 
     @property
+    def _authoritative_write_status(self):
+        return self.session_controller.state.authoritative_write_status
+
+    @_authoritative_write_status.setter
+    def _authoritative_write_status(self, value):
+        self.session_controller.state.authoritative_write_status = value
+
+    @property
     def _filtered_metrics(self) -> Optional[Dict[str, object]]:
         return self.session_controller.state.filtered_metrics
 
     @_filtered_metrics.setter
     def _filtered_metrics(self, value: Optional[Dict[str, object]]):
         self.session_controller.state.filtered_metrics = dict(value) if value is not None else None
+
+    @property
+    def _persistence_status_report(self):
+        return self.session_controller.state.persistence_status_report
+
+    @_persistence_status_report.setter
+    def _persistence_status_report(self, value):
+        self.session_controller.state.persistence_status_report = value
 
     @property
     def _dashboard_dirty(self) -> bool:
@@ -490,11 +526,11 @@ class MainWindow(QMainWindow):
     def _update_recent_files_menu(self):
         return self.settings_controller.update_recent_files_menu()
 
-    def _snapshot_excel_service_state(self) -> Dict[str, object]:
-        return self.data_controller.snapshot_excel_service_state()
+    def _snapshot_session_runtime_state(self) -> Dict[str, object]:
+        return self.data_controller.snapshot_session_runtime_state()
 
-    def _restore_excel_service_state(self, snapshot: Dict[str, object]):
-        return self.data_controller.restore_excel_service_state(snapshot)
+    def _restore_session_runtime_state(self, snapshot: Dict[str, object]):
+        return self.data_controller.restore_session_runtime_state(snapshot)
 
     def _metrics_to_kpi_rows(self, metrics: Dict[str, object]) -> List[Tuple[str, str]]:
         return self.export_controller.metrics_to_kpi_rows(metrics)
@@ -536,8 +572,11 @@ class MainWindow(QMainWindow):
     def show_rollback_dialog(self):
         return self.command_controller.show_rollback_dialog()
 
-    def import_excel_data(self):
-        return self.command_controller.import_excel_data()
+    def import_external_data(self):
+        return self.data_controller.import_external_data()
+
+    def new_session(self):
+        return self.command_controller.new_session()
 
     def _update_form_action_buttons(self):
         return self.form_controller.update_form_action_buttons()
@@ -557,14 +596,20 @@ class MainWindow(QMainWindow):
     def toggle_theme(self):
         return self.command_controller.toggle_theme()
 
-    def _load_excel(self, path, confirm_discard: bool = True):
-        return self.data_controller.load_excel(path, confirm_discard=confirm_discard)
+    def _load_session(self, path, confirm_discard: bool = True):
+        return self.data_controller.load_session(path, confirm_discard=confirm_discard)
 
-    def open_excel(self):
-        return self.command_controller.open_excel()
+    def _load_session_source(self, path, confirm_discard: bool = True):
+        return self._load_session(path, confirm_discard=confirm_discard)
 
-    def _load_last_excel(self):
-        return self.data_controller.load_last_excel()
+    def open_session(self):
+        return self.command_controller.open_session()
+
+    def _load_last_session(self):
+        return self.data_controller.load_last_session()
+
+    def _load_last_session_source(self):
+        return self.data_controller.load_last_session()
 
     def _load_sort_settings(self):
         return self.settings_controller.load_sort_settings()
@@ -611,8 +656,8 @@ class MainWindow(QMainWindow):
     def export_csv_clicked(self):
         return self.command_controller.export_csv_clicked()
 
-    def export_excel_clicked(self):
-        return self.command_controller.export_excel_clicked()
+    def export_spreadsheet_clicked(self):
+        return self.command_controller.export_spreadsheet_clicked()
 
     def export_pdf_clicked(self):
         return self.command_controller.export_pdf_clicked()

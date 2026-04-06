@@ -1,3 +1,5 @@
+import os
+
 from app.models.compensacao import Compensacao
 from datetime import datetime, timedelta, timezone
 
@@ -46,6 +48,7 @@ def test_audit_service_appends_and_filters_events_by_workbook(tmp_path):
     assert len(events) == 1
     assert events[0].action == "add"
     assert events[0].summary == "Registro cadastrado"
+    assert events[0].session_path.endswith("base-a.xlsx")
     assert events[0].after is not None
     assert events[0].after["uid"] == "uid-a"
 
@@ -111,6 +114,26 @@ def test_audit_service_falls_back_to_jsonl_when_sqlite_has_no_rows(tmp_path):
     assert len(events) == 1
     assert events[0].summary == "Evento apenas em JSONL"
     assert events[0].metadata["source"] == "legacy"
+
+
+def test_audit_service_supports_session_alias_methods(tmp_path):
+    log_path = tmp_path / "audit" / "events.jsonl"
+    sqlite_service = SqliteMirrorService(db_path=tmp_path / "state" / "mirror.db")
+    service = AuditService(audit_log_path=log_path, persistence_service=sqlite_service)
+    session_path = str(tmp_path / "base-a.xlsx")
+
+    event = service.append_session_event(
+        session_path=session_path,
+        action="edit",
+        summary="Alias de sessao",
+        metadata={"origin": "session"},
+    )
+    events = service.list_events_for_session(session_path)
+
+    assert event.session_path == os.path.normcase(session_path)
+    assert len(events) == 1
+    assert events[0].summary == "Alias de sessao"
+    assert events[0].metadata["origin"] == "session"
 
 
 def service_event(event_id, timestamp, action, summary, backup_path):

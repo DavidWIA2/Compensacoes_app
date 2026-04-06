@@ -71,7 +71,7 @@ def qt_app():
 
 
 @pytest.fixture
-def ui_test_env(monkeypatch, qt_app):
+def ui_test_env(monkeypatch, qt_app, tmp_path):
     from PySide6.QtWidgets import QMessageBox
 
     import app.ui.components.ui_utils as ui_utils_module
@@ -80,12 +80,18 @@ def ui_test_env(monkeypatch, qt_app):
     import app.ui.controllers.map_controller as map_controller_module
     import app.ui.main_window as main_window_module
     from app.ui.main_window import MainWindow
+    from app.services.sqlite_mirror_service import SqliteMirrorService
     from app.ui.tabs.data_tab import DataTab
 
     monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
     monkeypatch.setattr(main_window_module, "DashboardTab", MockDashboardTab)
     monkeypatch.setattr(main_window_module, "UpdaterWorker", NoopUpdaterWorker)
     monkeypatch.setattr(main_window_module, "QSettings", GlobalMockSettings)
+    monkeypatch.setattr(
+        main_window_module,
+        "SqliteMirrorService",
+        lambda *args, **kwargs: SqliteMirrorService(db_path=tmp_path / "ui-mirror.db"),
+    )
     monkeypatch.setattr(MainWindow, "_apply_theme", lambda self: None)
     monkeypatch.setattr(DataTab, "load_map", lambda self: None)
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)

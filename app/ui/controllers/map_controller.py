@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.batch_geocode_operations import BatchGeocodeOperationsUseCases
 from app.application.use_cases.map_interactions import MapInteractionsUseCases
 from app.application.use_cases.map_layer_operations import MapLayerOperationsUseCases
@@ -38,6 +39,36 @@ class MapController:
         self.map_use_cases = MapInteractionsUseCases()
         self.map_rendering_use_cases = MapRenderingUseCases()
         self.map_layer_use_cases = MapLayerOperationsUseCases(self.map_rendering_use_cases)
+        session_runtime = getattr(window, "session_runtime", None)
+        self.persistence = getattr(window, "authoritative_persistence", None) or AuthoritativePersistenceUseCases(
+            session_runtime,
+            window.audit_service,
+            getattr(window, "persistence_service", None),
+        )
+        self.local_record_queries = self.persistence.local_record_queries
+        self.local_mutation_sync = self.persistence.local_mutation_sync
+        self.local_write_authority = self.persistence.local_write_authority
+        self.authoritative_write = self.persistence.authoritative_write
+
+    def _current_session_path(self) -> str:
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.current_session_path()
+        runtime = getattr(self.window, "session_runtime", None)
+        if runtime is None:
+            return ""
+        return str(getattr(runtime, "session_path", getattr(runtime, "path", "")) or "").strip()
+
+    def _bind_runtime_persistence_service(self) -> None:
+        self.persistence.bind_runtime_window(self.window)
+
+    def _store_local_mutation_status(self, status) -> None:
+        self.persistence.store_local_mutation_status(self.window, status)
+
+    def _store_authoritative_write_status(self, status) -> None:
+        self.persistence.store_authoritative_write_status(self.window, status)
+
+    def _log_authoritative_write_issues(self, operation: str, issues) -> None:
+        self.persistence.log_preparation_issues(operation, issues)
 
     def _current_form_plantios(self):
         return clone_plantios(self.window.form_plantios)
@@ -291,15 +322,31 @@ class MapController:
         if not results:
             return 0
 
+        self._bind_runtime_persistence_service()
+        workbook_path = self._current_session_path()
+        preparation = self.persistence.prepare_base(
+            workbook_path,
+            fallback_records=self.window.records,
+        )
+        self._log_authoritative_write_issues("batch_geocode", preparation.issues)
+        authoritative_records = list(preparation.base_records)
+        projected_records = list(preparation.base_records)
         micro_finder = build_cached_microbacia_finder(self.window.gis.find_microbacia) if self.window.gis else None
         persistence_plan = self.batch_geocode_use_cases.apply_results(
-            self.window.records,
+            projected_records,
             results,
             micro_finder=micro_finder,
         )
         if not persistence_plan.updated_records:
             return 0
-        save_result = self.window.excel.save_batch_edits(list(persistence_plan.updated_records))
+
+        write_result = self.persistence.execute_batch_geocode(
+            authoritative_records=authoritative_records,
+            projected_records=projected_records,
+            updated_records=list(persistence_plan.updated_records),
+        )
+        self.persistence.publish_write_result(self.window, write_result)
+        save_result = write_result.excel_result
         if isinstance(save_result, int):
             return save_result
         return persistence_plan.total_updated_records
@@ -383,12 +430,13 @@ class MapController:
         try:
             updated = self.persist_batch_geocode_results(results)
         except Exception as exc:
+            root_exc = self.persistence.unwrap_write_exception(self.window, exc)
             self.window.mark_job_failed(
                 BATCH_GEOCODE_JOB_NAME,
-                self.batch_geocode_use_cases.build_failure_runtime_message(exc),
+                self.batch_geocode_use_cases.build_failure_runtime_message(root_exc),
             )
-            logger.error(f"Falha ao salvar geocodificacao em lote: {exc}", exc_info=True)
-            QMessageBox.critical(self.window, "Erro", f"Falha ao salvar coordenadas do GPS em lote: {exc}")
+            logger.error(f"Falha ao salvar geocodificacao em lote: {root_exc}", exc_info=True)
+            QMessageBox.critical(self.window, "Erro", f"Falha ao salvar coordenadas do GPS em lote: {root_exc}")
             return
 
         presentation = self.batch_geocode_use_cases.build_completion_presentation(
@@ -408,8 +456,13 @@ class MapController:
         self.run_map_js(command.script, command.context)
 
     def _current_heatmap_points(self) -> list[list[float]]:
+        records = (
+            self.window.shell_controller.visible_records()
+            if hasattr(self.window, "shell_controller")
+            else list(self.window.filtered_records)
+        )
         return self.map_rendering_use_cases.build_heatmap_points(
-            self.window.filtered_records,
+            records,
             self.window.data_tab.combo_heatmap_type.currentText(),
             enabled=self.window.data_tab.chk_heatmap.isChecked(),
         )

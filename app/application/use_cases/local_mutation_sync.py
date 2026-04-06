@@ -1,47 +1,27 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Sequence
 
+from app.application.use_cases.local_mutation_sync_support import (
+    LocalMutationApplyResult,
+    LocalMutationSnapshotWriter,
+    LocalMutationSyncStatus,
+    build_apply_result,
+    build_sync_status,
+    clone_records,
+    extend_status_issues,
+    list_session_records_dispatch,
+    normalized_workbook_path,
+    project_records_after_add,
+    project_records_after_delete,
+    project_records_after_edit,
+    project_records_after_import,
+    resolve_incremental_method,
+    sort_records,
+    sync_snapshot_dispatch,
+)
 from app.models.compensacao import Compensacao
-from app.services.sqlite_mirror_service import WorkbookSnapshotSummary
-
-
-class LocalMutationSnapshotWriter(Protocol):
-    def sync_workbook_snapshot(
-        self,
-        workbook_path: str,
-        records: Sequence[Compensacao],
-    ) -> WorkbookSnapshotSummary: ...
-
-    def list_records_for_workbook(self, workbook_path: str) -> list[Compensacao]: ...
-
-
-@dataclass(frozen=True)
-class LocalMutationSyncStatus:
-    status: str
-    operation: str
-    workbook_path: str
-    strategy: str = "snapshot_rebuild"
-    synced_at: str = ""
-    record_count: int = 0
-    issues: tuple[str, ...] = ()
-
-    @property
-    def uses_sqlite(self) -> bool:
-        return self.status == "sqlite"
-
-
-@dataclass(frozen=True)
-class LocalMutationApplyResult:
-    status: LocalMutationSyncStatus
-    records: tuple[Compensacao, ...]
-    source: str = "projection"
-
-    @property
-    def uses_sqlite(self) -> bool:
-        return self.source == "sqlite"
 
 
 class LocalMutationSyncUseCases:
@@ -50,68 +30,39 @@ class LocalMutationSyncUseCases:
 
     @staticmethod
     def _normalized_path(workbook_path: str) -> str:
-        return str(workbook_path or "").strip()
+        return normalized_workbook_path(workbook_path)
 
     @staticmethod
     def _sort_records(records: Sequence[Compensacao]) -> list[Compensacao]:
-        return sorted(
-            list(records),
-            key=lambda record: (
-                int(getattr(record, "excel_row", 0) or 0),
-                str(getattr(record, "uid", "") or ""),
-            ),
-        )
+        return sort_records(records)
 
     def project_after_add(
         self,
         existing_records: Sequence[Compensacao],
         added_record: Compensacao,
     ) -> list[Compensacao]:
-        return self._sort_records([*(deepcopy(list(existing_records))), deepcopy(added_record)])
+        return project_records_after_add(existing_records, added_record)
 
     def project_after_edit(
         self,
         existing_records: Sequence[Compensacao],
         updated_record: Compensacao,
     ) -> list[Compensacao]:
-        updated: list[Compensacao] = []
-        matched = False
-        for record in deepcopy(list(existing_records)):
-            same_uid = bool(updated_record.uid) and record.uid == updated_record.uid
-            same_row = int(record.excel_row or 0) == int(updated_record.excel_row or 0)
-            if same_uid or same_row:
-                updated.append(deepcopy(updated_record))
-                matched = True
-            else:
-                updated.append(record)
-        if not matched:
-            updated.append(deepcopy(updated_record))
-        return self._sort_records(updated)
+        return project_records_after_edit(existing_records, updated_record)
 
     def project_after_delete(
         self,
         existing_records: Sequence[Compensacao],
         deleted_record: Compensacao,
     ) -> list[Compensacao]:
-        deleted_uid = str(getattr(deleted_record, "uid", "") or "").strip()
-        deleted_row = int(getattr(deleted_record, "excel_row", 0) or 0)
-        projected: list[Compensacao] = []
-        for record in self._sort_records(deepcopy(list(existing_records))):
-            same_uid = bool(deleted_uid) and record.uid == deleted_uid
-            same_row = int(record.excel_row or 0) == deleted_row
-            if same_uid or same_row:
-                continue
-            if deleted_row and int(record.excel_row or 0) > deleted_row:
-                record.excel_row = max(int(record.excel_row or 0) - 1, 0)
-            projected.append(record)
-        return projected
+        return project_records_after_delete(existing_records, deleted_record)
 
     def project_after_import(
         self,
         existing_records: Sequence[Compensacao],
         imported_records: Sequence[Compensacao],
     ) -> list[Compensacao]:
-        return self._sort_records([*(deepcopy(list(existing_records))), *(deepcopy(list(imported_records)))])
+        return project_records_after_import(existing_records, imported_records)
 
     def sync_projected_records(
         self,
@@ -128,25 +79,24 @@ class LocalMutationSyncUseCases:
 
     @staticmethod
     def _clone_records(records: Sequence[Compensacao]) -> tuple[Compensacao, ...]:
-        return tuple(deepcopy(list(records)))
+        return clone_records(records)
+
+    def _sync_snapshot(
+        self,
+        workbook_path: str,
+        projected_records: Sequence[Compensacao],
+    ):
+        return sync_snapshot_dispatch(self.snapshot_writer, workbook_path, projected_records)
+
+    def _list_session_records(self, workbook_path: str) -> list[Compensacao]:
+        return list_session_records_dispatch(self.snapshot_writer, workbook_path)
 
     @staticmethod
     def _extend_status_issues(
         status: LocalMutationSyncStatus,
         *extra_issues: str,
     ) -> LocalMutationSyncStatus:
-        merged_issues = tuple([*status.issues, *(issue for issue in extra_issues if issue)])
-        if merged_issues == status.issues:
-            return status
-        return LocalMutationSyncStatus(
-            status=status.status,
-            operation=status.operation,
-            workbook_path=status.workbook_path,
-            strategy=status.strategy,
-            synced_at=status.synced_at,
-            record_count=status.record_count,
-            issues=merged_issues,
-        )
+        return extend_status_issues(status, *extra_issues)
 
     def _build_apply_result(
         self,
@@ -157,27 +107,23 @@ class LocalMutationSyncUseCases:
         normalized_path = self._normalized_path(status.workbook_path)
         writer = self.snapshot_writer
         if not status.uses_sqlite or writer is None or not normalized_path:
-            return LocalMutationApplyResult(
-                status=status,
-                records=self._clone_records(projected_records),
-                source="projection",
-            )
+            return build_apply_result(status=status, projected_records=projected_records, source="projection")
 
         try:
-            sqlite_records = tuple(writer.list_records_for_workbook(normalized_path))
+            sqlite_records = tuple(self._list_session_records(normalized_path))
         except Exception as exc:
-            return LocalMutationApplyResult(
+            return build_apply_result(
                 status=self._extend_status_issues(
                     status,
                     f"Leitura pos-mutacao do espelho local falhou: {exc}",
                 ),
-                records=self._clone_records(projected_records),
+                projected_records=projected_records,
                 source="projection",
             )
 
         expected_count = int(status.record_count or 0)
         if expected_count and len(sqlite_records) != expected_count:
-            return LocalMutationApplyResult(
+            return build_apply_result(
                 status=self._extend_status_issues(
                     status,
                     (
@@ -185,13 +131,14 @@ class LocalMutationSyncUseCases:
                         f"mas retornou {len(sqlite_records)} na leitura."
                     ),
                 ),
-                records=self._clone_records(projected_records),
+                projected_records=projected_records,
                 source="projection",
             )
 
-        return LocalMutationApplyResult(
+        return build_apply_result(
             status=status,
-            records=self._clone_records(sqlite_records),
+            projected_records=projected_records,
+            sqlite_records=sqlite_records,
             source="sqlite",
         )
 
@@ -206,14 +153,14 @@ class LocalMutationSyncUseCases:
     ) -> LocalMutationSyncStatus:
         normalized_path = self._normalized_path(workbook_path)
         if not normalized_path:
-            return LocalMutationSyncStatus(
+            return build_sync_status(
                 status="indisponivel",
                 operation=operation,
                 workbook_path="",
                 issues=("Nenhuma planilha ativa para sincronizar no SQLite.",),
             )
         if self.snapshot_writer is None:
-            return LocalMutationSyncStatus(
+            return build_sync_status(
                 status="indisponivel",
                 operation=operation,
                 workbook_path=normalized_path,
@@ -223,14 +170,10 @@ class LocalMutationSyncUseCases:
 
         incremental_issue = ""
         try:
-            incremental_method = (
-                getattr(self.snapshot_writer, incremental_method_name, None)
-                if incremental_method_name
-                else None
-            )
+            incremental_method = resolve_incremental_method(self.snapshot_writer, incremental_method_name)
             if callable(incremental_method):
                 summary = incremental_method(normalized_path, *incremental_args)
-                return LocalMutationSyncStatus(
+                return build_sync_status(
                     status="sqlite",
                     operation=operation,
                     workbook_path=summary.workbook_path,
@@ -242,12 +185,12 @@ class LocalMutationSyncUseCases:
             incremental_issue = f"Sincronizacao incremental falhou: {exc}"
 
         try:
-            summary = self.snapshot_writer.sync_workbook_snapshot(normalized_path, projected_records)
+            summary = self._sync_snapshot(normalized_path, projected_records)
         except Exception as exc:
             issues = [f"Falha ao sincronizar mutacao no SQLite: {exc}"]
             if incremental_issue:
                 issues.insert(0, incremental_issue)
-            return LocalMutationSyncStatus(
+            return build_sync_status(
                 status="falha",
                 operation=operation,
                 workbook_path=normalized_path,
@@ -255,7 +198,7 @@ class LocalMutationSyncUseCases:
                 issues=tuple(issues),
             )
 
-        return LocalMutationSyncStatus(
+        return build_sync_status(
             status="sqlite",
             operation=operation,
             workbook_path=summary.workbook_path,

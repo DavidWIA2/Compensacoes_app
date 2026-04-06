@@ -1,4 +1,9 @@
-from app.application.use_cases.workbook_session import WorkbookSessionUseCases
+from app.application.use_cases.workbook_session import (
+    ImportSessionAnalysis,
+    LoadSessionResult,
+    SessionRuntimeUseCases,
+    WorkbookSessionUseCases,
+)
 from app.models.compensacao import Compensacao
 
 
@@ -48,6 +53,7 @@ def test_load_workbook_returns_loaded_path_and_records():
     result = use_cases.load_workbook("base.xlsx")
 
     assert result.path == "base.xlsx"
+    assert result.session_path == "base.xlsx"
     assert [record.uid for record in result.records] == ["uid-base"]
     assert workbook.load_calls == ["base.xlsx"]
 
@@ -68,6 +74,7 @@ def test_analyze_import_skips_existing_uid_and_av_tec_conflicts():
     analysis = use_cases.analyze_import(current_records, "import.xlsx")
 
     assert analysis.import_path == "import.xlsx"
+    assert analysis.session_import_path == "import.xlsx"
     assert analysis.skipped_by_uid == 1
     assert analysis.skipped_by_av_tec == 1
     assert analysis.total_skipped == 2
@@ -89,3 +96,24 @@ def test_import_records_uses_atomic_commit_and_reports_progress():
     assert result == 2
     assert workbook.imported_records == records
     assert progress_updates == [(1, 2), (2, 2)]
+
+
+def test_workbook_session_use_cases_expose_session_aliases():
+    workbook = FakeWorkbook(records_by_path={"base.xlsx": [make_record(uid="uid-base")]})
+    use_cases = SessionRuntimeUseCases(workbook, loader_factory=lambda: FakeWorkbook())
+
+    result = use_cases.load_session("base.xlsx")
+    analysis = ImportSessionAnalysis(
+        import_path="import.xlsx",
+        incoming_records=[],
+        records_to_add=[],
+        skipped_by_uid=0,
+        skipped_by_av_tec=0,
+        skipped_uid_details=[],
+        skipped_av_tec_details=[],
+        invalid_issues=[],
+    )
+
+    assert isinstance(result, LoadSessionResult)
+    assert result.session_path == "base.xlsx"
+    assert analysis.session_import_path == "import.xlsx"

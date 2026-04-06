@@ -18,7 +18,10 @@ def test_default_diagnostics_filename_uses_expected_prefix():
 
 def test_build_diagnostics_snapshot_includes_window_session_data():
     window = SimpleNamespace(
-        excel=SimpleNamespace(path="C:/dados/base.xlsx"),
+        session_runtime=SimpleNamespace(
+            path="C:/dados/base.xlsx",
+            has_materialized_workbook=lambda: False,
+        ),
         records=[1, 2, 3],
         filtered_records=[1],
         selected=SimpleNamespace(uid="uid-1"),
@@ -45,7 +48,9 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
 
     assert snapshot["app"]["version"]
     assert snapshot["paths"]["app_data_dir"]
-    assert snapshot["session"]["excel_path"] == "C:/dados/base.xlsx"
+    assert snapshot["session"]["session_path"] == "C:/dados/base.xlsx"
+    assert snapshot["session"]["workbook_runtime_loaded"] is False
+    assert snapshot["session"]["session_runtime_materialized"] is False
     assert snapshot["session"]["records_total"] == 3
     assert snapshot["session"]["filtered_total"] == 1
     assert snapshot["session"]["selected_uid"] == "uid-1"
@@ -61,8 +66,9 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
 def test_build_diagnostics_snapshot_includes_persistence_data():
     persistence_service = SimpleNamespace(
         db_path="C:/dados/state/compensacoes.db",
-        build_workbook_diagnostics=lambda workbook_path: SimpleNamespace(
-            workbook_path=workbook_path,
+        build_session_diagnostics=lambda session_path: SimpleNamespace(
+            session_path=session_path,
+            workbook_path=session_path,
             db_path="C:/dados/state/compensacoes.db",
             synced_at="2026-03-30T12:00:00+00:00",
             record_count=3,
@@ -75,7 +81,10 @@ def test_build_diagnostics_snapshot_includes_persistence_data():
         ),
     )
     window = SimpleNamespace(
-        excel=SimpleNamespace(path="C:/dados/base.xlsx"),
+        session_runtime=SimpleNamespace(
+            path="C:/dados/base.xlsx",
+            has_materialized_workbook=lambda: False,
+        ),
         records=[1, 2, 3],
         filtered_records=[1, 2],
         selected=None,
@@ -104,6 +113,8 @@ def test_build_diagnostics_snapshot_includes_persistence_data():
 
     assert snapshot["persistence"]["available"] is True
     assert snapshot["persistence"]["db_path"] == "C:/dados/state/compensacoes.db"
+    assert snapshot["persistence"]["session"]["record_count"] == 3
+    assert snapshot["persistence"]["session"]["session_path"] == "C:/dados/base.xlsx"
     assert snapshot["persistence"]["workbook"]["record_count"] == 3
     assert snapshot["persistence"]["workbook"]["recent_audit_events"][0]["action"] == "edit"
     assert snapshot["session"]["local_session_source"]["source"] == "session"

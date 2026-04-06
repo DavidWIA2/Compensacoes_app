@@ -17,9 +17,12 @@ class WindowSessionSnapshot:
     record_search_index: Dict[str, str]
     local_record_read_status: object | None
     local_session_source_status: object | None
+    local_filter_facets_result: object | None
     local_filter_facets_status: object | None
     local_mutation_sync_status: object | None
+    authoritative_write_status: object | None
     filtered_metrics: Optional[Dict[str, object]]
+    persistence_status_report: object | None
     dashboard_dirty: bool
     pending_dashboard_metrics: Optional[Dict[str, object]]
     dashboard_record_overview: object | None
@@ -36,9 +39,12 @@ class WindowSessionState:
     record_search_index: Dict[str, str] = field(default_factory=dict)
     local_record_read_status: object | None = None
     local_session_source_status: object | None = None
+    local_filter_facets_result: object | None = None
     local_filter_facets_status: object | None = None
     local_mutation_sync_status: object | None = None
+    authoritative_write_status: object | None = None
     filtered_metrics: Optional[Dict[str, object]] = None
+    persistence_status_report: object | None = None
     dashboard_dirty: bool = True
     pending_dashboard_metrics: Optional[Dict[str, object]] = None
     dashboard_record_overview: object | None = None
@@ -61,9 +67,12 @@ class WindowSessionController:
             record_search_index=dict(self.state.record_search_index),
             local_record_read_status=self.state.local_record_read_status,
             local_session_source_status=self.state.local_session_source_status,
+            local_filter_facets_result=self.state.local_filter_facets_result,
             local_filter_facets_status=self.state.local_filter_facets_status,
             local_mutation_sync_status=self.state.local_mutation_sync_status,
+            authoritative_write_status=self.state.authoritative_write_status,
             filtered_metrics=dict(self.state.filtered_metrics) if self.state.filtered_metrics is not None else None,
+            persistence_status_report=self.state.persistence_status_report,
             dashboard_dirty=bool(self.state.dashboard_dirty),
             pending_dashboard_metrics=dict(pending_metrics) if pending_metrics is not None else None,
             dashboard_record_overview=self.state.dashboard_record_overview,
@@ -79,9 +88,12 @@ class WindowSessionController:
         self.state.record_search_index = dict(snapshot.record_search_index)
         self.state.local_record_read_status = snapshot.local_record_read_status
         self.state.local_session_source_status = snapshot.local_session_source_status
+        self.state.local_filter_facets_result = snapshot.local_filter_facets_result
         self.state.local_filter_facets_status = snapshot.local_filter_facets_status
         self.state.local_mutation_sync_status = snapshot.local_mutation_sync_status
+        self.state.authoritative_write_status = snapshot.authoritative_write_status
         self.state.filtered_metrics = dict(snapshot.filtered_metrics) if snapshot.filtered_metrics is not None else None
+        self.state.persistence_status_report = snapshot.persistence_status_report
         self.state.dashboard_dirty = bool(snapshot.dashboard_dirty)
         self.state.pending_dashboard_metrics = (
             dict(snapshot.pending_dashboard_metrics) if snapshot.pending_dashboard_metrics is not None else None
@@ -97,9 +109,12 @@ class WindowSessionController:
         self.state.record_search_index = {}
         self.state.local_record_read_status = None
         self.state.local_session_source_status = None
+        self.state.local_filter_facets_result = None
         self.state.local_filter_facets_status = None
         self.state.local_mutation_sync_status = None
+        self.state.authoritative_write_status = None
         self.state.filtered_metrics = None
+        self.state.persistence_status_report = None
         self.state.dashboard_dirty = True
         self.state.pending_dashboard_metrics = None
         self.state.dashboard_record_overview = None

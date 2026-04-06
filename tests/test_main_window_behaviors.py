@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 from types import SimpleNamespace
 
@@ -17,7 +17,11 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QObject, Signal, QTimer
 from PySide6.QtGui import QPalette, QStandardItemModel
 
-from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
+from app.application.use_cases.persistence_monitoring import (
+    PersistenceRecordOverviewReport,
+    PersistenceStatusReport,
+)
+from app.models.display_columns import display_column_index
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.tabs.data_tab import DataTab
@@ -26,7 +30,9 @@ from app.application.use_cases.local_record_queries import (
     LocalDuplicateCheckResult,
     LocalFilterFacetsResult,
     LocalRecordReadResult,
+    LocalRecordReadStatus,
 )
+from app.application.use_cases.local_mutation_sync import LocalMutationSyncStatus
 
 class MockQWebEngineView(QtWidgets.QWidget):
     loadFinished = Signal(bool)
@@ -73,12 +79,13 @@ class MockDashboardTab(QtWidgets.QWidget):
     def export_images(self): return "pie.png", "bar.png"
 
 @pytest.fixture(autouse=True)
-def global_mocks(monkeypatch):
+def global_mocks(monkeypatch, tmp_path):
     get_app()
     import app.ui.components.ui_utils as ui_utils_module
     import app.ui.controllers.data_controller as data_controller_module
     import app.ui.controllers.form_controller as form_controller_module
     import app.ui.controllers.map_controller as map_controller_module
+    from app.services.sqlite_mirror_service import SqliteMirrorService
 
     # Mock heavy widgets
     monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
@@ -98,6 +105,11 @@ def global_mocks(monkeypatch):
 
     # Mock common heavy setup
     monkeypatch.setattr(DataTab, "load_map", lambda self: None)
+    monkeypatch.setattr(
+        main_window_module,
+        "SqliteMirrorService",
+        lambda *args, **kwargs: SqliteMirrorService(db_path=tmp_path / "behaviors-mirror.db"),
+    )
     
     class GlobalMockSettings:
         def __init__(self, *args, **kwargs): pass
@@ -110,17 +122,17 @@ def global_mocks(monkeypatch):
 def test_lazy_map_loading_delays_initialization(monkeypatch):
     calls = []
     
-    original_load = MainWindow._load_last_excel
+    original_load = MainWindow._load_last_session
     def mock_load_last(self):
-        calls.append("excel")
+        calls.append("session")
         original_load(self)
-    monkeypatch.setattr(MainWindow, "_load_last_excel", mock_load_last)
+    monkeypatch.setattr(MainWindow, "_load_last_session", mock_load_last)
 
     window = MainWindow()
 
     # Map state should be False right after init
     assert window.data_tab._map_loaded is False
-    assert "excel" in calls
+    assert "session" in calls
     
     # After show event, it should turn True
     window.data_tab.showEvent(None)
@@ -133,13 +145,82 @@ def test_main_window_uses_readable_core_labels(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
 
-    assert window.windowTitle() == "Compensações - Cadastro e Consulta"
+    assert "Compensações - Cadastro e Consulta" in window.windowTitle()
+    assert "Banco local" in window.windowTitle()
     assert bool(window.windowState() & Qt.WindowMaximized)
     assert "ofício" in window.data_tab.search.placeholderText().lower()
     assert window.data_tab.filter_eletronico._all_label == "Todos os Tipos"
     assert "Endereço" in window.data_tab.btn_maps.text()
+    assert window.session_file_label.text() == "Banco: Banco local"
+    assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
+        "Dados & Cadastro",
+        "Painel",
+        "Operações",
+        "TCRAs",
+    ]
 
     assert window.data_tab.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
+    window.close()
+
+
+def test_main_window_tcra_tab_disables_global_search_and_refreshes_on_activation(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+    calls = []
+
+    monkeypatch.setattr(window.tcra_tab, "handle_tab_activated", lambda: calls.append("refresh"))
+
+    assert window.search.isEnabled() is True
+    assert "ofício" in window.search.placeholderText().lower()
+
+    window.tabs.setCurrentWidget(window.tcra_tab)
+    get_app().processEvents()
+
+    assert calls == ["refresh"]
+    assert window.search.isEnabled() is True
+    assert "buscar tcra" in window.search.placeholderText().lower()
+    assert window.tcra_tab.search_input.isHidden() is True
+
+    window.tabs.setCurrentWidget(window.data_tab)
+    get_app().processEvents()
+
+    assert window.search.isEnabled() is True
+    assert "ofício" in window.search.placeholderText().lower()
+    assert window.tcra_tab.search_input.isHidden() is False
+    window.close()
+
+
+def test_main_window_bootstraps_lazy_session_runtime(monkeypatch):
+    created = []
+
+    class LazyExcelLoader:
+        def __init__(self):
+            created.append("loader")
+            self.path = ""
+            self.wb = None
+            self.ws = None
+            self.plantio_ws = None
+            self.col_map = {}
+            self.plantio_col_map = {}
+            self.uid_to_row = {}
+            self.last_backup_time = 0
+            self.merged_cells_warning = False
+            self.loaded_source_mtime_ns = 0
+            self.loaded_source_size = 0
+
+        def load(self, path):
+            self.path = path
+            self.wb = object()
+            self.ws = object()
+            return []
+
+    monkeypatch.setattr(main_window_module, "ExternalSpreadsheetAdapter", LazyExcelLoader)
+
+    window = MainWindow()
+
+    assert window.session_runtime.path == "session://banco-local"
+    assert window.session_runtime.has_materialized_workbook() is False
+    assert created == []
     window.close()
 
 
@@ -205,6 +286,81 @@ def test_update_filters_from_records_can_use_sqlite_filter_facets(monkeypatch):
     window.close()
 
 
+def test_filter_widgets_reuse_cached_filter_facets_result(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+    window.records = [make_record(oficio_processo="123/2024", microbacia="Sessao")]
+    window.session_runtime.path = "dummy.xlsx"
+    calls = []
+    facets = LocalFilterFacetsResult(
+        source="sqlite",
+        workbook_path="dummy.xlsx",
+        synced_at="2026-03-31T12:00:00+00:00",
+        mirrored_records=2,
+        session_records=1,
+        microbacias=("Gregorio", "Medeiros"),
+        years=("2026",),
+    )
+
+    monkeypatch.setattr(
+        window.shell_controller.local_record_queries,
+        "resolve_filter_facets",
+        lambda workbook_path, **kwargs: calls.append(workbook_path) or facets,
+    )
+    monkeypatch.setattr(
+        window.shell_controller.local_record_queries,
+        "build_filter_facets_status",
+        lambda result: {"source": result.source, "micro_count": len(result.microbacias)},
+    )
+
+    window._update_filters_from_records()
+    window._setup_dynamic_form_options_from_records()
+
+    assert calls == ["dummy.xlsx"]
+    assert window._local_filter_facets_result is facets
+    assert window._local_filter_facets_status == {"source": "sqlite", "micro_count": 2}
+    window.close()
+
+
+def test_update_filters_from_records_rebinds_runtime_persistence_service_after_swap(tmp_path):
+    workbook_path = tmp_path / "base.xlsx"
+    workbook_path.write_text("stub", encoding="utf-8")
+    stat_result = workbook_path.stat()
+    window = MainWindow()
+    get_app().processEvents()
+    window.session_runtime.path = str(workbook_path)
+    window.records = [make_record(oficio_processo="123/2026", microbacia="Sessao")]
+
+    class SwappedPersistenceService:
+        def get_workbook_snapshot_summary(self, workbook_path):
+            return SimpleNamespace(
+                workbook_path=workbook_path,
+                synced_at="2026-03-31T12:00:00+00:00",
+                record_count=1,
+                source_mtime_ns=int(stat_result.st_mtime_ns),
+                source_size=int(stat_result.st_size),
+            )
+
+        def query_filter_facets_for_workbook(self, workbook_path):
+            return SimpleNamespace(
+                workbook_path=workbook_path,
+                synced_at="2026-03-31T12:00:00+00:00",
+                record_count=1,
+                microbacias=("Gregorio", "Medeiros"),
+                years=("2026",),
+            )
+
+    window.persistence_service = SwappedPersistenceService()
+
+    window._update_filters_from_records()
+
+    micro_model = window.data_tab.filter_micro.model()
+    micro_items = [micro_model.item(index).text() for index in range(1, micro_model.rowCount())]
+    assert micro_items == ["Gregorio", "Medeiros"]
+    assert getattr(window._local_filter_facets_status, "source", None) == "sqlite"
+    window.close()
+
+
 def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
     window = MainWindow()
     get_app().processEvents()
@@ -241,8 +397,8 @@ def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
 
 
 def test_startup_reenables_ui_when_last_excel_is_loaded(monkeypatch):
-    def fake_load_last_excel(self):
-        self.excel.path = "dummy.xlsx"
+    def fake_load_last_session(self):
+        self.session_runtime.path = "dummy.xlsx"
         # Use a local mock for this specific test
         real_exists = os.path.exists
         def mock_exists(p):
@@ -254,7 +410,7 @@ def test_startup_reenables_ui_when_last_excel_is_loaded(monkeypatch):
         self.filtered_records = list(self.records)
         self._update_ui_after_load()
 
-    monkeypatch.setattr(MainWindow, "_load_last_excel", fake_load_last_excel)
+    monkeypatch.setattr(MainWindow, "_load_last_session", fake_load_last_session)
 
     window = MainWindow()
 
@@ -366,6 +522,49 @@ def test_table_tipo_column_reserves_width_for_standard_options():
     ) + max(int(28 * window.scale_factor), 28)
 
     assert header.sectionSize(column) >= expected_min_width
+    window.close()
+
+
+def test_table_address_columns_gain_more_space_than_short_fields():
+    window = MainWindow()
+    window.records = [
+        make_record(
+            endereco="Rua muito mais longa para validar a largura visível da coluna principal",
+            endereco_plantio="Área de plantio longa para validar a largura da coluna de plantio",
+        ),
+        make_record(excel_row=3, uid="u-2", endereco="Rua curta", endereco_plantio="Área curta"),
+    ]
+
+    window.apply_filter()
+
+    header = window.data_tab.table.horizontalHeader()
+    endereco_width = header.sectionSize(display_column_index("endereco"))
+    plantio_width = header.sectionSize(display_column_index("endereco_plantio"))
+    tipo_width = header.sectionSize(display_column_index("eletronico"))
+    caixa_width = header.sectionSize(display_column_index("caixa"))
+
+    assert endereco_width > tipo_width
+    assert plantio_width > caixa_width
+    window.close()
+
+
+def test_table_address_columns_respect_maximum_width_cap():
+    window = MainWindow()
+    very_long_address = "Endereço " + ("muito longo " * 40)
+    window.records = [
+        make_record(endereco=very_long_address, endereco_plantio=very_long_address),
+    ]
+
+    window.apply_filter()
+
+    header = window.data_tab.table.horizontalHeader()
+    endereco_column = display_column_index("endereco")
+    plantio_column = display_column_index("endereco_plantio")
+    endereco_max_width = window.data_tab._column_width_bounds("endereco")[1]
+    plantio_max_width = window.data_tab._column_width_bounds("endereco_plantio")[1]
+
+    assert header.sectionSize(endereco_column) <= endereco_max_width
+    assert header.sectionSize(plantio_column) <= plantio_max_width
     window.close()
 
 
@@ -562,8 +761,8 @@ def test_reload_keeps_table_constrained_and_bottom_sections_visible(monkeypatch)
     expected_window_height = window.height()
 
     monkeypatch.setattr(window.form_controller, "confirm_discard_changes", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(window.data_controller, "load_excel", lambda *_args, **_kwargs: window.data_controller.update_ui_after_load() or True)
-    window.excel.path = "C:/temp/fake.xlsx"
+    monkeypatch.setattr(window.data_controller, "load_session", lambda *_args, **_kwargs: window.data_controller.update_ui_after_load() or True)
+    window.session_runtime.path = "C:/temp/fake.xlsx"
 
     window.reload()
     get_app().processEvents()
@@ -597,7 +796,7 @@ def test_batch_geocode_keeps_window_height_stable(monkeypatch):
     ]
     window.filtered_records = list(window.records)
     window._update_filters_from_records()
-    window.excel.path = "C:/temp/fake.xlsx"
+    window.session_runtime.path = "C:/temp/fake.xlsx"
     window.resize(1600, 900)
     window.show()
     get_app().processEvents()
@@ -699,7 +898,7 @@ def test_update_ui_after_load_syncs_sqlite_snapshot(monkeypatch):
             calls.append((workbook_path, list(records)))
 
     window.persistence_service = StubPersistenceService()
-    window.excel.path = "C:/temp/base.xlsx"
+    window.session_runtime.path = "C:/temp/base.xlsx"
     window.records = [record]
     monkeypatch.setattr(window, "_update_filters_from_records", lambda: None)
     monkeypatch.setattr(window, "_setup_dynamic_form_options_from_records", lambda: None)
@@ -754,6 +953,9 @@ def test_align_splitter_to_table_width_uses_table_content_width(monkeypatch):
         window.data_tab.preferred_left_panel_width(),
         sum(window.data_tab.splitter.sizes()) - window.data_tab.right_panel.minimumWidth(),
     )
+    anchor_left = window.data_tab._preferred_splitter_anchor_left_width()
+    if anchor_left is not None:
+        expected_left = min(expected_left, anchor_left)
 
     captured = []
     monkeypatch.setattr(window.data_tab.splitter, "setSizes", lambda sizes: captured.append(list(sizes)))
@@ -765,7 +967,26 @@ def test_align_splitter_to_table_width_uses_table_content_width(monkeypatch):
     window.close()
 
 
-def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
+def test_align_splitter_to_table_width_respects_visual_button_anchor(monkeypatch):
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    get_app().processEvents()
+
+    available_left = sum(window.data_tab.splitter.sizes()) - window.data_tab.right_panel.minimumWidth()
+    monkeypatch.setattr(window.data_tab, "preferred_left_panel_width", lambda: available_left + 200)
+    monkeypatch.setattr(window.data_tab, "_preferred_splitter_anchor_left_width", lambda: 780)
+
+    captured = []
+    monkeypatch.setattr(window.data_tab.splitter, "setSizes", lambda sizes: captured.append(list(sizes)))
+    window.data_tab.align_splitter_to_table_width()
+
+    assert captured
+    assert captured[-1][0] == min(780, available_left)
+    window.close()
+
+
+def test_export_spreadsheet_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
     window = MainWindow()
     window.records = [
         make_record(oficio_processo="ABC-1", compensacao="10", microbacia="Gregorio"),
@@ -778,7 +999,7 @@ def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "saida.xlsx"))
     monkeypatch.setattr(
-        "app.ui.controllers.export_controller.export_excel_two_sheets",
+        "app.ui.controllers.export_controller.export_spreadsheet_two_sheets",
         lambda path, records, filtros_txt, selected_cols, kpis, pend_micro_sorted, pend_ele_sorted: captured.update(
             {
                 "path": path,
@@ -794,7 +1015,7 @@ def test_export_excel_reuses_cached_filtered_metrics(monkeypatch, tmp_path):
         lambda *_args, **_kwargs: pytest.fail("compute_metrics nao deveria ser recalculado durante a exportacao"),
     )
 
-    window.export_excel_clicked()
+    window.export_spreadsheet_clicked()
 
     assert captured["path"].endswith("saida.xlsx")
     assert len(captured["records"]) == 1
@@ -860,6 +1081,33 @@ def test_export_csv_reports_failure_without_raising(monkeypatch, tmp_path):
         errors.append("disco cheio")
 
     assert errors and "disco cheio" in errors[0]
+    window.close()
+
+
+def test_export_csv_uses_shell_visible_records(monkeypatch, tmp_path):
+    window = MainWindow()
+    window.filtered_records = [make_record(uid="session-visible")]
+    captured = {}
+    visible_records = [make_record(uid="sqlite-visible", oficio_processo="SQL-1")]
+
+    monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "saida.csv"))
+    monkeypatch.setattr(window.shell_controller, "visible_records", lambda: list(visible_records))
+    monkeypatch.setattr(
+        "app.ui.controllers.export_controller.export_csv",
+        lambda path, records, selected_cols: captured.update(
+            {
+                "path": path,
+                "uids": [record.uid for record in records],
+                "selected_cols": list(selected_cols),
+            }
+        ),
+    )
+
+    window.export_csv_clicked()
+
+    assert captured["path"].endswith("saida.csv")
+    assert captured["uids"] == ["sqlite-visible"]
+    assert captured["selected_cols"]
     window.close()
 
 
@@ -937,12 +1185,72 @@ def test_export_dashboard_pdf_uses_images_from_dash_tab(monkeypatch, tmp_path):
     window.close()
 
 
+def test_export_dashboard_pdf_uses_shell_resolved_dashboard_report(monkeypatch, tmp_path):
+    window = MainWindow()
+    window.records = [make_record(compensacao="10", microbacia="Gregorio")]
+    window.filtered_records = list(window.records)
+    window.session_runtime.path = "dummy.xlsx"
+    captured = {}
+    report = PersistenceRecordOverviewReport(
+        status="sincronizado",
+        workbook_path="dummy.xlsx",
+        synced_at="2026-03-30T12:00:00+00:00",
+        total_records=1,
+        compensados_count=0,
+        pendentes_count=1,
+        records_with_plantios_count=0,
+        records_without_microbacia_count=0,
+        records_without_coordinates_count=1,
+        top_microbacias=(("Gregorio", 1),),
+    )
+    calls = {"overview": 0}
+
+    monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "painel.pdf"))
+    monkeypatch.setattr(window.dash_tab, "export_images", lambda: ("pie.png", "bar.png"))
+    monkeypatch.setattr(
+        window.shell_controller,
+        "resolved_dashboard_record_overview",
+        lambda **kwargs: calls.__setitem__("overview", calls["overview"] + 1) or report,
+    )
+    monkeypatch.setattr(
+        window.shell_controller,
+        "resolved_filtered_metrics",
+        lambda: {
+            "count_total": 1,
+            "total_geral": 10.0,
+            "total_pendente": 10.0,
+            "total_compensado": 0.0,
+            "pend_micro_sorted": [("Gregorio", 10.0)],
+            "pend_ele_sorted": [("Eletrônico", 10.0)],
+        },
+    )
+    monkeypatch.setattr(
+        "app.ui.controllers.export_controller.export_dashboard_pdf",
+        lambda path, titulo, kpi_lines, filtros_txt, chart_images: captured.update(
+            {
+                "path": path,
+                "chart_images": list(chart_images),
+                "kpi_lines": list(kpi_lines),
+            }
+        ),
+    )
+
+    window.export_dashboard_pdf_clicked()
+
+    assert calls["overview"] >= 1
+    assert captured["path"].endswith("painel.pdf")
+    assert captured["chart_images"] == ["pie.png", "bar.png"]
+    assert any("Espelho local: 1 registro(s)" in line for line in captured["kpi_lines"])
+    assert window._dashboard_record_overview is report
+    window.close()
+
+
 def test_form_action_buttons_follow_selection_state(monkeypatch):
     real_exists = os.path.exists
     monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
     
     window = MainWindow()
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window._update_form_action_buttons()
     window.clear_form()
 
@@ -969,7 +1277,7 @@ def test_sn_keeps_add_enabled_for_new_record(monkeypatch):
     monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
 
     window = MainWindow()
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.clear_form()
 
     window.data_tab.chk_sn.setChecked(True)
@@ -986,7 +1294,7 @@ def test_sn_marks_existing_record_as_dirty_and_keeps_save_enabled(monkeypatch):
     monkeypatch.setattr(os.path, "exists", lambda p: True if "dummy.xlsx" in p else real_exists(p))
 
     window = MainWindow()
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record(oficio_processo="123/2026")
     window._fill_form(window.selected)
 
@@ -1003,7 +1311,7 @@ def test_sn_marks_existing_record_as_dirty_and_keeps_save_enabled(monkeypatch):
 
 def test_table_row_selection_populates_form(monkeypatch):
     window = MainWindow()
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     monkeypatch.setattr(window, "_run_map_js", lambda *args, **kwargs: None)
     r3 = make_record(
         excel_row=3,
@@ -1396,11 +1704,47 @@ def test_on_geocode_finished_persists_batch_coordinates(monkeypatch):
         microbacia="",
     )
     window.records = [record]
+    window.session_runtime.path = "dummy.xlsx"
     window.gis = SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio")
 
-    saved = {}
+    persisted = {}
     reloaded = []
-    monkeypatch.setattr(window.excel, "save_batch_edits", lambda records: saved.setdefault("records", list(records)) or len(records))
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "prepare_base",
+        lambda workbook_path, **kwargs: type(
+            "Preparation",
+            (),
+            {"base_records": (record,), "issues": ()},
+        )(),
+    )
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "execute_batch_geocode",
+        lambda **kwargs: persisted.update(kwargs)
+        or type(
+            "WriteResult",
+            (),
+            {
+                "status": LocalMutationSyncStatus(
+                    status="sqlite",
+                    operation="batch_geocode",
+                    workbook_path="dummy.xlsx",
+                    strategy="snapshot_rebuild",
+                    record_count=len(kwargs["projected_records"]),
+                ),
+                "write_status": type(
+                    "WriteStatus",
+                    (),
+                    {"status": "sqlite_authoritative", "operation": "batch_geocode", "issues": (), "finalized": False},
+                )(),
+                "records": tuple(kwargs["projected_records"]),
+                "excel_result": len(kwargs["updated_records"]),
+                "rollback_issues": (),
+                "finalized": False,
+            },
+        )(),
+    )
     monkeypatch.setattr(window, "reload", lambda: reloaded.append(True))
 
     window.on_geocode_finished({
@@ -1410,15 +1754,88 @@ def test_on_geocode_finished_persists_batch_coordinates(monkeypatch):
         }
     })
 
-    assert "records" in saved
-    assert len(saved["records"]) == 1
-    saved_record = saved["records"][0]
+    assert len(persisted["projected_records"]) == 1
+    saved_record = persisted["projected_records"][0]
     assert saved_record.latitude == "-22.01"
     assert saved_record.longitude == "-47.89"
     assert saved_record.latitude_plantio == "-22.02"
     assert saved_record.longitude_plantio == "-47.9"
     assert saved_record.microbacia == "Gregorio"
     assert reloaded == [True]
+    window.close()
+
+
+def test_persist_batch_geocode_uses_authoritative_runtime_base_and_tracks_sync_status(monkeypatch):
+    window = MainWindow()
+    window.session_runtime.path = "dummy.xlsx"
+    window.records = [make_record(excel_row=3, uid="session-stale", endereco="Rua Sessao")]
+    window.gis = SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio")
+
+    authoritative_record = make_record(
+        excel_row=12,
+        uid="geo-authoritative",
+        endereco="Rua Autoritativa",
+        latitude="",
+        longitude="",
+        microbacia="",
+    )
+    sync_calls = []
+    persisted = {}
+
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "prepare_base",
+        lambda workbook_path, **kwargs: type(
+            "Preparation",
+            (),
+            {"base_records": (authoritative_record,), "issues": ()},
+        )(),
+    )
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "execute_batch_geocode",
+        lambda **kwargs: sync_calls.append(kwargs)
+        or persisted.update(kwargs)
+        or type(
+            "WriteResult",
+            (),
+            {
+                "status": LocalMutationSyncStatus(
+                    status="sqlite",
+                    operation="batch_geocode",
+                    workbook_path="dummy.xlsx",
+                    strategy="snapshot_rebuild",
+                    record_count=len(kwargs["projected_records"]),
+                ),
+                "write_status": type(
+                    "WriteStatus",
+                    (),
+                    {"status": "sqlite_authoritative", "operation": "batch_geocode", "issues": (), "finalized": False},
+                )(),
+                "records": tuple(kwargs["projected_records"]),
+                "excel_result": len(kwargs["updated_records"]),
+                "rollback_issues": (),
+                "finalized": False,
+            },
+        )(),
+    )
+
+    updated = window._persist_batch_geocode_results(
+        {
+            authoritative_record.excel_row: {
+                "main": (-22.01, -47.89),
+            }
+        }
+    )
+
+    assert updated == 1
+    assert len(sync_calls) == 1
+    assert [record.uid for record in sync_calls[0]["authoritative_records"]] == ["geo-authoritative"]
+    assert persisted["updated_records"][0].uid == "geo-authoritative"
+    assert persisted["projected_records"][0].latitude == "-22.01"
+    assert persisted["projected_records"][0].microbacia == "Gregorio"
+    assert window._local_mutation_sync_status is not None
+    assert window._local_mutation_sync_status.operation == "batch_geocode"
     window.close()
 
 
@@ -1453,10 +1870,46 @@ def test_on_geocode_finished_updates_all_plantios(monkeypatch):
         ],
     )
     window.records = [record]
+    window.session_runtime.path = "dummy.xlsx"
     window.gis = SimpleNamespace(find_microbacia=lambda lat, lng: "Gregorio")
 
-    saved = {}
-    monkeypatch.setattr(window.excel, "save_batch_edits", lambda records: saved.setdefault("records", list(records)) or len(records))
+    persisted = {}
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "prepare_base",
+        lambda workbook_path, **kwargs: type(
+            "Preparation",
+            (),
+            {"base_records": (record,), "issues": ()},
+        )(),
+    )
+    monkeypatch.setattr(
+        window.map_controller.persistence,
+        "execute_batch_geocode",
+        lambda **kwargs: persisted.update(kwargs)
+        or type(
+            "WriteResult",
+            (),
+            {
+                "status": LocalMutationSyncStatus(
+                    status="sqlite",
+                    operation="batch_geocode",
+                    workbook_path="dummy.xlsx",
+                    strategy="snapshot_rebuild",
+                    record_count=len(kwargs["projected_records"]),
+                ),
+                "write_status": type(
+                    "WriteStatus",
+                    (),
+                    {"status": "sqlite_authoritative", "operation": "batch_geocode", "issues": (), "finalized": False},
+                )(),
+                "records": tuple(kwargs["projected_records"]),
+                "excel_result": len(kwargs["updated_records"]),
+                "rollback_issues": (),
+                "finalized": False,
+            },
+        )(),
+    )
     monkeypatch.setattr(window, "reload", lambda: None)
 
     window.on_geocode_finished(
@@ -1470,7 +1923,7 @@ def test_on_geocode_finished_updates_all_plantios(monkeypatch):
         }
     )
 
-    saved_record = saved["records"][0]
+    saved_record = persisted["projected_records"][0]
     assert saved_record.plantios[0].latitude == "-22.01"
     assert saved_record.plantios[1].longitude == "-47.9"
     assert saved_record.latitude_plantio == "-22.01"
@@ -1505,10 +1958,8 @@ def test_perform_geocode_surfaces_not_found(monkeypatch):
     window.close()
 
 
-def test_load_last_excel_reports_failures_and_clears_setting(monkeypatch, tmp_path):
-    expected_path = tmp_path / "ultima.xlsx"
-    expected_path.write_text("stub", encoding="utf-8")
-    state = {"last_excel_path": str(expected_path)}
+def test_load_last_session_reports_failures_and_clears_setting(monkeypatch, tmp_path):
+    state = {"last_session_path": str(tmp_path / "ultima.xlsx")}
 
     class MockSettings:
         def __init__(self, *args, **kwargs): pass
@@ -1518,25 +1969,101 @@ def test_load_last_excel_reports_failures_and_clears_setting(monkeypatch, tmp_pa
 
     monkeypatch.setattr("app.ui.main_window.QSettings", MockSettings)
 
-    # Ensure os.path.exists returns True for our test path
-    real_exists = os.path.exists
-    def mock_exists(p):
-        if p == str(expected_path): return True
-        return real_exists(p)
-    monkeypatch.setattr(os.path, "exists", mock_exists)
+    window = MainWindow()
+    monkeypatch.setattr(
+        window.authoritative_persistence,
+        "ensure_singleton_session",
+        lambda: SimpleNamespace(session_path="session://banco-local", display_name="Banco local"),
+    )
+    monkeypatch.setattr(window.data_controller, "load_session", lambda *args, **kwargs: True)
+
+    window._load_last_session()
+
+    assert "last_session_path" not in state
+    window.close()
+
+
+def test_load_last_session_bootstraps_singleton_from_legacy_workbook(monkeypatch, tmp_path):
+    legacy_path = tmp_path / "ultima.xlsx"
+    legacy_path.write_text("planilha-legada", encoding="utf-8")
+    state = {"last_excel_path": str(legacy_path)}
+
+    class MockSettings:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def value(self, key, default=""):
+            return state.get(key, default)
+
+        def setValue(self, key, val):
+            state[key] = val
+
+        def remove(self, key):
+            state.pop(key, None)
+
+    monkeypatch.setattr("app.ui.main_window.QSettings", MockSettings)
+    monkeypatch.setattr(MainWindow, "_load_last_session", lambda self: None)
 
     window = MainWindow()
-    def mock_raise_error(*args, **kwargs):
-        raise RuntimeError("planilha corrompida")
-    monkeypatch.setattr(window.excel, "load", mock_raise_error)
+    calls = {}
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "migrate_legacy_workbook_to_singleton",
+        lambda path: calls.update({"migrate": path}) or "session://banco-local",
+    )
+    monkeypatch.setattr(
+        window.data_controller,
+        "load_session",
+        lambda path, confirm_discard=True: calls.update({"load": (path, confirm_discard)}) or True,
+    )
 
-    window._load_last_excel()
-
+    assert window.data_controller.load_last_session() is True
+    assert calls["migrate"] == os.path.abspath(str(legacy_path))
+    assert calls["load"] == ("session://banco-local", False)
+    assert state["database_bootstrap_source_path"] == os.path.abspath(str(legacy_path))
     assert "last_excel_path" not in state
     window.close()
 
 
-def test_load_excel_failure_restores_previous_filter_state(monkeypatch):
+def test_load_last_session_falls_back_to_singleton_database(monkeypatch):
+    state = {}
+
+    class MockSettings:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def value(self, key, default=""):
+            return state.get(key, default)
+
+        def setValue(self, key, val):
+            state[key] = val
+
+        def remove(self, key):
+            state.pop(key, None)
+
+    monkeypatch.setattr("app.ui.main_window.QSettings", MockSettings)
+    monkeypatch.setattr(MainWindow, "_load_last_session", lambda self: None)
+
+    window = MainWindow()
+    calls = {}
+
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "ensure_singleton_session",
+        lambda: SimpleNamespace(session_path="session://banco-local", display_name="Banco local"),
+    )
+    monkeypatch.setattr(
+        window.data_controller,
+        "load_session",
+        lambda path, confirm_discard=True: calls.update({"load": (path, confirm_discard)}) or True,
+    )
+
+    assert window.data_controller.load_last_session() is True
+    assert calls["load"] == ("session://banco-local", False)
+    window.close()
+
+
+def test_load_session_failure_restores_previous_filter_state(monkeypatch):
     window = MainWindow()
     window.records = [
         make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM"),
@@ -1553,9 +2080,9 @@ def test_load_excel_failure_restores_previous_filter_state(monkeypatch):
     window.data_tab.filter_eletronico.set_checked_items(["Eletrônico"], all_selected=False)
     window.apply_filter()
 
-    monkeypatch.setattr(window.excel, "load", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("falhou")))
+    monkeypatch.setattr(window.session_runtime, "load", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("falhou")))
 
-    window._load_excel("quebrado.xlsx")
+    window._load_session("quebrado.xlsx")
 
     assert window.data_tab.search.text() == "Gregorio"
     assert window.data_tab.filter_status.currentText() == "Pendentes"
@@ -1566,7 +2093,7 @@ def test_load_excel_failure_restores_previous_filter_state(monkeypatch):
     window.close()
 
 
-def test_load_excel_continues_when_gis_fails(ui_window_factory, monkeypatch, tmp_path):
+def test_load_session_continues_when_gis_fails(ui_window_factory, monkeypatch, tmp_path):
     workbook_path = tmp_path / "base.xlsx"
     workbook = openpyxl.Workbook()
     sheet = workbook.active
@@ -1599,7 +2126,7 @@ def test_load_excel_continues_when_gis_fails(ui_window_factory, monkeypatch, tmp
         lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("shapefile quebrado")),
     )
 
-    assert window._load_excel(str(workbook_path)) is True
+    assert window._load_session(str(workbook_path)) is True
     assert len(window.records) == 1
     assert window.gis is None
     assert "Microbacias indisponiveis" in window.data_tab.map_notice_label.text()
@@ -1608,13 +2135,13 @@ def test_load_excel_continues_when_gis_fails(ui_window_factory, monkeypatch, tmp
     window.close()
 
 
-def test_load_excel_can_hydrate_session_records_from_sqlite_snapshot(monkeypatch):
+def test_load_session_can_hydrate_session_records_from_sqlite_snapshot(monkeypatch):
     window = MainWindow()
     session_records = [make_record(oficio_processo="EXCEL-1", uid="excel-1")]
     mirrored_records = [make_record(oficio_processo="SQLITE-1", uid="sqlite-1", microbacia="Gregorio")]
 
     def fake_run_blocking_spec(spec):
-        window.excel.path = "dummy.xlsx"
+        window.session_runtime.path = "dummy.xlsx"
         return SimpleNamespace(records=session_records)
 
     monkeypatch.setattr(window, "run_blocking_spec", fake_run_blocking_spec)
@@ -1648,11 +2175,52 @@ def test_load_excel_can_hydrate_session_records_from_sqlite_snapshot(monkeypatch
     monkeypatch.setattr(window, "refresh_operations_overview", lambda: None)
     monkeypatch.setattr(window, "_load_sort_settings", lambda: None)
 
-    assert window._load_excel("dummy.xlsx") is True
+    assert window._load_session("dummy.xlsx") is True
     assert [record.uid for record in window.records] == ["sqlite-1"]
     assert window._local_session_source_status is not None
     assert window._local_session_source_status.source == "sqlite"
     assert window._local_session_source_status.strategy == "sqlite_snapshot"
+    window.close()
+
+
+def test_load_session_clears_previous_write_statuses(monkeypatch):
+    window = MainWindow()
+    window._local_mutation_sync_status = SimpleNamespace(status="sqlite", operation="edit")
+    window._authoritative_write_status = SimpleNamespace(status="sqlite_primary", operation="edit")
+
+    authoritative_result = SimpleNamespace(
+        loaded_records=(make_record(oficio_processo="EXCEL-1", uid="excel-1"),),
+        records=(make_record(oficio_processo="SQLITE-1", uid="sqlite-1"),),
+        local_session_source_status=LocalRecordReadStatus(
+            status="sqlite",
+            source="sqlite",
+            strategy="sqlite_snapshot",
+            workbook_path="dummy.xlsx",
+            synced_at="2026-03-31T12:00:00+00:00",
+            mirrored_records=1,
+            session_records=1,
+            filtered_records=1,
+        ),
+        issues=(),
+    )
+
+    def fake_run_blocking_spec(_spec):
+        window.session_runtime.path = "dummy.xlsx"
+        return authoritative_result
+
+    monkeypatch.setattr(window, "run_blocking_spec", fake_run_blocking_spec)
+    monkeypatch.setattr(window.data_controller, "_refresh_dashboard_record_overview", lambda: None)
+    monkeypatch.setattr(window.data_controller, "load_gis", lambda: True)
+    monkeypatch.setattr(window.data_controller, "apply_filter", lambda: None)
+    monkeypatch.setattr(window.data_tab, "align_splitter_to_table_width", lambda: None)
+    monkeypatch.setattr(window, "clear_form", lambda *args, **kwargs: True)
+    monkeypatch.setattr(window, "refresh_operations_overview", lambda: None)
+    monkeypatch.setattr(window, "_load_sort_settings", lambda: None)
+
+    assert window._load_session("dummy.xlsx") is True
+    assert window._local_mutation_sync_status is None
+    assert window._authoritative_write_status is None
+    assert window._local_session_source_status.source == "sqlite"
     window.close()
 
 
@@ -1676,12 +2244,11 @@ def test_load_settings_restores_geometry_and_tab(monkeypatch):
 
 
 def test_load_settings_filters_missing_recent_files(monkeypatch, tmp_path):
-    existing = tmp_path / "base.xlsx"
-    existing.write_text("stub", encoding="utf-8")
+    existing = "session://base-principal"
 
     class MemorySettings:
         def __init__(self):
-            self._data = {"recent_files": [str(existing), str(existing), str(tmp_path / "missing.xlsx")]}
+            self._data = {}
 
         def value(self, key, default=None):
             return self._data.get(key, default)
@@ -1694,11 +2261,29 @@ def test_load_settings_filters_missing_recent_files(monkeypatch, tmp_path):
 
     window = MainWindow()
     window.settings = AppSettings(MemorySettings())
+    window.settings.set_recent_files([existing, existing, str(tmp_path / "missing.xlsx")])
+    monkeypatch.setattr(
+        window.authoritative_persistence,
+        "resolve_session_availability",
+        lambda path: SimpleNamespace(
+            path=path,
+            display_label="Base principal",
+            detail_message="Sessão SQLite local disponível para Base principal.",
+            is_openable=(path == existing),
+        ),
+    )
 
     window._load_settings()
 
-    assert window.recent_files == [str(existing)]
-    assert window.settings.recent_files() == [str(existing)]
+    assert window.recent_files == []
+    assert window.settings.recent_files() == []
+    window.close()
+
+
+def test_recent_files_menu_is_hidden_in_single_database_mode():
+    window = MainWindow()
+    window._update_recent_files_menu()
+    assert not hasattr(window, "menu_recent")
     window.close()
 
 
@@ -1731,7 +2316,11 @@ def test_help_menu_exposes_support_actions():
 def test_file_menu_exposes_operation_history_action():
     window = MainWindow()
 
+    assert window.action_reload.text() == "Recarregar"
     assert window.action_operation_history.text() == "Histórico de Operações"
+    assert not hasattr(window, "action_database")
+    assert not hasattr(window, "btn_open")
+    assert not hasattr(window, "btn_reload")
     window.close()
 
 
@@ -1836,11 +2425,24 @@ def test_delete_selected_surfaces_lookup_errors(monkeypatch):
     window = MainWindow()
     errors = []
     reloaded = []
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
+    window.records = [make_record(uid="u-delete")]
     window.selected = make_record(uid="u-delete")
 
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "delete_record_shift_up", lambda *args, **kwargs: (_ for _ in ()).throw(LookupError("UID ausente")))
+    monkeypatch.setattr(
+        window.form_controller.persistence,
+        "prepare_delete",
+        lambda *args, **kwargs: type(
+            "Preparation",
+            (),
+            {"base_records": tuple(window.records), "selected_record": window.selected, "issues": ()},
+        )(),
+    )
+    monkeypatch.setattr(
+        window.form_controller.persistence,
+        "execute_delete",
+        lambda *args, **kwargs: (_ for _ in ()).throw(LookupError("UID ausente")),
+    )
     monkeypatch.setattr(window, "reload", lambda: reloaded.append(True))
     monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: errors.append(args[2]))
 
@@ -1853,18 +2455,39 @@ def test_delete_selected_surfaces_lookup_errors(monkeypatch):
 
 def test_add_new_writes_audit_entry(monkeypatch):
     window = MainWindow()
-    added = []
     audits = []
     refreshed = []
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "add_new", lambda record: added.append(record) or 3)
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/add.json")
+    monkeypatch.setattr(
+        window.form_controller.local_mutation_sync,
+        "apply_after_add",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": len(kwargs["existing_records"]) + 1,
+                        "issues": (),
+                        "operation": "add",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": tuple([*kwargs["existing_records"], kwargs["added_record"]]),
+            },
+        )(),
+    )
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.data_tab.in_oficio.setText("123/2026")
     window.data_tab.in_avtec.setText("AT-55")
     window.data_tab.in_comp.setText("10")
@@ -1872,26 +2495,47 @@ def test_add_new_writes_audit_entry(monkeypatch):
 
     window.add_new()
 
-    assert len(added) == 1
     assert len(refreshed) == 1
     assert audits[0]["action"] == "add"
-    assert audits[0]["backup_path"].endswith("add.xlsx")
+    assert audits[0]["backup_path"].endswith("add.json")
     assert audits[0]["after"]["av_tec"] == "AT-55"
     window.close()
 
 
-def test_add_new_reports_external_workbook_change(monkeypatch):
+def test_add_new_does_not_depend_on_external_workbook_state(monkeypatch):
     window = MainWindow()
-    errors = []
+    infos = []
 
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/add.json")
     monkeypatch.setattr(
-        window.excel,
-        "ensure_workbook_is_current",
-        lambda: (_ for _ in ()).throw(WorkbookModifiedExternallyError("stale")),
+        window.form_controller.local_mutation_sync,
+        "apply_after_add",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": len(kwargs["existing_records"]) + 1,
+                        "issues": (),
+                        "operation": "add",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": tuple([*kwargs["existing_records"], kwargs["added_record"]]),
+            },
+        )(),
     )
-    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: errors.append((args[1], args[2])))
+    monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: None)
+    monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: True)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: infos.append(args[2]))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.data_tab.in_oficio.setText("123/2026")
     window.data_tab.in_avtec.setText("AT-55")
     window.data_tab.in_comp.setText("10")
@@ -1899,51 +2543,57 @@ def test_add_new_reports_external_workbook_change(monkeypatch):
 
     window.add_new()
 
-    assert errors == [("Planilha Desatualizada", "A planilha foi alterada fora do aplicativo. Recarregue antes de continuar.")]
+    assert infos == ["Adicionado com sucesso."]
     window.close()
 
 
 def test_add_new_uses_authoritative_runtime_base_for_projection_and_sync(monkeypatch):
     window = MainWindow()
     refreshed = []
-    sync_calls = []
+    execute_calls = []
     authoritative_base = [make_record(uid="uid-sqlite-base", av_tec="AT-BASE", excel_row=8)]
 
-    def fake_add_new(record):
-        record.uid = "uid-added"
-        record.excel_row = 9
-        return 9
-
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "add_new", fake_add_new)
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: None)
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        window.form_controller.local_record_queries,
-        "resolve_authoritative_record_source",
+        window.form_controller.persistence,
+        "prepare_create",
         lambda workbook_path, **kwargs: type(
-            "RecordSource",
+            "Preparation",
             (),
-            {"records": tuple(authoritative_base), "issues": ()},
+            {"base_records": tuple(authoritative_base), "duplicate_row": None, "issues": ()},
         )(),
     )
     monkeypatch.setattr(
-        window.form_controller.local_mutation_sync,
-        "apply_after_add",
-        lambda **kwargs: sync_calls.append(kwargs)
+        window.form_controller.persistence,
+        "execute_add",
+        lambda record, **kwargs: execute_calls.append({"record": record, **kwargs})
         or type(
-            "MutationResult",
+            "WriteResult",
             (),
             {
-                "status": type("Status", (), {"issues": (), "operation": "add"})(),
-                "records": tuple([*authoritative_base, make_record(uid="uid-added", av_tec="AT-55", excel_row=9)]),
+                "status": LocalMutationSyncStatus(
+                    status="sqlite",
+                    operation="add",
+                    workbook_path="dummy.xlsx",
+                    strategy="incremental",
+                    record_count=2,
+                ),
+                "write_status": type(
+                    "WriteStatus",
+                    (),
+                    {"status": "sqlite_authoritative", "operation": "add", "issues": (), "finalized": False},
+                )(),
+                "records": tuple([*authoritative_base, make_record(uid="uid-added", av_tec=record.av_tec, excel_row=9)]),
+                "excel_result": None,
+                "rollback_issues": (),
+                "finalized": False,
             },
         )(),
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.records = [make_record(uid="uid-stale-session", av_tec="AT-OLD", excel_row=2)]
     window.data_tab.in_oficio.setText("123/2026")
     window.data_tab.in_avtec.setText("AT-55")
@@ -1952,8 +2602,8 @@ def test_add_new_uses_authoritative_runtime_base_for_projection_and_sync(monkeyp
 
     window.add_new()
 
-    assert len(sync_calls) == 1
-    assert [record.uid for record in sync_calls[0]["existing_records"]] == ["uid-sqlite-base"]
+    assert len(execute_calls) == 1
+    assert [record.uid for record in execute_calls[0]["authoritative_records"]] == ["uid-sqlite-base"]
     assert [record.uid for record in refreshed[0]] == ["uid-sqlite-base", "uid-added"]
     window.close()
 
@@ -1963,12 +2613,12 @@ def test_save_edit_blocks_invalid_payload(monkeypatch):
     saved = []
     warnings = []
 
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window.session_runtime, "ensure_workbook_is_current", lambda: None)
+    monkeypatch.setattr(window.session_runtime, "save_edit", lambda record: saved.append(record))
     monkeypatch.setattr(window, "reload", lambda: None)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record()
     window._fill_form(window.selected)
     window.data_tab.in_comp.setText("")
@@ -1983,15 +2633,54 @@ def test_save_edit_writes_audit_entry(monkeypatch):
     audits = []
     refreshed = []
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: None)
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/edit.json")
+    monkeypatch.setattr(
+        window.form_controller.local_mutation_sync,
+        "apply_after_edit",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": len(kwargs["existing_records"]),
+                        "issues": (),
+                        "operation": "edit",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": tuple(
+                    [
+                        kwargs["updated_record"]
+                        if getattr(record, "uid", "") == getattr(kwargs["updated_record"], "uid", "")
+                        else record
+                        for record in kwargs["existing_records"]
+                    ]
+                ),
+            },
+        )(),
+    )
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        window.form_controller.local_record_queries,
+        "resolve_selected_record",
+        lambda workbook_path, **kwargs: type(
+            "SelectionResult",
+            (),
+            {"record": make_record(caixa="CX-1", uid="uid-edit"), "issues": ()},
+        )(),
+    )
 
-    window.excel.path = "dummy.xlsx"
-    window.selected = make_record(caixa="CX-1", uid="uid-edit")
+    window.session_runtime.path = "dummy.xlsx"
+    window.records = [make_record(caixa="CX-1", uid="uid-edit")]
+    window.selected = window.records[0]
     window._fill_form(window.selected)
     window.data_tab.in_caixa.setText("CX-9")
 
@@ -2004,36 +2693,205 @@ def test_save_edit_writes_audit_entry(monkeypatch):
     window.close()
 
 
-def test_save_edit_reports_external_workbook_change(monkeypatch):
+def test_save_edit_does_not_depend_on_external_workbook_state(monkeypatch):
     window = MainWindow()
-    errors = []
+    infos = []
 
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/edit.json")
     monkeypatch.setattr(
-        window.excel,
-        "ensure_workbook_is_current",
-        lambda: (_ for _ in ()).throw(WorkbookModifiedExternallyError("stale")),
+        window.form_controller.local_mutation_sync,
+        "apply_after_edit",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": len(kwargs["existing_records"]),
+                        "issues": (),
+                        "operation": "edit",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": tuple(
+                    [
+                        kwargs["updated_record"]
+                        if getattr(record, "uid", "") == getattr(kwargs["updated_record"], "uid", "")
+                        else record
+                        for record in kwargs["existing_records"]
+                    ]
+                ),
+            },
+        )(),
     )
-    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: errors.append((args[1], args[2])))
+    monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: True)
+    monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: None)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: infos.append(args[2]))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record(caixa="CX-1", uid="uid-edit")
     window._fill_form(window.selected)
     window.data_tab.in_caixa.setText("CX-9")
 
     window.save_edit()
 
-    assert errors == [("Planilha Desatualizada", "A planilha foi alterada fora do aplicativo. Recarregue antes de continuar.")]
+    assert infos == ["Salvo com sucesso."]
+    window.close()
+
+
+def test_check_duplicate_av_tec_rebinds_runtime_persistence_service_after_swap(tmp_path):
+    workbook_path = tmp_path / "base.xlsx"
+    workbook_path.write_text("stub", encoding="utf-8")
+    stat_result = workbook_path.stat()
+    window = MainWindow()
+    window.session_runtime.path = str(workbook_path)
+    window.records = [make_record(uid="dup-uid-1", av_tec="AT-1")]
+
+    class SwappedPersistenceService:
+        def get_workbook_snapshot_summary(self, workbook_path):
+            return SimpleNamespace(
+                workbook_path=workbook_path,
+                synced_at="2026-03-31T12:00:00+00:00",
+                record_count=1,
+                source_mtime_ns=int(stat_result.st_mtime_ns),
+                source_size=int(stat_result.st_size),
+            )
+
+        def find_duplicate_av_tec_for_workbook(self, workbook_path, *, av_tec, current_uid=""):
+            return 12 if av_tec == "AT-DUPLICADA" else None
+
+    window.persistence_service = SwappedPersistenceService()
+
+    assert window.form_controller.check_duplicate_av_tec("AT-DUPLICADA", "") == 12
+    window.close()
+
+
+def test_resolved_dashboard_record_overview_rebinds_runtime_persistence_service_after_swap(tmp_path):
+    workbook_path = tmp_path / "base.xlsx"
+    workbook_path.write_text("stub", encoding="utf-8")
+    window = MainWindow()
+    window.session_runtime.path = str(workbook_path)
+    window._dashboard_record_overview = None
+
+    class SwappedPersistenceService:
+        def build_workbook_record_overview(
+            self,
+            workbook_path,
+            *,
+            top_microbacias_limit=5,
+            sample_limit=5,
+        ):
+            return SimpleNamespace(
+                workbook_path=workbook_path,
+                synced_at="2026-03-31T12:00:00+00:00",
+                total_records=7,
+                compensados_count=2,
+                pendentes_count=5,
+                records_with_plantios_count=1,
+                records_without_microbacia_count=0,
+                records_without_coordinates_count=3,
+                top_microbacias=(("Gregorio", 7),)[: int(top_microbacias_limit)],
+                sample_records=(),
+            )
+
+    window.persistence_service = SwappedPersistenceService()
+
+    report = window.shell_controller.resolved_dashboard_record_overview(
+        refresh=True,
+        top_microbacias_limit=1,
+        sample_limit=0,
+    )
+
+    assert report is not None
+    assert report.total_records == 7
+    assert report.top_microbacias == (("Gregorio", 7),)
+    assert window._dashboard_record_overview is report
+    window.close()
+
+
+def test_resolved_persistence_status_report_rebinds_runtime_persistence_service_after_swap(tmp_path):
+    workbook_path = tmp_path / "base.xlsx"
+    workbook_path.write_text("stub", encoding="utf-8")
+    window = MainWindow()
+    window.session_runtime.path = str(workbook_path)
+    window.records = [make_record(uid="u-1"), make_record(uid="u-2")]
+    window._local_session_source_status = LocalRecordReadStatus(
+        status="sqlite",
+        source="sqlite",
+        strategy="sqlite_snapshot",
+        workbook_path=str(workbook_path),
+        synced_at="2026-03-31T12:00:00+00:00",
+        mirrored_records=2,
+        session_records=2,
+        filtered_records=2,
+    )
+
+    class SwappedPersistenceService:
+        def get_workbook_snapshot_summary(self, workbook_path):
+            return SimpleNamespace(
+                workbook_path=workbook_path,
+                synced_at="2026-03-31T12:00:00+00:00",
+                record_count=2,
+                plantio_count=1,
+                audit_event_count=4,
+            )
+
+    window.persistence_service = SwappedPersistenceService()
+
+    report = window.shell_controller.resolved_persistence_status_report(
+        refresh=True,
+        expected_audit_events=4,
+    )
+
+    assert isinstance(report, PersistenceStatusReport)
+    assert report.status == "sincronizado"
+    assert report.mirrored_records == 2
+    assert report.expected_audit_events == 4
+    assert window._persistence_status_report is report
     window.close()
 
 
 def test_save_edit_uses_authoritative_selected_record_for_audit_and_target(monkeypatch):
     window = MainWindow()
     audits = []
-    saved = []
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/edit.json")
+    monkeypatch.setattr(
+        window.form_controller.local_mutation_sync,
+        "apply_after_edit",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": len(kwargs["existing_records"]),
+                        "issues": (),
+                        "operation": "edit",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": tuple(
+                    [
+                        kwargs["updated_record"]
+                        if getattr(record, "uid", "") == getattr(kwargs["updated_record"], "uid", "")
+                        else record
+                        for record in kwargs["existing_records"]
+                    ]
+                ),
+            },
+        )(),
+    )
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
@@ -2050,18 +2908,17 @@ def test_save_edit_uses_authoritative_selected_record_for_audit_and_target(monke
         )(),
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record(excel_row=3, uid="uid-stale", caixa="CX-OLD", av_tec="AT-OLD")
     window._fill_form(window.selected)
     window.data_tab.in_caixa.setText("CX-EDIT")
 
     window.save_edit()
 
-    assert len(saved) == 1
-    assert saved[0].uid == "uid-authoritative"
-    assert saved[0].excel_row == 9
     assert audits[0]["before"]["uid"] == "uid-authoritative"
     assert audits[0]["before"]["caixa"] == "CX-AUTH"
+    assert audits[0]["after"]["uid"] == "uid-authoritative"
+    assert audits[0]["after"]["excel_row"] == 9
     window.close()
 
 
@@ -2074,9 +2931,7 @@ def test_save_edit_uses_authoritative_runtime_base_for_projection_and_sync(monke
         make_record(excel_row=10, uid="uid-neighbor", caixa="CX-NB", av_tec="AT-NB"),
     ]
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: None)
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/edit.json")
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: None)
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
@@ -2117,7 +2972,7 @@ def test_save_edit_uses_authoritative_runtime_base_for_projection_and_sync(monke
         )(),
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.records = [make_record(excel_row=3, uid="uid-stale-session", caixa="CX-OLD", av_tec="AT-OLD")]
     window.selected = make_record(excel_row=3, uid="uid-stale-session", caixa="CX-OLD", av_tec="AT-OLD")
     window._fill_form(window.selected)
@@ -2137,13 +2992,48 @@ def test_delete_selected_writes_audit_entry(monkeypatch):
     audits = []
     refreshed = []
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "delete_record_shift_up", lambda *args, **kwargs: None)
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/delete.json")
+    monkeypatch.setattr(
+        window.form_controller.persistence,
+        "prepare_delete",
+        lambda *args, **kwargs: type(
+            "Preparation",
+            (),
+            {
+                "base_records": (window.selected,),
+                "selected_record": window.selected,
+                "issues": (),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        window.form_controller.local_mutation_sync,
+        "apply_after_delete",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": max(len(kwargs["existing_records"]) - 1, 0),
+                        "issues": (),
+                        "operation": "delete",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": (),
+            },
+        )(),
+    )
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record(uid="uid-delete", av_tec="AT-DEL")
 
     window.delete_selected()
@@ -2151,18 +3041,39 @@ def test_delete_selected_writes_audit_entry(monkeypatch):
     assert len(refreshed) == 1
     assert audits[0]["action"] == "delete"
     assert audits[0]["before"]["uid"] == "uid-delete"
-    assert audits[0]["backup_path"].endswith("delete.xlsx")
+    assert audits[0]["backup_path"].endswith("delete.json")
     window.close()
 
 
 def test_delete_selected_uses_authoritative_selected_record_for_delete_and_audit(monkeypatch):
     window = MainWindow()
     audits = []
-    deleted = []
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "delete_record_shift_up", lambda row_idx, uid="": deleted.append((row_idx, uid)))
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/delete.json")
+    monkeypatch.setattr(
+        window.form_controller.local_mutation_sync,
+        "apply_after_delete",
+        lambda **kwargs: type(
+            "MutationResult",
+            (),
+            {
+                "status": type(
+                    "Status",
+                    (),
+                    {
+                        "status": "sqlite",
+                        "strategy": "incremental",
+                        "synced_at": "2026-03-31T12:00:00+00:00",
+                        "record_count": max(len(kwargs["existing_records"]) - 1, 0),
+                        "issues": (),
+                        "operation": "delete",
+                        "uses_sqlite": True,
+                    },
+                )(),
+                "records": (),
+            },
+        )(),
+    )
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
     monkeypatch.setattr(
@@ -2178,14 +3089,13 @@ def test_delete_selected_uses_authoritative_selected_record_for_delete_and_audit
         )(),
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record(excel_row=4, uid="uid-stale-delete", av_tec="AT-OLD-DEL")
 
     window.delete_selected()
 
-    assert deleted == [(12, "uid-authoritative-delete")]
     assert audits[0]["before"]["uid"] == "uid-authoritative-delete"
-    assert audits[0]["backup_path"].endswith("delete.xlsx")
+    assert audits[0]["backup_path"].endswith("delete.json")
     window.close()
 
 
@@ -2199,9 +3109,7 @@ def test_delete_selected_uses_authoritative_runtime_base_for_projection_and_sync
         make_record(excel_row=13, uid="uid-neighbor-delete", av_tec="AT-NB-DEL"),
     ]
 
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: f"C:/tmp/{label}.xlsx")
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "delete_record_shift_up", lambda row_idx, uid="": None)
+    monkeypatch.setattr(window.form_controller.persistence.session_backup_service, "create_backup", lambda **kwargs: "C:/tmp/delete.json")
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refreshed.append(records) or True)
     monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: None)
     monkeypatch.setattr(
@@ -2236,7 +3144,7 @@ def test_delete_selected_uses_authoritative_runtime_base_for_projection_and_sync
         )(),
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.records = [make_record(excel_row=4, uid="uid-stale-session-delete", av_tec="AT-OLD-DEL")]
     window.selected = make_record(excel_row=4, uid="uid-stale-session-delete", av_tec="AT-OLD-DEL")
 
@@ -2260,12 +3168,12 @@ def test_save_edit_requires_endereco_plantio_when_compensado(monkeypatch):
     saved = []
     warnings = []
 
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(window.session_runtime, "ensure_workbook_is_current", lambda: None)
+    monkeypatch.setattr(window.session_runtime, "save_edit", lambda record: saved.append(record))
     monkeypatch.setattr(window, "reload", lambda: None)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: warnings.append(args[2]))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record()
     window._fill_form(window.selected)
 
@@ -2286,7 +3194,7 @@ def test_save_edit_reenables_when_endereco_plantio_is_filled(monkeypatch):
     monkeypatch.setattr(os.path, "exists", lambda p: True if p == "dummy.xlsx" else real_exists(p))
 
     window = MainWindow()
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record()
     window._fill_form(window.selected)
 
@@ -2378,24 +3286,65 @@ def test_save_edit_refreshes_runtime_session_without_full_reload(monkeypatch):
     monkeypatch.setattr(os.path, "exists", lambda p: True if p == "dummy.xlsx" else real_exists(p))
 
     window = MainWindow()
-    saved = []
+    executed = []
     refresh_calls = []
     infos = []
 
-    monkeypatch.setattr(window.excel, "ensure_workbook_is_current", lambda: None)
-    monkeypatch.setattr(window.excel, "save_edit", lambda record: saved.append(record))
+    monkeypatch.setattr(
+        window.form_controller.persistence,
+        "prepare_update",
+        lambda *args, **kwargs: type(
+            "Preparation",
+            (),
+            {
+                "base_records": (window.selected,),
+                "selected_record": window.selected,
+                "effective_record": None,
+                "duplicate_row": None,
+                "issues": (),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        window.form_controller.persistence,
+        "execute_edit",
+        lambda record, **kwargs: executed.append(record)
+        or type(
+            "WriteResult",
+            (),
+            {
+                "status": LocalMutationSyncStatus(
+                    status="sqlite",
+                    operation="edit",
+                    workbook_path="dummy.xlsx",
+                    strategy="incremental",
+                    record_count=1,
+                ),
+                "write_status": type(
+                    "WriteStatus",
+                    (),
+                    {"status": "sqlite_authoritative", "operation": "edit", "issues": (), "finalized": False},
+                )(),
+                "records": (record,),
+                "excel_result": None,
+                "rollback_issues": (),
+                "finalized": False,
+            },
+        )(),
+    )
     monkeypatch.setattr(window, "reload", lambda *args, **kwargs: pytest.fail("reload nao deveria ser usado apos save_edit"))
     monkeypatch.setattr(window.data_controller, "refresh_runtime_after_mutation", lambda records: refresh_calls.append(records) or True)
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: infos.append(args[2]))
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
     window.selected = make_record()
     window._fill_form(window.selected)
     window.data_tab.in_comp.setText("11")
 
     window.save_edit()
 
-    assert len(saved) == 1
+    assert len(executed) == 1
+    assert executed[0].compensacao == "11"
     assert len(refresh_calls) == 1
     assert infos == ["Salvo com sucesso."]
     window.close()
@@ -2403,13 +3352,12 @@ def test_save_edit_refreshes_runtime_session_without_full_reload(monkeypatch):
 
 def test_show_rollback_dialog_uses_audit_history_when_available(monkeypatch, tmp_path):
     window = MainWindow()
-    audits = []
+    restored = {}
     reloaded = []
 
     current_file = tmp_path / "base.xlsx"
     current_file.write_text("atual", encoding="utf-8")
     backup_file = tmp_path / "backup-op.xlsx"
-    backup_file.write_text("snapshot", encoding="utf-8")
 
     event = SimpleNamespace(
         event_id="evt-1",
@@ -2419,9 +3367,45 @@ def test_show_rollback_dialog_uses_audit_history_when_available(monkeypatch, tmp
         backup_path=str(backup_file),
     )
 
-    monkeypatch.setattr(window.audit_service, "list_events_for_workbook", lambda *_args, **_kwargs: [event])
-    monkeypatch.setattr(window.audit_service, "append_event", lambda **payload: audits.append(payload))
-    monkeypatch.setattr(window.excel, "create_operation_backup", lambda label: str(tmp_path / f"{label}.xlsx"))
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "build_rollback_dialog_plan",
+        lambda *args, **kwargs: type(
+            "RollbackPlan",
+            (),
+            {
+                "choices": [
+                    type(
+                        "Choice",
+                        (),
+                        {"label": "30/03/2026 12:00:00 - EDIT - Registro alterado: AT-1"},
+                    )()
+                ],
+                "prompt": "Escolha",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "resolve_rollback_choice",
+        lambda *_args, **_kwargs: type(
+            "RestoreRequest",
+            (),
+            {
+                "backup_path": str(backup_file),
+                "rollback_source": "operation_audit",
+                "metadata": {"event_id": event.event_id},
+                "label": event.summary,
+                "confirmation_title": "Confirmar",
+                "confirmation_message": "Restaurar?",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "restore_backup",
+        lambda selected_file, **kwargs: restored.update({"selected_file": selected_file, **kwargs}),
+    )
     monkeypatch.setattr(
         "app.ui.controllers.data_controller.QInputDialog.getItem",
         lambda *args, **kwargs: ("30/03/2026 12:00:00 - EDIT - Registro alterado: AT-1", True),
@@ -2429,14 +3413,41 @@ def test_show_rollback_dialog_uses_audit_history_when_available(monkeypatch, tmp
     monkeypatch.setattr(window.data_controller, "reload", lambda *args, **kwargs: reloaded.append(True))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
 
-    window.excel.path = str(current_file)
+    window.session_runtime.path = str(current_file)
 
     window.show_rollback_dialog()
 
-    assert current_file.read_text(encoding="utf-8") == "snapshot"
+    assert restored["selected_file"] == str(backup_file)
     assert reloaded == [True]
-    assert audits[0]["action"] == "rollback"
-    assert audits[0]["metadata"]["source_type"] == "operation_audit"
+    assert restored["rollback_source"] == "operation_audit"
+    assert restored["metadata"]["event_id"] == "evt-1"
+    window.close()
+
+
+def test_restore_backup_file_reloads_without_second_discard_prompt(monkeypatch):
+    window = MainWindow()
+    reload_calls = []
+
+    window.session_runtime.path = "dummy.xlsx"
+    monkeypatch.setattr(window.data_controller.persistence, "restore_backup", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        window.data_controller,
+        "reload",
+        lambda *args, **kwargs: reload_calls.append(kwargs) or True,
+    )
+    monkeypatch.setattr(window, "refresh_operations_overview", lambda: None)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+    assert (
+        window.data_controller._restore_backup_file(
+            "C:/tmp/backup.xlsx",
+            rollback_source="operation_audit",
+            metadata={"event_id": "evt-1"},
+            label="restore-test",
+        )
+        is True
+    )
+    assert reload_calls == [{"confirm_discard": False}]
     window.close()
 
 
@@ -2475,7 +3486,7 @@ def test_show_operation_history_restores_selected_audit_snapshot(monkeypatch):
         lambda selected_file, **kwargs: restored.update({"selected_file": selected_file, **kwargs}) or True,
     )
 
-    window.excel.path = "dummy.xlsx"
+    window.session_runtime.path = "dummy.xlsx"
 
     window.show_operation_history()
 
@@ -2485,3 +3496,6 @@ def test_show_operation_history_restores_selected_audit_snapshot(monkeypatch):
     assert restored["metadata"]["event_id"] == "evt-2"
     assert restored["label"] == "2 registro(s) importado(s)"
     window.close()
+
+
+

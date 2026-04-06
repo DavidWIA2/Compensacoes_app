@@ -1,6 +1,8 @@
 from app.application.use_cases.persistence_monitoring import PersistenceMonitoringUseCases
 from app.services.sqlite_mirror_service import (
     MirroredRecordSample,
+    SessionRecordOverview,
+    SessionSnapshotSummary,
     WorkbookRecordOverview,
     WorkbookSnapshotSummary,
 )
@@ -27,6 +29,9 @@ class StubSnapshotReader:
     def get_workbook_snapshot_summary(self, workbook_path: str) -> WorkbookSnapshotSummary:
         return self.summary
 
+    def get_session_snapshot_summary(self, session_path: str) -> WorkbookSnapshotSummary:
+        return self.get_workbook_snapshot_summary(session_path)
+
     def build_workbook_record_overview(
         self,
         workbook_path: str,
@@ -35,6 +40,19 @@ class StubSnapshotReader:
         sample_limit: int = 5,
     ) -> WorkbookRecordOverview:
         return self.overview
+
+    def build_session_record_overview(
+        self,
+        session_path: str,
+        *,
+        top_microbacias_limit: int = 5,
+        sample_limit: int = 5,
+    ) -> WorkbookRecordOverview:
+        return self.build_workbook_record_overview(
+            session_path,
+            top_microbacias_limit=top_microbacias_limit,
+            sample_limit=sample_limit,
+        )
 
 
 def test_persistence_monitoring_reports_synchronized_status():
@@ -59,6 +77,7 @@ def test_persistence_monitoring_reports_synchronized_status():
     assert report.status == "sincronizado"
     assert report.is_healthy is True
     assert report.issues == ()
+    assert report.session_path == "C:/tmp/base.xlsx"
 
 
 def test_persistence_monitoring_reports_attention_when_counts_diverge():
@@ -138,8 +157,44 @@ def test_persistence_monitoring_builds_record_overview_report():
 
     assert report.status == "sincronizado"
     assert report.is_available is True
+    assert report.session_path == "C:/tmp/base.xlsx"
     assert report.total_records == 12
     assert report.compensados_count == 7
     assert report.records_without_coordinates_count == 2
     assert report.top_microbacias[0] == ("Gregorio", 8)
     assert report.sample_records[0].uid == "uid-1"
+
+
+def test_persistence_monitoring_session_alias_methods_work_with_session_reader():
+    use_cases = PersistenceMonitoringUseCases(
+        StubSnapshotReader(
+            SessionSnapshotSummary(
+                workbook_path="C:/tmp/base.xlsx",
+                synced_at="2026-03-30T12:00:00+00:00",
+                record_count=4,
+                plantio_count=1,
+                audit_event_count=2,
+            ),
+            overview=SessionRecordOverview(
+                workbook_path="C:/tmp/base.xlsx",
+                synced_at="2026-03-30T12:00:00+00:00",
+                total_records=4,
+                compensados_count=1,
+                pendentes_count=3,
+                records_with_plantios_count=1,
+                records_without_microbacia_count=0,
+                records_without_coordinates_count=1,
+            ),
+        )
+    )
+
+    status_report = use_cases.build_session_status_report(
+        "C:/tmp/base.xlsx",
+        expected_records=4,
+        expected_audit_events=2,
+    )
+    overview_report = use_cases.build_session_record_overview_report("C:/tmp/base.xlsx")
+
+    assert status_report.status == "sincronizado"
+    assert overview_report.total_records == 4
+    assert overview_report.session_path == "C:/tmp/base.xlsx"

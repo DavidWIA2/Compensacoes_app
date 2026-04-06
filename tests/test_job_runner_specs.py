@@ -124,9 +124,9 @@ def test_job_runner_records_runtime_history_for_blocking_jobs(ui_window_factory)
     window.run_blocking_spec(
         BlockingJobSpec(
             name="load-workbook",
-            busy_message="Carregando planilha...",
+            busy_message="Carregando sessão...",
             operation=lambda: "ok",
-            success_message="Planilha carregada.",
+            success_message="Sessão carregada.",
         )
     )
 
@@ -135,8 +135,8 @@ def test_job_runner_records_runtime_history_for_blocking_jobs(ui_window_factory)
 
     assert target_job.kind == "blocking"
     assert target_job.status == "completed"
-    assert target_job.label == "Carregando planilha..."
-    assert target_job.detail_message == "Planilha carregada."
+    assert target_job.label == "Carregando sessão..."
+    assert target_job.detail_message == "Sessão carregada."
     assert target_job.started_at
     assert target_job.finished_at
     window.close()

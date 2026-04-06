@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Sequence
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.persistence_monitoring import (
@@ -30,6 +30,16 @@ class DashboardExportPayload:
     chart_images: tuple[str, ...]
     record_overview: PersistenceRecordOverviewReport | None = None
     record_read_status: LocalRecordReadStatus | None = None
+
+
+@dataclass(frozen=True)
+class GridExportPayload:
+    records: tuple[object, ...]
+    visible_columns: tuple[str, ...]
+    filter_summary: str
+    metrics_kpi_rows: tuple[tuple[str, str], ...]
+    pend_micro_sorted: tuple[tuple[str, object], ...]
+    pend_ele_sorted: tuple[tuple[str, object], ...]
 
 
 class ExportReportingUseCases:
@@ -133,19 +143,36 @@ class ExportReportingUseCases:
                 lines.append("Modo de leitura local: consulta indexada.")
             if status.synced_at:
                 lines.append(
-                    f"Ultima sincronizacao valida: {format_audit_timestamp(status.synced_at)}"
+                    f"Última sincronização válida: {format_audit_timestamp(status.synced_at)}"
                 )
             return lines
 
         lines = [
             (
-                f"Leitura operacional: sessao em memoria | "
+                f"Leitura operacional: sessão em memória | "
                 f"{status.filtered_records} registro(s) no recorte atual"
             )
         ]
         if status.issues:
             lines.append("Motivos do fallback: " + " | ".join(status.issues))
         return lines
+
+    def build_grid_export_payload(
+        self,
+        *,
+        records: Sequence[object],
+        selected_cols: Sequence[str],
+        metrics: Mapping[str, object],
+        filter_state: ExportFilterState,
+    ) -> GridExportPayload:
+        return GridExportPayload(
+            records=tuple(records),
+            visible_columns=tuple(str(column) for column in selected_cols),
+            filter_summary=self.build_filter_summary(filter_state),
+            metrics_kpi_rows=tuple(self.build_metrics_kpi_rows(metrics)),
+            pend_micro_sorted=tuple(metrics.get("pend_micro_sorted", ())),
+            pend_ele_sorted=tuple(metrics.get("pend_ele_sorted", ())),
+        )
 
     def build_dashboard_export_payload(
         self,

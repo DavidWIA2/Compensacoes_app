@@ -34,6 +34,31 @@ def test_export_reporting_builds_filter_summary():
     assert summary == "Busca: Gregorio | Status: Pendentes | Microbacias: Gregorio | Tipo: Eletrônico | Ano: 2026"
 
 
+def test_export_reporting_builds_grid_payload():
+    use_cases = ExportReportingUseCases(None)
+
+    payload = use_cases.build_grid_export_payload(
+        records=[object(), object()],
+        selected_cols=["oficio_processo", "endereco"],
+        metrics={
+            "count_total": 8,
+            "total_geral": 50.0,
+            "total_pendente": 30.0,
+            "total_compensado": 20.0,
+            "pend_micro_sorted": [("Gregorio", 30.0)],
+            "pend_ele_sorted": [("Eletrônico", 30.0)],
+        },
+        filter_state=ExportFilterState(search_text="Gregorio"),
+    )
+
+    assert len(payload.records) == 2
+    assert payload.visible_columns == ("oficio_processo", "endereco")
+    assert payload.filter_summary == "Busca: Gregorio"
+    assert payload.metrics_kpi_rows[0] == ("Total de Registros", "8")
+    assert payload.pend_micro_sorted == (("Gregorio", 30.0),)
+    assert payload.pend_ele_sorted == (("Eletrônico", 30.0),)
+
+
 def test_export_reporting_builds_dashboard_payload_with_persistence_summary():
     report = PersistenceRecordOverviewReport(
         status="sincronizado",
@@ -78,3 +103,4 @@ def test_export_reporting_builds_dashboard_payload_with_persistence_summary():
     assert any("Espelho local: 8 registro(s)" in line for line in payload.kpi_lines)
     assert any("Top microbacias no espelho: Gregorio: 5 | Medeiros: 3" in line for line in payload.kpi_lines)
     assert any("Leitura operacional: espelho local (SQLite)" in line for line in payload.kpi_lines)
+    assert any("Última sincronização válida:" in line for line in payload.kpi_lines)

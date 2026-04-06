@@ -4,7 +4,6 @@ import json
 import os
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -20,39 +19,27 @@ from app.services.records_service import (
 )
 from app.utils.app_paths import ensure_dir, resolve_data_path
 from app.utils.logger import get_logger
+from app.services.sqlite_mirror_service_support import (
+    build_unique_session_path as _build_unique_session_path_helper,
+    decode_json_object as _decode_json_object_helper,
+    decode_json_value as _decode_json_value_helper,
+    display_name_for_path as _display_name_for_path_helper,
+    is_session_path as _is_session_path,
+    microbacia_key as _microbacia_key,
+    normalize_session_path as _normalize_path,
+    read_source_file_identity as _read_workbook_file_identity,
+    stringify as _stringify,
+    utc_timestamp as _utc_timestamp,
+)
 
 
 logger = get_logger("Persistence.SQLite")
 
 SCHEMA_VERSION = 4
 DEFAULT_DB_NAME = "compensacoes.db"
-
-
-def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _normalize_path(path: str) -> str:
-    return os.path.normcase(os.path.abspath(str(path or "").strip()))
-
-
-def _stringify(value: object) -> str:
-    return str(value or "").strip()
-
-
-def _microbacia_key(value: object) -> str:
-    return _stringify(value).upper()
-
-
-def _read_workbook_file_identity(workbook_path: str) -> tuple[int, int]:
-    normalized_path = _normalize_path(workbook_path)
-    if not normalized_path or not os.path.exists(normalized_path):
-        return 0, 0
-    try:
-        stat_result = os.stat(normalized_path)
-    except OSError:
-        return 0, 0
-    return int(getattr(stat_result, "st_mtime_ns", 0) or 0), int(getattr(stat_result, "st_size", 0) or 0)
+SESSION_SCHEME = "session://"
+DEFAULT_SINGLETON_SESSION_PATH = f"{SESSION_SCHEME}banco-local"
+DEFAULT_SINGLETON_SESSION_NAME = "Banco local"
 
 
 @dataclass(frozen=True)
@@ -65,6 +52,10 @@ class WorkbookSnapshotSummary:
     source_mtime_ns: int = 0
     source_size: int = 0
 
+    @property
+    def session_path(self) -> str:
+        return self.workbook_path
+
 
 @dataclass(frozen=True)
 class WorkbookFilterFacets:
@@ -73,6 +64,10 @@ class WorkbookFilterFacets:
     record_count: int
     microbacias: tuple[str, ...] = ()
     years: tuple[str, ...] = ()
+
+    @property
+    def session_path(self) -> str:
+        return self.workbook_path
 
 
 @dataclass(frozen=True)
@@ -87,6 +82,10 @@ class WorkbookMirrorDiagnostics:
     pendentes_count: int
     top_microbacias: tuple[tuple[str, int], ...] = ()
     recent_audit_events: tuple[dict[str, str], ...] = ()
+
+    @property
+    def session_path(self) -> str:
+        return self.workbook_path
 
 
 @dataclass(frozen=True)
@@ -112,12 +111,231 @@ class WorkbookRecordOverview:
     top_microbacias: tuple[tuple[str, int], ...] = ()
     sample_records: tuple[MirroredRecordSample, ...] = ()
 
+    @property
+    def session_path(self) -> str:
+        return self.workbook_path
+
+
+SessionSnapshotSummary = WorkbookSnapshotSummary
+SessionFilterFacets = WorkbookFilterFacets
+SessionMirrorDiagnostics = WorkbookMirrorDiagnostics
+SessionRecordSample = MirroredRecordSample
+SessionRecordOverview = WorkbookRecordOverview
+
+
+@dataclass(frozen=True)
+class NamedSessionEntry:
+    session_path: str
+    display_name: str
+    record_count: int = 0
+    created_at: str = ""
+    last_loaded_at: str = ""
+    last_synced_at: str = ""
+
+    @property
+    def workbook_path(self) -> str:
+        return self.session_path
+
+    @property
+    def picker_label(self) -> str:
+        suffix = f"{self.record_count} registro(s)"
+        return f"{self.display_name} [{suffix}]"
+
 
 class SqliteMirrorService:
     def __init__(self, *, db_path: str | Path | None = None):
         self.db_path = Path(db_path) if db_path else resolve_data_path("state", DEFAULT_DB_NAME)
         ensure_dir(self.db_path.parent)
         self.initialize()
+
+    def create_named_session(self, session_name: str) -> NamedSessionEntry:
+        normalized_name = _stringify(session_name)
+        if not normalized_name:
+            raise ValueError("Informe um nome para criar a sessão.")
+
+        created_at = _utc_timestamp()
+        with self._connect() as conn:
+            session_path = self._build_unique_session_path(conn, normalized_name)
+            conn.execute(
+                """
+                INSERT INTO workbooks (
+                    workbook_path,
+                    workbook_name,
+                    created_at,
+                    last_loaded_at,
+                    last_synced_at,
+                    record_count,
+                    plantio_count,
+                    source_mtime_ns,
+                    source_size
+                ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0)
+                """,
+                (session_path, normalized_name, created_at, created_at, created_at),
+            )
+            row = conn.execute(
+                """
+                SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                FROM workbooks
+                WHERE workbook_path = ?
+                """,
+                (session_path,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("Não foi possível criar a sessão SQLite.")
+        return self._row_to_named_session_entry(row)
+
+    def list_named_sessions(self, *, limit: int = 200) -> list[NamedSessionEntry]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                FROM workbooks
+                WHERE workbook_path LIKE ?
+                ORDER BY last_loaded_at DESC, created_at DESC, workbook_name COLLATE NOCASE ASC
+                LIMIT ?
+                """,
+                (f"{SESSION_SCHEME}%", max(int(limit), 0)),
+            ).fetchall()
+        return [self._row_to_named_session_entry(row) for row in rows]
+
+    def get_session_entry(self, session_path: str) -> NamedSessionEntry | None:
+        normalized_path = _normalize_path(session_path)
+        if not normalized_path:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                FROM workbooks
+                WHERE workbook_path = ?
+                """,
+                (normalized_path,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_named_session_entry(row)
+
+    def touch_session(self, session_path: str) -> None:
+        normalized_path = _normalize_path(session_path)
+        if not normalized_path:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workbooks
+                SET last_loaded_at = ?
+                WHERE workbook_path = ?
+                """,
+                (_utc_timestamp(), normalized_path),
+            )
+
+    def ensure_singleton_session(self) -> NamedSessionEntry:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                FROM workbooks
+                WHERE workbook_path = ?
+                """,
+                (DEFAULT_SINGLETON_SESSION_PATH,),
+            ).fetchone()
+            if row is None:
+                row = conn.execute(
+                    """
+                    SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                    FROM workbooks
+                    WHERE workbook_path LIKE ?
+                    ORDER BY
+                        CASE WHEN record_count > 0 THEN 0 ELSE 1 END,
+                        last_loaded_at DESC,
+                        created_at DESC,
+                        workbook_name COLLATE NOCASE ASC
+                    LIMIT 1
+                    """,
+                    (f"{SESSION_SCHEME}%",),
+                ).fetchone()
+            if row is None:
+                created_at = _utc_timestamp()
+                conn.execute(
+                    """
+                    INSERT INTO workbooks (
+                        workbook_path,
+                        workbook_name,
+                        created_at,
+                        last_loaded_at,
+                        last_synced_at,
+                        record_count,
+                        plantio_count,
+                        source_mtime_ns,
+                        source_size
+                    ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0)
+                    """,
+                    (
+                        DEFAULT_SINGLETON_SESSION_PATH,
+                        DEFAULT_SINGLETON_SESSION_NAME,
+                        created_at,
+                        created_at,
+                        created_at,
+                    ),
+                )
+                row = conn.execute(
+                    """
+                    SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                    FROM workbooks
+                    WHERE workbook_path = ?
+                    """,
+                    (DEFAULT_SINGLETON_SESSION_PATH,),
+                ).fetchone()
+            else:
+                selected_path = _stringify(row["workbook_path"])
+                if selected_path and selected_path != DEFAULT_SINGLETON_SESSION_PATH:
+                    conn.execute(
+                        """
+                        UPDATE workbooks
+                        SET workbook_path = ?, workbook_name = ?
+                        WHERE workbook_path = ?
+                        """,
+                        (
+                            DEFAULT_SINGLETON_SESSION_PATH,
+                            DEFAULT_SINGLETON_SESSION_NAME,
+                            selected_path,
+                        ),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE audit_events
+                        SET workbook_path = ?
+                        WHERE workbook_path = ?
+                        """,
+                        (
+                            DEFAULT_SINGLETON_SESSION_PATH,
+                            selected_path,
+                        ),
+                    )
+                    selected_path = DEFAULT_SINGLETON_SESSION_PATH
+                conn.execute(
+                    """
+                    UPDATE workbooks
+                    SET workbook_name = ?
+                    WHERE workbook_path = ?
+                    """,
+                    (
+                        DEFAULT_SINGLETON_SESSION_NAME,
+                        selected_path,
+                    ),
+                )
+                row = conn.execute(
+                    """
+                    SELECT workbook_path, workbook_name, record_count, created_at, last_loaded_at, last_synced_at
+                    FROM workbooks
+                    WHERE workbook_path = ?
+                    """,
+                    (selected_path,),
+                ).fetchone()
+
+        if row is None:
+            raise RuntimeError("Não foi possível preparar o banco local único.")
+        return self._row_to_named_session_entry(row)
 
     def initialize(self) -> None:
         with self._connect() as conn:
@@ -402,6 +620,7 @@ class SqliteMirrorService:
                     "event_id": str(row["event_id"] or ""),
                     "timestamp": str(row["timestamp"] or ""),
                     "workbook_path": str(row["workbook_path"] or ""),
+                    "session_path": str(row["workbook_path"] or ""),
                     "action": str(row["action"] or ""),
                     "summary": str(row["summary"] or ""),
                     "backup_path": str(row["backup_path"] or ""),
@@ -946,6 +1165,155 @@ class SqliteMirrorService:
             ),
             top_microbacias=top_microbacias,
             sample_records=sample_records,
+        )
+
+    def sync_session_snapshot(
+        self,
+        session_path: str,
+        records: Sequence[Compensacao],
+    ) -> SessionSnapshotSummary:
+        return self.sync_workbook_snapshot(session_path, records)
+
+    def append_record_to_session(
+        self,
+        session_path: str,
+        record: Compensacao,
+    ) -> SessionSnapshotSummary:
+        return self.append_record_to_workbook(session_path, record)
+
+    def append_records_to_session(
+        self,
+        session_path: str,
+        records: Sequence[Compensacao],
+    ) -> SessionSnapshotSummary:
+        return self.append_records_to_workbook(session_path, records)
+
+    def update_record_in_session(
+        self,
+        session_path: str,
+        record: Compensacao,
+    ) -> SessionSnapshotSummary:
+        return self.update_record_in_workbook(session_path, record)
+
+    def delete_record_from_session(
+        self,
+        session_path: str,
+        record: Compensacao,
+    ) -> SessionSnapshotSummary:
+        return self.delete_record_from_workbook(session_path, record)
+
+    def list_audit_event_payloads_for_session(
+        self,
+        session_path: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return self.list_audit_event_payloads_for_workbook(session_path, limit=limit)
+
+    def get_session_snapshot_summary(self, session_path: str) -> SessionSnapshotSummary:
+        return self.get_workbook_snapshot_summary(session_path)
+
+    def get_session_display_name(self, session_path: str) -> str:
+        entry = self.get_session_entry(session_path)
+        if entry is not None:
+            return entry.display_name
+        return self._display_name_for_path(session_path)
+
+    def list_records_for_session(self, session_path: str) -> list[Compensacao]:
+        return self.list_records_for_workbook(session_path)
+
+    def find_record_by_uid_for_session(self, session_path: str, uid: str) -> Compensacao | None:
+        return self.find_record_by_uid_for_workbook(session_path, uid)
+
+    def find_record_by_excel_row_for_session(self, session_path: str, excel_row: int) -> Compensacao | None:
+        return self.find_record_by_excel_row_for_workbook(session_path, excel_row)
+
+    def find_duplicate_av_tec_for_session(
+        self,
+        session_path: str,
+        *,
+        av_tec: str,
+        current_uid: str = "",
+    ) -> int | None:
+        return self.find_duplicate_av_tec_for_workbook(
+            session_path,
+            av_tec=av_tec,
+            current_uid=current_uid,
+        )
+
+    def query_filter_facets_for_session(self, session_path: str) -> SessionFilterFacets:
+        return self.query_filter_facets_for_workbook(session_path)
+
+    def query_records_for_session(
+        self,
+        session_path: str,
+        *,
+        search_text: str = "",
+        status: str = "Todos",
+        selected_micros: Sequence[str] = (),
+        selected_eletronicos: Sequence[str] = (),
+        micro_all_selected: bool = True,
+        eletronico_all_selected: bool = True,
+        selected_year: str = "Todos",
+    ) -> list[Compensacao]:
+        return self.query_records_for_workbook(
+            session_path,
+            search_text=search_text,
+            status=status,
+            selected_micros=selected_micros,
+            selected_eletronicos=selected_eletronicos,
+            micro_all_selected=micro_all_selected,
+            eletronico_all_selected=eletronico_all_selected,
+            selected_year=selected_year,
+        )
+
+    def query_metrics_for_session(
+        self,
+        session_path: str,
+        *,
+        search_text: str = "",
+        status: str = "Todos",
+        selected_micros: Sequence[str] = (),
+        selected_eletronicos: Sequence[str] = (),
+        micro_all_selected: bool = True,
+        eletronico_all_selected: bool = True,
+        selected_year: str = "Todos",
+    ) -> dict[str, object]:
+        return self.query_metrics_for_workbook(
+            session_path,
+            search_text=search_text,
+            status=status,
+            selected_micros=selected_micros,
+            selected_eletronicos=selected_eletronicos,
+            micro_all_selected=micro_all_selected,
+            eletronico_all_selected=eletronico_all_selected,
+            selected_year=selected_year,
+        )
+
+    def build_session_diagnostics(
+        self,
+        session_path: str,
+        *,
+        top_microbacias_limit: int = 10,
+        recent_audit_limit: int = 10,
+    ) -> SessionMirrorDiagnostics:
+        return self.build_workbook_diagnostics(
+            session_path,
+            top_microbacias_limit=top_microbacias_limit,
+            recent_audit_limit=recent_audit_limit,
+        )
+
+    def build_session_record_overview(
+        self,
+        session_path: str,
+        *,
+        top_microbacias_limit: int = 5,
+        sample_limit: int = 5,
+    ) -> SessionRecordOverview:
+        return self.build_workbook_record_overview(
+            session_path,
+            top_microbacias_limit=top_microbacias_limit,
+            sample_limit=sample_limit,
         )
 
     def _build_filtered_record_where_clause(
@@ -1596,6 +1964,30 @@ class SqliteMirrorService:
                 (source_mtime_ns, source_size, workbook_id),
             )
 
+    @staticmethod
+    def _display_name_for_path(workbook_path: str) -> str:
+        return _display_name_for_path_helper(workbook_path, session_scheme=SESSION_SCHEME)
+
+    def _build_unique_session_path(self, conn: sqlite3.Connection, session_name: str) -> str:
+        rows = conn.execute("SELECT workbook_path FROM workbooks").fetchall()
+        existing_paths = [_stringify(row["workbook_path"]) for row in rows]
+        return _build_unique_session_path_helper(
+            session_name,
+            existing_paths=existing_paths,
+            session_scheme=SESSION_SCHEME,
+        )
+
+    @staticmethod
+    def _row_to_named_session_entry(row: sqlite3.Row) -> NamedSessionEntry:
+        return NamedSessionEntry(
+            session_path=_stringify(row["workbook_path"]),
+            display_name=_stringify(row["workbook_name"]),
+            record_count=int(row["record_count"] or 0),
+            created_at=_stringify(row["created_at"]),
+            last_loaded_at=_stringify(row["last_loaded_at"]),
+            last_synced_at=_stringify(row["last_synced_at"]),
+        )
+
     def _backfill_record_query_fields(self, conn: sqlite3.Connection) -> None:
         workbook_rows = conn.execute("SELECT id FROM workbooks ORDER BY id ASC").fetchall()
         for workbook_row in workbook_rows:
@@ -1624,8 +2016,24 @@ class SqliteMirrorService:
                     ),
                 )
 
-    def _upsert_workbook(self, conn: sqlite3.Connection, workbook_path: str, timestamp: str) -> int:
-        workbook_name = os.path.basename(workbook_path) or workbook_path
+    def _upsert_workbook(
+        self,
+        conn: sqlite3.Connection,
+        workbook_path: str,
+        timestamp: str,
+        *,
+        workbook_name: str | None = None,
+    ) -> int:
+        resolved_workbook_name = _stringify(workbook_name)
+        if not resolved_workbook_name:
+            existing_row = conn.execute(
+                "SELECT workbook_name FROM workbooks WHERE workbook_path = ?",
+                (workbook_path,),
+            ).fetchone()
+            if existing_row is not None and _is_session_path(workbook_path):
+                resolved_workbook_name = _stringify(existing_row["workbook_name"])
+        if not resolved_workbook_name:
+            resolved_workbook_name = self._display_name_for_path(workbook_path)
         conn.execute(
             """
             INSERT INTO workbooks (
@@ -1638,7 +2046,7 @@ class SqliteMirrorService:
             ON CONFLICT(workbook_path) DO UPDATE SET
                 workbook_name = excluded.workbook_name
             """,
-            (workbook_path, workbook_name, timestamp, timestamp, timestamp),
+            (workbook_path, resolved_workbook_name, timestamp, timestamp, timestamp),
         )
         row = conn.execute(
             "SELECT id FROM workbooks WHERE workbook_path = ?",
@@ -1666,17 +2074,8 @@ class SqliteMirrorService:
 
     @staticmethod
     def _decode_json_object(raw_value: object) -> dict[str, Any]:
-        decoded = SqliteMirrorService._decode_json_value(raw_value)
-        if isinstance(decoded, dict):
-            return decoded
-        return {}
+        return _decode_json_object_helper(raw_value)
 
     @staticmethod
     def _decode_json_value(raw_value: object) -> Any:
-        text = str(raw_value or "").strip()
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return None
+        return _decode_json_value_helper(raw_value)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+from app.ui.tabs.dashboard_tab_support import build_dashboard_micro_palette_keys
+
 
 class WindowNavigationController:
     def __init__(self, window):
@@ -12,6 +14,9 @@ class WindowNavigationController:
 
     def is_operations_tab_active(self) -> bool:
         return self.window.tabs.currentWidget() is self.window.operations_tab
+
+    def is_tcra_tab_active(self) -> bool:
+        return self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None)
 
     def update_dashboard(self, metrics: Dict[str, object]):
         self.window._pending_dashboard_metrics = dict(metrics)
@@ -25,15 +30,26 @@ class WindowNavigationController:
         payload = metrics if metrics is not None else self.window._pending_dashboard_metrics
         if payload is None:
             return
+        record_overview = (
+            self.window.shell_controller.resolved_dashboard_record_overview()
+            if hasattr(self.window, "shell_controller")
+            else self.window._dashboard_record_overview
+        )
         self.window.dash_tab.update_dashboard(
             payload,
             self.window.is_dark_mode,
-            [record.microbacia for record in self.window.records],
-            self.window._dashboard_record_overview,
+            build_dashboard_micro_palette_keys(payload, record_overview),
+            record_overview,
             self.window._local_record_read_status,
         )
+        if hasattr(self.window.dash_tab, "update_tcra_overview") and hasattr(self.window, "tcra_tab"):
+            tcra_overview, tcra_agenda = self.window.tcra_tab.build_dashboard_payload()
+            self.window.dash_tab.update_tcra_overview(tcra_overview, tcra_agenda)
 
     def on_tab_changed(self, _index: int):
+        if hasattr(self.window, "shell_controller"):
+            self.window.shell_controller.sync_global_search_context()
+
         if self.is_dashboard_tab_active() and self.window._dashboard_dirty:
             self._render_dashboard()
             if self.window._pending_dashboard_metrics is not None:
@@ -41,3 +57,6 @@ class WindowNavigationController:
 
         if self.is_operations_tab_active():
             self.window.operations_controller.refresh_overview()
+
+        if self.is_tcra_tab_active():
+            self.window.tcra_tab.handle_tab_activated()

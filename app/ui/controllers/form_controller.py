@@ -1,4 +1,3 @@
-import os
 from copy import deepcopy
 from contextlib import contextmanager
 from typing import Dict, Iterable, Optional, cast
@@ -6,10 +5,7 @@ from typing import Dict, Iterable, Optional, cast
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMessageBox
 
-from app.application.use_cases.local_mutation_sync import LocalMutationSyncUseCases
-from app.application.use_cases.local_record_queries import LocalRecordQueriesUseCases
-from app.application.use_cases.local_write_authority import LocalWriteAuthorityUseCases
-from app.application.use_cases.record_mutations import RecordMutationUseCases
+from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.models.compensacao import Compensacao
 from app.services.audit_service import serialize_record
 from app.services.error_service import friendly_error_message
@@ -18,12 +14,22 @@ from app.services.plantio_service import (
     deserialize_plantios_state,
     serialize_plantios_state,
     summarize_plantios,
-    sync_legacy_plantio_fields,
     validate_record_plantios,
 )
-from app.services.records_service import display_tipo_value, safe_upper, storage_tipo_value
+from app.services.records_service import display_tipo_value
 from app.ui.components.dialogs import PlantiosDialog
 from app.ui.components.ui_utils import msg_confirm
+from app.ui.controllers.form_controller_support import (
+    FormStateSnapshot,
+    build_dirty_state_view,
+    build_duplicate_highlight_stylesheet,
+    build_form_action_state,
+    build_form_record,
+    build_form_state_snapshot,
+    build_prefill_form_state,
+    resolve_before_record_for_audit,
+    same_record_identity,
+)
 from app.utils.logger import get_logger
 
 
@@ -39,41 +45,50 @@ class FormController:
 
     def __init__(self, window):
         self.window = window
-        self.record_use_cases = RecordMutationUseCases(window.excel)
-        self.local_mutation_sync = LocalMutationSyncUseCases(getattr(window, "persistence_service", None))
-        self.local_record_queries = LocalRecordQueriesUseCases(getattr(window, "persistence_service", None))
-        self.local_write_authority = LocalWriteAuthorityUseCases(self.local_record_queries)
+        session_runtime = getattr(window, "session_runtime", None)
+        self.persistence = getattr(window, "authoritative_persistence", None) or AuthoritativePersistenceUseCases(
+            session_runtime,
+            window.audit_service,
+            getattr(window, "persistence_service", None),
+        )
+        self.record_use_cases = self.persistence.record_mutations
+        self.local_mutation_sync = self.persistence.local_mutation_sync
+        self.local_record_queries = self.persistence.local_record_queries
+        self.local_write_authority = self.persistence.local_write_authority
+        self.authoritative_write = self.persistence.authoritative_write
         self._history = []
         self._history_index = -1
         self._tracking_suspended = 0
         self._clean_state: Optional[Dict[str, object]] = None
 
+    def _current_session_path(self) -> str:
+        if hasattr(self.window, "shell_controller"):
+            return self.window.shell_controller.current_session_path()
+        runtime = getattr(self.window, "session_runtime", None)
+        if runtime is None:
+            return ""
+        return str(getattr(runtime, "session_path", getattr(runtime, "path", "")) or "").strip()
+
+    def _bind_runtime_persistence_service(self) -> None:
+        self.persistence.bind_runtime_window(self.window)
+
     def _sync_local_mutation(self, *, operation: str, records) -> None:
+        self._bind_runtime_persistence_service()
         status = self.local_mutation_sync.sync_projected_records(
-            workbook_path=str(getattr(self.window.excel, "path", "") or ""),
+            workbook_path=self._current_session_path(),
             records=records,
             operation=operation,
         )
         self._store_local_mutation_status(status)
 
     def _store_local_mutation_status(self, status) -> None:
-        self.window._local_mutation_sync_status = status
-        if status.issues:
-            logger.warning(
-                "Falha ao sincronizar mutacao '%s' no espelho local: %s",
-                getattr(status, "operation", "mutacao"),
-                " | ".join(status.issues),
-            )
+        self.persistence.store_local_mutation_status(self.window, status)
+
+    def _store_authoritative_write_status(self, status) -> None:
+        self.persistence.store_authoritative_write_status(self.window, status)
 
     def _log_authoritative_write_issues(self, operation: str, issues) -> None:
-        normalized_issues = tuple(str(issue or "").strip() for issue in issues or () if str(issue or "").strip())
-        if not normalized_issues:
-            return
-        logger.warning(
-            "Contexto autoritativo de escrita (%s) consultado com fallback/local issues: %s",
-            operation,
-            " | ".join(normalized_issues),
-        )
+        self.persistence.log_preparation_issues(operation, issues)
 
     def _append_audit_event(
         self,
@@ -85,10 +100,7 @@ class FormController:
         after_record: Optional[Compensacao] = None,
         metadata: Optional[Dict[str, object]] = None,
     ) -> None:
-        if not self.window.excel.path:
-            return
-        self.window.audit_service.append_event(
-            workbook_path=self.window.excel.path,
+        self.persistence._append_audit_event_safely(
             action=action,
             summary=summary,
             backup_path=backup_path,
@@ -126,22 +138,23 @@ class FormController:
             self.window.data_tab.in_end_plantio.blockSignals(False)
 
     def capture_form_state(self) -> Dict[str, object]:
-        return {
-            "oficio_processo": self.window.data_tab.in_oficio.text().strip(),
-            "caixa": self.window.data_tab.in_caixa.text().strip(),
-            "av_tec": self.window.data_tab.in_avtec.text().strip(),
-            "compensacao": self.window.data_tab.in_comp.text().strip(),
-            "endereco": self.window.data_tab.in_end.text().strip(),
-            "endereco_plantio": self.window.data_tab.in_end_plantio.text().strip(),
-            "plantios": serialize_plantios_state(self.window.form_plantios),
-            "microbacia": self.window.data_tab.in_micro.currentText().strip(),
-            "compensado": self.window.data_tab.chk_compensado.isChecked(),
-            "sn": self.window.data_tab.chk_sn.isChecked(),
-            "arquivado": self.window.data_tab.chk_arquivado.isChecked(),
-            "eletronico": self._checked_eletronico_value(),
-        }
+        return build_form_state_snapshot(
+            oficio_processo=self.window.data_tab.in_oficio.text(),
+            caixa=self.window.data_tab.in_caixa.text(),
+            av_tec=self.window.data_tab.in_avtec.text(),
+            compensacao=self.window.data_tab.in_comp.text(),
+            endereco=self.window.data_tab.in_end.text(),
+            endereco_plantio=self.window.data_tab.in_end_plantio.text(),
+            plantios=serialize_plantios_state(self.window.form_plantios),
+            microbacia=self.window.data_tab.in_micro.currentText(),
+            compensado=self.window.data_tab.chk_compensado.isChecked(),
+            sn=self.window.data_tab.chk_sn.isChecked(),
+            arquivado=self.window.data_tab.chk_arquivado.isChecked(),
+            eletronico=self._checked_eletronico_value(),
+        ).to_dict()
 
     def _apply_state_to_form(self, state: Dict[str, object]):
+        snapshot = FormStateSnapshot.from_mapping(state)
         with self.suspend_tracking():
             self.window.data_tab.in_oficio.blockSignals(True)
             self.window.data_tab.in_caixa.blockSignals(True)
@@ -154,38 +167,35 @@ class FormController:
             self.window.data_tab.chk_arquivado.blockSignals(True)
             self.window.data_tab.chk_compensado.blockSignals(True)
 
-            is_sn = bool(state.get("sn"))
-            oficio = str(state.get("oficio_processo", ""))
+            is_sn = snapshot.sn
+            oficio = snapshot.oficio_processo
             self.window.data_tab.chk_sn.setChecked(is_sn)
             self.window.data_tab.in_oficio.setEnabled(not is_sn)
             self.window.data_tab.in_oficio.setText(oficio)
 
-            is_arquivado = bool(state.get("arquivado"))
-            caixa = str(state.get("caixa", ""))
+            is_arquivado = snapshot.arquivado
+            caixa = snapshot.caixa
             self.window.data_tab.chk_arquivado.setChecked(is_arquivado)
             self.window.data_tab.in_caixa.setText(caixa)
 
-            self.window.data_tab.in_avtec.setText(str(state.get("av_tec", "")))
-            self.window.data_tab.in_comp.setText(str(state.get("compensacao", "")))
-            self.window.data_tab.in_end.setText(str(state.get("endereco", "")))
+            self.window.data_tab.in_avtec.setText(snapshot.av_tec)
+            self.window.data_tab.in_comp.setText(snapshot.compensacao)
+            self.window.data_tab.in_end.setText(snapshot.endereco)
 
-            serialized_plantios = cast(
-                Iterable[tuple[int, str, str, str, str]],
-                state.get("plantios", ()),
-            )
+            serialized_plantios = cast(Iterable[tuple[int, str, str, str, str]], snapshot.plantios)
             plantios_state = deserialize_plantios_state(serialized_plantios)
             self._set_form_plantios(plantios_state, block_signals=False)
             if not self.window.form_plantios:
-                self.window.data_tab.in_end_plantio.setText(str(state.get("endereco_plantio", "")))
+                self.window.data_tab.in_end_plantio.setText(snapshot.endereco_plantio)
 
-            self.window.data_tab.in_micro.setCurrentText(str(state.get("microbacia", "")))
+            self.window.data_tab.in_micro.setCurrentText(snapshot.microbacia)
 
-            is_compensado = bool(state.get("compensado"))
+            is_compensado = snapshot.compensado
             self.window.data_tab.chk_compensado.setChecked(is_compensado)
             self.window.data_tab.in_end_plantio.setEnabled(is_compensado)
             self.window.data_tab.btn_manage_plantios.setEnabled(is_compensado)
 
-            target_eletronico = display_tipo_value(str(state.get("eletronico", "")))
+            target_eletronico = display_tipo_value(snapshot.eletronico)
             self.window.data_tab.eletronico_group.setExclusive(False)
             for btn in self.window.data_tab.eletronico_group.buttons():
                 btn.setChecked(btn.text() == target_eletronico)
@@ -256,10 +266,14 @@ class FormController:
         return self.capture_form_state() != self._clean_state
 
     def _refresh_dirty_state(self):
-        is_dirty = self.has_pending_changes()
-        self.window.data_tab.form_group.setTitle(self._DIRTY_GROUP_TITLE if is_dirty else self._CLEAN_GROUP_TITLE)
-        self.window.form_state_label.setText("Alterações pendentes" if is_dirty else "Sem alterações")
-        self.window.setWindowModified(is_dirty)
+        state_view = build_dirty_state_view(
+            is_dirty=self.has_pending_changes(),
+            dirty_group_title=self._DIRTY_GROUP_TITLE,
+            clean_group_title=self._CLEAN_GROUP_TITLE,
+        )
+        self.window.data_tab.form_group.setTitle(state_view.group_title)
+        self.window.form_state_label.setText(state_view.status_label)
+        self.window.setWindowModified(state_view.window_modified)
         self.window._refresh_window_chrome()
 
     def confirm_discard_changes(self, action_text: str) -> bool:
@@ -285,27 +299,31 @@ class FormController:
 
     def _duplicate_av_tec_stylesheet(self) -> str:
         palette = self.window.data_tab.in_avtec.palette()
-        background_color = palette.color(QPalette.ColorRole.Base).name()
-        text_color = palette.color(QPalette.ColorRole.Text).name()
-        return (
-            "QLineEdit { "
-            "border: 2px solid #e74c3c; "
-            f"background-color: {background_color}; "
-            f"color: {text_color}; "
-            "}"
+        return build_duplicate_highlight_stylesheet(
+            background_color=palette.color(QPalette.ColorRole.Base).name(),
+            text_color=palette.color(QPalette.ColorRole.Text).name(),
         )
 
     def update_form_action_buttons(self):
-        has_excel = bool(self.window.excel.path and os.path.exists(self.window.excel.path))
+        workbook_path = (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else self._current_session_path()
+        )
+        has_session = bool(workbook_path)
         has_selected = self.window.selected is not None
         is_dirty = self.has_pending_changes()
         plantio_error = validate_record_plantios(self.read_form()) if has_selected else ""
-        self.window.data_tab.btn_add.setEnabled(has_excel)
-        self.window.data_tab.btn_save_edit.setEnabled(
-            has_excel and has_selected and is_dirty and not plantio_error
+        action_state = build_form_action_state(
+            has_session=has_session,
+            has_selected=has_selected,
+            is_dirty=is_dirty,
+            plantio_error=plantio_error,
         )
-        self.window.data_tab.btn_delete.setEnabled(has_excel and has_selected)
-        self.window.data_tab.btn_ficha_pdf.setEnabled(has_excel and has_selected)
+        self.window.data_tab.btn_add.setEnabled(action_state.enable_add)
+        self.window.data_tab.btn_save_edit.setEnabled(action_state.enable_save)
+        self.window.data_tab.btn_delete.setEnabled(action_state.enable_delete)
+        self.window.data_tab.btn_ficha_pdf.setEnabled(action_state.enable_ficha)
 
     def on_compensado_toggled(self, checked: bool):
         if not checked and self.window.form_plantios:
@@ -343,28 +361,13 @@ class FormController:
             self.window._update_address_search_enabled()
 
     def fill_form(self, record: Compensacao):
-        sync_legacy_plantio_fields(record)
-        self._apply_state_to_form(
-            {
-                "oficio_processo": (record.oficio_processo or "").strip(),
-                "caixa": (record.caixa or "").strip(),
-                "av_tec": record.av_tec,
-                "compensacao": str(record.compensacao or ""),
-                "endereco": record.endereco,
-                "endereco_plantio": record.endereco_plantio,
-                "plantios": serialize_plantios_state(record.plantios),
-                "microbacia": record.microbacia,
-                "compensado": safe_upper(record.compensado) == "SIM",
-                "sn": (record.oficio_processo or "").strip().upper() == "S/N",
-                "arquivado": (record.caixa or "").strip().upper() == "ARQUIVADO",
-                "eletronico": display_tipo_value(record.eletronico),
-            }
-        )
+        self._apply_state_to_form(build_prefill_form_state(record).to_dict())
         self.reset_history()
 
     def check_duplicate_av_tec(self, av_tec: str, current_uid: str) -> Optional[int]:
-        duplicate_result = self.local_record_queries.resolve_duplicate_av_tec(
-            str(getattr(self.window.excel, "path", "") or ""),
+        self._bind_runtime_persistence_service()
+        duplicate_result = self.persistence.resolve_duplicate_av_tec(
+            self._current_session_path(),
             fallback_records=self.window.records,
             av_tec=av_tec,
             current_uid=current_uid,
@@ -386,8 +389,9 @@ class FormController:
         ):
             fallback_records.append(selected)
 
-        result = self.local_record_queries.resolve_selected_record(
-            str(getattr(self.window.excel, "path", "") or ""),
+        self._bind_runtime_persistence_service()
+        result = self.persistence.resolve_selected_record(
+            self._current_session_path(),
             fallback_records=fallback_records,
             uid=str(getattr(selected, "uid", "") or ""),
             excel_row=int(getattr(selected, "excel_row", 0) or 0),
@@ -409,8 +413,9 @@ class FormController:
         ):
             fallback_records.append(selected)
 
-        result = self.local_record_queries.resolve_authoritative_record_source(
-            str(getattr(self.window.excel, "path", "") or ""),
+        self._bind_runtime_persistence_service()
+        result = self.persistence.resolve_authoritative_record_source(
+            self._current_session_path(),
             fallback_records=fallback_records,
         )
         if result.issues:
@@ -420,31 +425,63 @@ class FormController:
             )
         return list(result.records)
 
+    @staticmethod
+    def _next_excel_row(records: Iterable[Compensacao]) -> int:
+        return AuthoritativePersistenceUseCases._next_excel_row(list(records))
+
+    @staticmethod
+    def _generate_unique_uid(used_uids: set[str]) -> str:
+        return AuthoritativePersistenceUseCases._generate_unique_uid(used_uids)
+
+    def _assign_provisional_add_identity(
+        self,
+        record: Compensacao,
+        *,
+        existing_records: Iterable[Compensacao],
+    ) -> None:
+        self.persistence.assign_provisional_add_identity(
+            record,
+            existing_records=list(existing_records),
+        )
+
+    @staticmethod
+    def _same_record_identity(left: Compensacao | None, right: Compensacao | None) -> bool:
+        return same_record_identity(left, right)
+
+    def _resolve_before_record_for_audit(
+        self,
+        authoritative_record: Compensacao | None,
+        selected_record: Compensacao | None,
+    ) -> Compensacao | None:
+        return resolve_before_record_for_audit(authoritative_record, selected_record)
+
     def read_form(self) -> Compensacao:
-        record = Compensacao(
-            excel_row=self.window.selected.excel_row if self.window.selected else -1,
-            oficio_processo=self.window.data_tab.in_oficio.text().strip(),
-            caixa=self.window.data_tab.in_caixa.text().strip(),
-            av_tec=self.window.data_tab.in_avtec.text().strip(),
-            compensacao=self.window.data_tab.in_comp.text().strip(),
-            endereco=self.window.data_tab.in_end.text().strip(),
-            endereco_plantio=self.window.data_tab.in_end_plantio.text().strip(),
-            microbacia=self.window.data_tab.in_micro.currentText().strip(),
-            compensado="SIM" if self.window.data_tab.chk_compensado.isChecked() else "",
-            eletronico=storage_tipo_value(self._checked_eletronico_value()),
-            uid=self.window.selected.uid if self.window.selected else "",
+        return build_form_record(
+            selected_record=self.window.selected,
+            oficio_processo=self.window.data_tab.in_oficio.text(),
+            caixa=self.window.data_tab.in_caixa.text(),
+            av_tec=self.window.data_tab.in_avtec.text(),
+            compensacao=self.window.data_tab.in_comp.text(),
+            endereco=self.window.data_tab.in_end.text(),
+            endereco_plantio=self.window.data_tab.in_end_plantio.text(),
+            microbacia=self.window.data_tab.in_micro.currentText(),
+            compensado_checked=self.window.data_tab.chk_compensado.isChecked(),
+            eletronico_value=self._checked_eletronico_value(),
             plantios=clone_plantios(self.window.form_plantios),
         )
-        return sync_legacy_plantio_fields(record)
 
     def add_new(self):
-        if not self.window.excel.path:
+        if not (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else self._current_session_path()
+        ):
             return
         try:
-            self.window.excel.ensure_workbook_is_current()
+            self._bind_runtime_persistence_service()
             record = self.read_form()
-            preparation = self.local_write_authority.prepare_create(
-                str(getattr(self.window.excel, "path", "") or ""),
+            preparation = self.persistence.prepare_create(
+                self._current_session_path(),
                 fallback_records=self.window.records,
                 draft_record=record,
             )
@@ -461,40 +498,38 @@ class FormController:
             f"A Av. Tec. '{record.av_tec}' já existe na linha {duplicate - 1}. Cadastrar mesmo assim?",
             ):
                 return
-            backup_path = self.window.excel.create_operation_backup("add") or ""
-            self.record_use_cases.add_new(record)
-            self._append_audit_event(
-                action="add",
-                summary=f"Registro cadastrado: {record.av_tec or record.oficio_processo}",
-                backup_path=backup_path,
-                after_record=record,
+            write_result = self.persistence.execute_add(
+                record,
+                authoritative_records=authoritative_records,
             )
-            mutation_result = self.local_mutation_sync.apply_after_add(
-                workbook_path=str(getattr(self.window.excel, "path", "") or ""),
-                existing_records=authoritative_records,
-                added_record=record,
-            )
-            self._store_local_mutation_status(mutation_result.status)
-            self.window.data_controller.refresh_runtime_after_mutation(list(mutation_result.records))
+            self.persistence.publish_write_result(self.window, write_result)
+            self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
             QMessageBox.information(self.window, "Sucesso", "Adicionado com sucesso.")
         except Exception as exc:
-            title, message = friendly_error_message(exc, "adicionar o registro")
+            root_exc = self.persistence.unwrap_write_exception(self.window, exc)
+            title, message = friendly_error_message(root_exc, "adicionar o registro")
             QMessageBox.critical(self.window, title, message)
 
     def save_edit(self):
-        if not self.window.excel.path or not self.window.selected:
+        workbook_path = (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else self._current_session_path()
+        )
+        if not workbook_path or not self.window.selected:
             return
         try:
-            self.window.excel.ensure_workbook_is_current()
+            self._bind_runtime_persistence_service()
             self._save_edit_impl()
         except Exception as exc:
-            title, message = friendly_error_message(exc, "salvar o registro")
+            root_exc = self.persistence.unwrap_write_exception(self.window, exc)
+            title, message = friendly_error_message(root_exc, "salvar o registro")
             QMessageBox.critical(self.window, title, message)
 
     def _save_edit_impl(self):
         draft_record = self.read_form()
-        preparation = self.local_write_authority.prepare_update(
-            str(getattr(self.window.excel, "path", "") or ""),
+        preparation = self.persistence.prepare_update(
+            self._current_session_path(),
             fallback_records=self.window.records,
             fallback_selected=self.window.selected,
             draft_record=draft_record,
@@ -504,7 +539,7 @@ class FormController:
         if authoritative_selected is None:
             QMessageBox.warning(self.window, "Erro", self._STALE_SELECTION_ERROR)
             return
-        before_record = deepcopy(authoritative_selected)
+        before_record = self._resolve_before_record_for_audit(authoritative_selected, self.window.selected)
         record = preparation.effective_record or draft_record
         authoritative_records = list(preparation.base_records)
         plantio_error = validate_record_plantios(record)
@@ -522,22 +557,13 @@ class FormController:
             f"A Av. Tec. '{record.av_tec}' já existe na linha {duplicate - 1}. Salvar mesmo assim?",
         ):
             return
-        backup_path = self.window.excel.create_operation_backup("edit") or ""
-        self.record_use_cases.save_edit(record)
-        self._append_audit_event(
-            action="edit",
-            summary=f"Registro alterado: {record.av_tec or record.oficio_processo}",
-            backup_path=backup_path,
+        write_result = self.persistence.execute_edit(
+            record,
+            authoritative_records=authoritative_records,
             before_record=before_record,
-            after_record=record,
         )
-        mutation_result = self.local_mutation_sync.apply_after_edit(
-            workbook_path=str(getattr(self.window.excel, "path", "") or ""),
-            existing_records=authoritative_records,
-            updated_record=record,
-        )
-        self._store_local_mutation_status(mutation_result.status)
-        refresh_result = self.window.data_controller.refresh_runtime_after_mutation(list(mutation_result.records))
+        self.persistence.publish_write_result(self.window, write_result)
+        refresh_result = self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
         if refresh_result is False:
             return
         QMessageBox.information(self.window, "Sucesso", "Salvo com sucesso.")
@@ -545,9 +571,9 @@ class FormController:
     def delete_selected(self):
         if self.window.selected and msg_confirm(self.window, "Excluir", "Deseja excluir este registro?"):
             try:
-                self.window.excel.ensure_workbook_is_current()
-                preparation = self.local_write_authority.prepare_delete(
-                    str(getattr(self.window.excel, "path", "") or ""),
+                self._bind_runtime_persistence_service()
+                preparation = self.persistence.prepare_delete(
+                    self._current_session_path(),
                     fallback_records=self.window.records,
                     fallback_selected=self.window.selected,
                 )
@@ -558,25 +584,17 @@ class FormController:
                     return
                 authoritative_records = list(preparation.base_records)
                 deleted_record = deepcopy(authoritative_selected)
-                backup_path = self.window.excel.create_operation_backup("delete") or ""
-                self.record_use_cases.delete(authoritative_selected)
+                write_result = self.persistence.execute_delete(
+                    deleted_record,
+                    authoritative_records=authoritative_records,
+                )
             except Exception as exc:
-                title, message = friendly_error_message(exc, "excluir o registro")
+                root_exc = self.persistence.unwrap_write_exception(self.window, exc)
+                title, message = friendly_error_message(root_exc, "excluir o registro")
                 QMessageBox.critical(self.window, title, message)
                 return
-            self._append_audit_event(
-                action="delete",
-                summary=f"Registro excluido: {deleted_record.av_tec or deleted_record.oficio_processo}",
-                backup_path=backup_path,
-                before_record=deleted_record,
-            )
-            mutation_result = self.local_mutation_sync.apply_after_delete(
-                workbook_path=str(getattr(self.window.excel, "path", "") or ""),
-                existing_records=authoritative_records,
-                deleted_record=deleted_record,
-            )
-            self._store_local_mutation_status(mutation_result.status)
-            self.window.data_controller.refresh_runtime_after_mutation(list(mutation_result.records))
+            self.persistence.publish_write_result(self.window, write_result)
+            self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
             self.window.statusBar().showMessage("Registro excluído")
 
     def clear_form(self, force: bool = False):

@@ -1,148 +1,34 @@
 from __future__ import annotations
 
 import json
-import os
-import uuid
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Optional
 
-from app.models.compensacao import Compensacao
-from app.models.plantio_item import PlantioItem
+from app.services.audit_service_support import (
+    AuditEvent,
+    AuditOverview,
+    audit_backup_available,
+    audit_backup_path,
+    audit_event_matches_path,
+    build_audit_event,
+    build_audit_event_from_payload,
+    build_audit_overview,
+    format_audit_timestamp,
+    normalize_audit_path,
+    parse_audit_json_line,
+    parse_audit_timestamp,
+    serialize_audit_event,
+    serialize_plantio,
+    serialize_record,
+    serialize_records_sample,
+    sort_audit_events,
+)
 from app.services.sqlite_mirror_service import SqliteMirrorService
 from app.utils.app_paths import ensure_dir, resolve_data_path
 from app.utils.logger import get_logger
 
 
 logger = get_logger("Audit")
-
-
-def _normalize_path(path: str) -> str:
-    return os.path.normcase(os.path.abspath(str(path or "").strip()))
-
-
-def _utc_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-@dataclass(frozen=True)
-class AuditEvent:
-    event_id: str
-    timestamp: str
-    workbook_path: str
-    action: str
-    summary: str
-    backup_path: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-    before: Optional[dict[str, Any]] = None
-    after: Optional[dict[str, Any]] = None
-
-
-@dataclass(frozen=True)
-class AuditOverview:
-    total_events: int
-    events_today: int
-    available_backups: int
-    configured_backups: int
-    latest_summary: str = ""
-    latest_timestamp: str = ""
-    action_counts: tuple[tuple[str, int], ...] = ()
-
-
-def serialize_plantio(item: PlantioItem) -> dict[str, Any]:
-    return {
-        "sequence": int(item.sequence),
-        "endereco": item.endereco,
-        "qtd_mudas": item.qtd_mudas,
-        "latitude": item.latitude,
-        "longitude": item.longitude,
-    }
-
-
-def serialize_record(record: Compensacao) -> dict[str, Any]:
-    return {
-        "excel_row": int(record.excel_row),
-        "uid": record.uid,
-        "oficio_processo": record.oficio_processo,
-        "eletronico": record.eletronico,
-        "caixa": record.caixa,
-        "av_tec": record.av_tec,
-        "compensacao": record.compensacao,
-        "endereco": record.endereco,
-        "microbacia": record.microbacia,
-        "compensado": record.compensado,
-        "endereco_plantio": record.endereco_plantio,
-        "latitude_plantio": record.latitude_plantio,
-        "longitude_plantio": record.longitude_plantio,
-        "latitude": record.latitude,
-        "longitude": record.longitude,
-        "plantios": [serialize_plantio(item) for item in record.plantios],
-    }
-
-
-def serialize_records_sample(records: Sequence[Compensacao], *, limit: int = 10) -> list[dict[str, Any]]:
-    return [serialize_record(record) for record in list(records)[: max(limit, 0)]]
-
-
-def parse_audit_timestamp(value: str) -> Optional[datetime]:
-    raw_value = str(value or "").strip()
-    if not raw_value:
-        return None
-    try:
-        return datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def format_audit_timestamp(value: str) -> str:
-    parsed = parse_audit_timestamp(value)
-    if parsed is None:
-        return str(value or "").strip()
-    return parsed.astimezone().strftime("%d/%m/%Y %H:%M:%S")
-
-
-def audit_backup_path(event: AuditEvent) -> str:
-    return str(getattr(event, "backup_path", "") or "").strip()
-
-
-def audit_backup_available(event: AuditEvent) -> bool:
-    backup_path = audit_backup_path(event)
-    return bool(backup_path) and os.path.exists(backup_path)
-
-
-def build_audit_overview(events: Sequence[AuditEvent]) -> AuditOverview:
-    action_counter: dict[str, int] = {}
-    local_today = datetime.now().astimezone().date()
-    events_today = 0
-    available_backups = 0
-    configured_backups = 0
-
-    for event in events:
-        action = str(event.action or "").strip().upper() or "SEM ACAO"
-        action_counter[action] = action_counter.get(action, 0) + 1
-
-        backup_path = audit_backup_path(event)
-        if backup_path:
-            configured_backups += 1
-            if audit_backup_available(event):
-                available_backups += 1
-
-        parsed = parse_audit_timestamp(event.timestamp)
-        if parsed is not None and parsed.astimezone().date() == local_today:
-            events_today += 1
-
-    latest_event = events[0] if events else None
-    action_counts = tuple(sorted(action_counter.items()))
-    return AuditOverview(
-        total_events=len(events),
-        events_today=events_today,
-        available_backups=available_backups,
-        configured_backups=configured_backups,
-        latest_summary=str(getattr(latest_event, "summary", "") or ""),
-        latest_timestamp=format_audit_timestamp(str(getattr(latest_event, "timestamp", "") or "")),
-        action_counts=action_counts,
-    )
 
 
 class AuditService:
@@ -159,28 +45,28 @@ class AuditService:
     def append_event(
         self,
         *,
-        workbook_path: str,
         action: str,
         summary: str,
+        workbook_path: str = "",
+        session_path: str = "",
         backup_path: str = "",
-        metadata: Optional[dict[str, Any]] = None,
-        before: Optional[dict[str, Any]] = None,
-        after: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, object]] = None,
+        before: Optional[dict[str, object]] = None,
+        after: Optional[dict[str, object]] = None,
     ) -> AuditEvent:
-        event = AuditEvent(
-            event_id=uuid.uuid4().hex,
-            timestamp=_utc_timestamp(),
-            workbook_path=_normalize_path(workbook_path),
-            action=str(action or "").strip(),
-            summary=str(summary or "").strip(),
-            backup_path=os.path.abspath(backup_path) if backup_path else "",
-            metadata=dict(metadata or {}),
+        event = build_audit_event(
+            action=action,
+            summary=summary,
+            workbook_path=workbook_path,
+            session_path=session_path,
+            backup_path=backup_path,
+            metadata=metadata,
             before=before,
             after=after,
         )
 
         with self.audit_log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(event), ensure_ascii=True) + "\n")
+            handle.write(json.dumps(serialize_audit_event(event), ensure_ascii=True) + "\n")
 
         if self.persistence_service is not None:
             try:
@@ -200,75 +86,89 @@ class AuditService:
 
         return event
 
+    def append_session_event(
+        self,
+        *,
+        session_path: str,
+        action: str,
+        summary: str,
+        backup_path: str = "",
+        metadata: Optional[dict[str, object]] = None,
+        before: Optional[dict[str, object]] = None,
+        after: Optional[dict[str, object]] = None,
+    ) -> AuditEvent:
+        return self.append_event(
+            session_path=session_path,
+            action=action,
+            summary=summary,
+            backup_path=backup_path,
+            metadata=metadata,
+            before=before,
+            after=after,
+        )
+
     def list_events_for_workbook(self, workbook_path: str, *, limit: int = 50) -> list[AuditEvent]:
         sqlite_events = self._list_events_from_sqlite(workbook_path, limit=limit)
         if sqlite_events:
             return sqlite_events
         return self._list_events_from_jsonl(workbook_path, limit=limit)
 
+    def list_events_for_session(self, session_path: str, *, limit: int = 50) -> list[AuditEvent]:
+        return self.list_events_for_workbook(session_path, limit=limit)
+
     def _list_events_from_sqlite(self, workbook_path: str, *, limit: int) -> list[AuditEvent]:
         if self.persistence_service is None:
             return []
 
         try:
-            payloads = self.persistence_service.list_audit_event_payloads_for_workbook(workbook_path, limit=limit)
+            if hasattr(self.persistence_service, "list_audit_event_payloads_for_session"):
+                payloads = self.persistence_service.list_audit_event_payloads_for_session(workbook_path, limit=limit)
+            else:
+                payloads = self.persistence_service.list_audit_event_payloads_for_workbook(workbook_path, limit=limit)
         except Exception as exc:
             logger.warning("Falha ao consultar auditoria pelo SQLite: %s", exc, exc_info=True)
             return []
 
         events: list[AuditEvent] = []
+        skipped_payloads = 0
         for payload in payloads:
             try:
-                events.append(
-                    AuditEvent(
-                        event_id=str(payload.get("event_id") or ""),
-                        timestamp=str(payload.get("timestamp") or ""),
-                        workbook_path=str(payload.get("workbook_path") or ""),
-                        action=str(payload.get("action") or ""),
-                        summary=str(payload.get("summary") or ""),
-                        backup_path=str(payload.get("backup_path") or ""),
-                        metadata=dict(payload.get("metadata") or {}),
-                        before=payload.get("before"),
-                        after=payload.get("after"),
-                    )
-                )
-            except Exception:
-                continue
-        return events
+                events.append(build_audit_event_from_payload(dict(payload or {})))
+            except Exception as exc:
+                skipped_payloads += 1
+                logger.warning("Falha ao converter payload de auditoria do SQLite: %s", exc, exc_info=True)
+        if skipped_payloads:
+            logger.warning("Auditoria: %s payload(s) do SQLite foram ignorados por estarem invalidos.", skipped_payloads)
+        return sort_audit_events(events, limit=limit)
 
     def _list_events_from_jsonl(self, workbook_path: str, *, limit: int) -> list[AuditEvent]:
-        target_path = _normalize_path(workbook_path)
+        target_path = normalize_audit_path(workbook_path)
         if not self.audit_log_path.exists():
             return []
 
         events: list[AuditEvent] = []
+        skipped_json_lines = 0
         with self.audit_log_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if _normalize_path(str(payload.get("workbook_path", ""))) != target_path:
+                    payload = parse_audit_json_line(line)
+                except json.JSONDecodeError as exc:
+                    skipped_json_lines += 1
+                    logger.warning("Falha ao ler linha JSONL de auditoria: %s", exc, exc_info=True)
                     continue
                 try:
-                    events.append(
-                        AuditEvent(
-                            event_id=str(payload.get("event_id") or ""),
-                            timestamp=str(payload.get("timestamp") or ""),
-                            workbook_path=str(payload.get("workbook_path") or ""),
-                            action=str(payload.get("action") or ""),
-                            summary=str(payload.get("summary") or ""),
-                            backup_path=str(payload.get("backup_path") or ""),
-                            metadata=dict(payload.get("metadata") or {}),
-                            before=payload.get("before"),
-                            after=payload.get("after"),
-                        )
-                    )
-                except Exception:
+                    event = build_audit_event_from_payload(payload)
+                except Exception as exc:
+                    skipped_json_lines += 1
+                    logger.warning("Falha ao converter evento JSONL de auditoria: %s", exc, exc_info=True)
                     continue
+                if not audit_event_matches_path(event, target_path):
+                    continue
+                events.append(event)
 
-        events.sort(key=lambda event: event.timestamp, reverse=True)
-        return events[: max(limit, 0)]
+        if skipped_json_lines:
+            logger.warning("Auditoria: %s linha(s) JSONL foram ignoradas por estarem invalidas.", skipped_json_lines)
+        return sort_audit_events(events, limit=limit)

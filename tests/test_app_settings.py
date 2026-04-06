@@ -1,4 +1,4 @@
-from app.services.app_settings import AppSettings
+﻿from app.services.app_settings import AppSettings
 
 
 class MemorySettings:
@@ -21,35 +21,70 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.is_dark_mode() is False
     assert settings.active_tab_index() == 0
     assert settings.recent_files() == []
-    assert settings.last_excel_path() == ""
+    assert settings.last_session_path() == ""
+    assert settings.legacy_workbook_path() == ""
+    assert settings.database_bootstrap_source_path() == ""
     assert settings.last_export_dir() == ""
     assert settings.map_layer() == "Mapa Claro"
     assert settings.sort_state() == (-1, 0)
     assert settings.window_geometry() is None
     assert settings.operation_history_filter_state() == {}
+    assert settings.tcra_filter_state() == {}
+    assert settings.tcra_form_draft() == {}
 
     settings.set_dark_mode(True)
     settings.set_active_tab_index(2)
     settings.set_recent_files(["a.xlsx", "b.xlsx"])
-    settings.set_last_excel_path("a.xlsx")
+    settings.set_last_session_path("a.xlsx")
+    settings.setValue("last_excel_path", "legacy.xlsx")
+    settings.set_database_bootstrap_source_path("C:/dados/base.xlsx")
     settings.set_last_export_dir("C:/exports")
     settings.set_map_layer("Satélite")
     settings.set_sort_state(4, 1)
     settings.set_window_geometry(b"geom")
     settings.set_operation_history_filter_state({"action": "EDIT", "search": "uid-1"})
+    settings.set_tcra_filter_state({"search_text": "varjao", "quick_filter_mode": "alertas"})
+    settings.set_tcra_form_draft({"numero_processo": "26207/2019", "local": "Itamarati"})
 
     assert settings.is_dark_mode() is True
     assert settings.active_tab_index() == 2
     assert settings.recent_files() == ["a.xlsx", "b.xlsx"]
-    assert settings.last_excel_path() == "a.xlsx"
+    assert settings.last_session_path() == "a.xlsx"
+    assert settings.legacy_workbook_path() == "legacy.xlsx"
+    assert settings.database_bootstrap_source_path() == "C:/dados/base.xlsx"
     assert settings.last_export_dir() == "C:/exports"
     assert settings.map_layer() == "Satélite"
     assert settings.sort_state() == (4, 1)
     assert settings.window_geometry() == b"geom"
     assert settings.operation_history_filter_state() == {"action": "EDIT", "search": "uid-1"}
+    assert settings.tcra_filter_state() == {"search_text": "varjao", "quick_filter_mode": "alertas"}
+    assert settings.tcra_form_draft() == {"numero_processo": "26207/2019", "local": "Itamarati"}
 
-    settings.clear_last_excel_path()
+    settings.clear_last_session_path()
+    settings.clear_legacy_workbook_path()
+    settings.clear_database_bootstrap_source_path()
     settings.clear_sort_state()
+    settings.clear_tcra_form_draft()
 
-    assert settings.last_excel_path() == ""
+    assert settings.last_session_path() == ""
+    assert settings.legacy_workbook_path() == ""
+    assert settings.database_bootstrap_source_path() == ""
     assert settings.sort_state() == (-1, 0)
+    assert settings.tcra_form_draft() == {}
+
+
+def test_app_settings_recovers_from_invalid_json_payloads():
+    raw = MemorySettings()
+    raw.setValue("recent_files", "{invalido")
+    raw.setValue("operation_history_filter_state", "{invalido")
+    raw.setValue("tcra_filter_state", "[1,2,3]")
+    raw.setValue("tcra_form_draft", "[]")
+
+    settings = AppSettings(raw)
+
+    assert settings.recent_files() == []
+    assert settings.operation_history_filter_state() == {}
+    assert settings.tcra_filter_state() == {}
+    assert settings.tcra_form_draft() == {}
+
+

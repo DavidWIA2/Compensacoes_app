@@ -6,22 +6,54 @@ from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, Q
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableView, QHeaderView,
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
-    QPushButton, QSizePolicy, QButtonGroup,
+    QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
 
-from app.models.display_columns import display_column_index
+from app.models.compensacao import Compensacao
+from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
+from app.services.records_service import display_tipo_value
 from app.ui.components.widgets import CheckableComboBox, NumericSortProxy, MapBridge, DebugPage
 from app.ui.components.model import CompensacoesTableModel
 from app.ui.components.ui_utils import resource_path
+from app.ui.tabs.data_tab_support import (
+    build_column_texts_for_records,
+    build_micro_rows,
+    build_totals_rows,
+    compute_crud_buttons_minimum_width,
+    compute_preferred_left_panel_width,
+    compute_preferred_right_panel_width,
+    compute_splitter_anchor_left_width,
+    compute_splitter_sizes,
+    compute_target_column_width,
+    resolve_column_width_bounds,
+    resolve_splitter_anchor_character_index,
+)
 
 
 class DataTab(QWidget):
     OFICIO_COLUMN_INDEX = display_column_index("oficio_processo")
     TIPO_COLUMN_INDEX = display_column_index("eletronico")
     PLANTIO_COLUMN_INDEX = display_column_index("endereco_plantio")
+    _SPLITTER_VISUAL_ANCHOR_NUDGE = 4
+    _COLUMN_WIDTH_RULES = {
+        "oficio_processo": {"min": 160, "max": 380},
+        "eletronico": {"min": 110, "max": 150},
+        "caixa": {"min": 95, "max": 150},
+        "av_tec": {"min": 110, "max": 180},
+        "compensacao": {"min": 100, "max": 140},
+        "endereco": {"min": 220, "max": 420},
+        "microbacia": {"min": 130, "max": 220},
+        "compensado": {"min": 110, "max": 140},
+        "endereco_plantio": {"min": 220, "max": 420},
+    }
+    _COLUMN_STATIC_TEXTS = {
+        "eletronico": ("Eletrônico", "Ofício", "Físico", "Nulo"),
+        "caixa": ("Arquivado",),
+        "compensado": ("SIM", "NÃO"),
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -131,8 +163,7 @@ class DataTab(QWidget):
         self.table.setMinimumHeight(0)
         self.table.setMinimumWidth(0)
         self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self._resize_column_to_texts(self.TIPO_COLUMN_INDEX, ["Eletrônico", "Ofício", "Físico", "Nulo"])
-        self._resize_column_to_texts(self.PLANTIO_COLUMN_INDEX, [])
+        self.resize_table_columns_for_records([])
         l_lay.addWidget(self.table, 1)
 
         self.group_totals = self._create_totals_group()
@@ -269,28 +300,67 @@ class DataTab(QWidget):
         )
         totals_min_width = self.group_totals.minimumSizeHint().width()
         export_min_width = self.bar_export.minimumSizeHint().width()
-        return max(
-            visible_columns_width + table_chrome_width + self._panel_gap,
-            totals_min_width + self._panel_gap,
-            export_min_width + self._panel_gap,
+        return compute_preferred_left_panel_width(
+            visible_columns_width=visible_columns_width,
+            table_chrome_width=table_chrome_width,
+            totals_min_width=totals_min_width,
+            export_min_width=export_min_width,
+            panel_gap=self._panel_gap,
         )
 
     def _crud_buttons_minimum_width(self) -> int:
         buttons = [self.btn_clear, self.btn_add, self.btn_save_edit, self.btn_delete, self.btn_ficha_pdf]
-        return sum(button.minimumSizeHint().width() for button in buttons) + (self._crud_spacing * (len(buttons) - 1))
+        return compute_crud_buttons_minimum_width(
+            [button.minimumSizeHint().width() for button in buttons],
+            spacing=self._crud_spacing,
+        )
 
     def preferred_right_panel_width(self) -> int:
-        widths = [max(int(620 * self.sf), 560)]
-        if hasattr(self, "map_group"):
-            widths.append(self.map_group.minimumSizeHint().width())
-        if hasattr(self, "btn_ficha_pdf"):
-            widths.append(self._crud_buttons_minimum_width())
-        return max(widths)
+        return compute_preferred_right_panel_width(
+            scale_factor=self.sf,
+            map_group_width=self.map_group.minimumSizeHint().width() if hasattr(self, "map_group") else None,
+            crud_buttons_width=self._crud_buttons_minimum_width() if hasattr(self, "btn_ficha_pdf") else None,
+        )
 
     def _update_responsive_constraints(self):
         if not hasattr(self, "right_panel"):
             return
         self.right_panel.setMinimumWidth(self.preferred_right_panel_width())
+
+    def _preferred_splitter_anchor_left_width(self) -> int | None:
+        if not hasattr(self, "btn_table_full") or not hasattr(self, "splitter"):
+            return None
+
+        button = self.btn_table_full
+        splitter_rect = self.splitter.geometry()
+        if splitter_rect.width() <= 0 or button.width() <= 0:
+            return None
+
+        text = button.text() or ""
+        target_char_index = resolve_splitter_anchor_character_index(text)
+        if target_char_index is None:
+            return None
+
+        option = QStyleOptionButton()
+        button.initStyleOption(option)
+        content_rect = button.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, button)
+        full_text_width = button.fontMetrics().horizontalAdvance(text)
+        text_origin_x = content_rect.x() + max((content_rect.width() - full_text_width) // 2, 0)
+
+        prefix = text[:target_char_index]
+        target_char = text[target_char_index]
+        return compute_splitter_anchor_left_width(
+            splitter_x=splitter_rect.x(),
+            button_x=button.geometry().x(),
+            text_origin_x=text_origin_x,
+            prefix_width=button.fontMetrics().horizontalAdvance(prefix),
+            target_char_width=button.fontMetrics().horizontalAdvance(target_char),
+            handle_width=self.splitter.handleWidth(),
+            nudge=max(
+                int(self._SPLITTER_VISUAL_ANCHOR_NUDGE * max(float(self.sf), 1.0)),
+                self._SPLITTER_VISUAL_ANCHOR_NUDGE,
+            ),
+        )
 
     def align_splitter_to_table_width(self):
         if not hasattr(self, "splitter") or self.splitter.count() < 2:
@@ -307,12 +377,54 @@ class DataTab(QWidget):
             max(self.preferred_left_panel_width(), 0),
             max(total_width - right_min_width, 0),
         )
-        if target_left_width <= 0:
+        sizes = compute_splitter_sizes(
+            total_width=total_width,
+            right_min_width=right_min_width,
+            preferred_left_width=target_left_width,
+            anchor_left_width=self._preferred_splitter_anchor_left_width(),
+        )
+        if sizes is None:
             return
 
-        self.splitter.setSizes([target_left_width, max(total_width - target_left_width, 0)])
+        self.splitter.setSizes(list(sizes))
 
-    def _resize_column_to_texts(self, column_index: int, texts: List[str]):
+    def _column_width_bounds(self, attr: str) -> tuple[int, int]:
+        bounds = resolve_column_width_bounds(
+            attr,
+            scale_factor=self.sf,
+            rules=self._COLUMN_WIDTH_RULES,
+        )
+        return bounds.min_width, bounds.max_width
+
+    def _column_texts_for_records(self, attr: str, records: List[Compensacao]) -> List[str]:
+        return build_column_texts_for_records(
+            attr,
+            records,
+            static_texts=self._COLUMN_STATIC_TEXTS,
+            display_tipo_value=display_tipo_value,
+        )
+
+    def resize_table_columns_for_records(self, records: List[Compensacao]):
+        effective_records = list(records or [])
+        for column_index, attr in enumerate(DISPLAY_COLUMN_ATTRS):
+            if self.table.isColumnHidden(column_index):
+                continue
+            min_width, max_width = self._column_width_bounds(attr)
+            self._resize_column_to_texts(
+                column_index,
+                self._column_texts_for_records(attr, effective_records),
+                min_width=min_width,
+                max_width=max_width,
+            )
+
+    def _resize_column_to_texts(
+        self,
+        column_index: int,
+        texts: List[str],
+        *,
+        min_width: int | None = None,
+        max_width: int | None = None,
+    ):
         header = self.table.horizontalHeader()
         if column_index < 0 or column_index >= header.count():
             return
@@ -320,7 +432,12 @@ class DataTab(QWidget):
         header_text = self.table_model.headerData(column_index, Qt.Horizontal, Qt.DisplayRole) or ""
         widths = [header.fontMetrics().horizontalAdvance(str(header_text))]
         widths.extend(self.table.fontMetrics().horizontalAdvance(str(text or "")) for text in texts)
-        target_width = max(widths) + max(int(28 * self.sf), 28)
+        target_width = compute_target_column_width(
+            widths,
+            padding=max(int(28 * self.sf), 28),
+            min_width=min_width,
+            max_width=max_width,
+        )
         header.resizeSection(column_index, target_width)
 
     def load_map(self):
@@ -357,16 +474,11 @@ class DataTab(QWidget):
 
     def update_totals_tables(self, metrics: Dict):
         self.kpi_model.removeRows(0, self.kpi_model.rowCount())
-        rows = [
-            ("Total Mudas", f"{metrics['total_geral']:g}"),
-            ("Pendente", f"{metrics['total_pendente']:g}"),
-            ("Compensado", f"{metrics['total_compensado']:g}"),
-        ]
-        for k, v in rows:
-            self.kpi_model.appendRow([QStandardItem(k), QStandardItem(v)])
+        for label, value in build_totals_rows(metrics):
+            self.kpi_model.appendRow([QStandardItem(label), QStandardItem(value)])
         self.micro_model.removeRows(0, self.micro_model.rowCount())
-        for m, v in metrics["pend_micro_sorted"]:
-            self.micro_model.appendRow([QStandardItem(m), QStandardItem(f"{v:g}")])
+        for micro, value in build_micro_rows(metrics):
+            self.micro_model.appendRow([QStandardItem(micro), QStandardItem(value)])
 
     def _create_export_bar(self):
         w = QWidget()
@@ -375,9 +487,9 @@ class DataTab(QWidget):
         l.setContentsMargins(0, 0, 0, 0)
         l.setSpacing(int(8 * self.sf))
         self.btn_export_csv = QPushButton("Exportar CSV")
-        self.btn_export_excel = QPushButton("Exportar Excel (2 abas)")
+        self.btn_export_spreadsheet = QPushButton("Exportar Planilha (2 abas)")
         self.btn_export_pdf = QPushButton("Exportar PDF")
-        for b in [self.btn_export_csv, self.btn_export_excel, self.btn_export_pdf]:
+        for b in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
             b.setProperty("kind", "secondary")
             b.setMinimumHeight(int(28 * self.sf))
             l.addWidget(b)

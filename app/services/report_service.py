@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import os
 from typing import Any, List, Tuple
 
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -12,13 +13,28 @@ from reportlab.lib.units import inch
 from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.compensacao import Compensacao
-from app.models.display_columns import (
-    DISPLAY_COLUMNS,
-    DISPLAY_COLUMN_LABEL_BY_ATTR,
-    display_column_label,
+from app.models.display_columns import DISPLAY_COLUMNS
+from app.services.ficha_report_service import export_individual_pdf as export_ficha_report_pdf
+from app.services.report_service_support import (
+    DATA_SHEET_NAME,
+    REPORT_DETAIL_LABEL,
+    REPORT_SUMMARY_LABEL,
+    REPORT_TITLE,
+    SUMMARY_LABEL_FILTERS,
+    SUMMARY_LABEL_GENERAL,
+    SUMMARY_LABEL_METRIC,
+    SUMMARY_LABEL_PENDING_MICRO,
+    SUMMARY_LABEL_PENDING_TYPE,
+    SUMMARY_LABEL_VALUE,
+    SUMMARY_SHEET_NAME,
+    build_dashboard_chart_rows,
+    build_department_header_html_lines,
+    build_grid_pdf_layout,
+    build_individual_report_rows,
+    build_records_to_dict_list,
+    build_selected_headers,
+    format_individual_status,
 )
-from app.services.coordinates import format_coordinate_pair
-from app.services.records_service import display_tipo_value
 from app.ui.components.ui_utils import resource_path
 
 
@@ -37,35 +53,15 @@ ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 
 
 def _selected_headers(selected_cols: List[str]) -> List[str]:
-    return [display_column_label(column) for column in selected_cols]
+    return build_selected_headers(selected_cols)
 
 
 def _format_individual_status(record: Compensacao) -> str:
-    return "CONCLUÍDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE"
+    return format_individual_status(record)
 
 
 def _build_individual_pdf_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
-    rows = [
-        ["Ofício/Processo:", str(record.oficio_processo or ""), "Tipo:", display_tipo_value(record.eletronico)],
-        ["Av. Técnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
-        ["Status:", _format_individual_status(record), "Microbacia:", str(record.microbacia or "")],
-        ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
-        ["End. Ocorrência:", str(record.endereco or ""), "", ""],
-        ["End. Plantio:", str(record.endereco_plantio or ""), "", ""],
-    ]
-
-    main_coords = format_coordinate_pair(record.latitude, record.longitude)
-    plantio_coords = format_coordinate_pair(record.latitude_plantio, record.longitude_plantio)
-    if main_coords:
-        rows.append(["Coord. Ocorrência:", main_coords, "", ""])
-    if plantio_coords:
-        rows.append(["Coord. Plantio:", plantio_coords, "", ""])
-    if not main_coords and not plantio_coords:
-        rows.append(["Coordenadas:", "", "", ""])
-    if str(observation or "").strip():
-        rows.append(["Observações:", str(observation).strip(), "", ""])
-
-    return rows
+    return build_individual_report_rows(record, observation)
 
 
 def _build_individual_pdf_header(styles):
@@ -94,11 +90,8 @@ def _build_individual_pdf_header(styles):
     )
 
     lines = [
-        Paragraph("PREFEITURA MUNICIPAL DE S&Atilde;O CARLOS", header_title),
-        Paragraph("Capital Nacional da Tecnologia", header_text),
-        Paragraph("Secretaria Municipal de Conserva&ccedil;&atilde;o e Qualidade Urbana", header_text),
-        Paragraph("Departamento de Poda de &Aacute;rvores", header_text),
-        Paragraph("Se&ccedil;&atilde;o de Recupera&ccedil;&atilde;o Ambiental", header_text),
+        Paragraph(build_department_header_html_lines()[0], header_title),
+        *[Paragraph(line, header_text) for line in build_department_header_html_lines()[1:]],
     ]
 
     table = Table([[logo, lines]], colWidths=[1.35 * inch, 4.85 * inch])
@@ -124,18 +117,8 @@ def _build_individual_pdf_header(styles):
     ]
 
 
-def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict]:
-    data_list = []
-    for record in records:
-        row = {}
-        for attr in selected_cols:
-            header_name = DISPLAY_COLUMN_LABEL_BY_ATTR.get(attr, attr)
-            value = getattr(record, attr)
-            if attr == "eletronico":
-                value = display_tipo_value(value)
-            row[header_name] = "" if value is None else str(value)
-        data_list.append(row)
-    return data_list
+def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict[str, str]]:
+    return build_records_to_dict_list(records, selected_cols)
 
 
 def _style_worksheet(ws, highlight_compensado: bool = False):
@@ -176,6 +159,15 @@ def _style_worksheet(ws, highlight_compensado: bool = False):
     ws.auto_filter.ref = ws.dimensions
 
 
+def _write_summary_table(worksheet, *, start_row: int, start_col: int, title: str, headers: tuple[str, str], rows):
+    worksheet.cell(row=start_row, column=start_col, value=title).font = FONT_BOLD
+    worksheet.cell(row=start_row + 1, column=start_col, value=headers[0]).font = FONT_BOLD
+    worksheet.cell(row=start_row + 1, column=start_col + 1, value=headers[1]).font = FONT_BOLD
+    for index, row in enumerate(rows):
+        worksheet.cell(row=start_row + 2 + index, column=start_col, value=row[0])
+        worksheet.cell(row=start_row + 2 + index, column=start_col + 1, value=row[1])
+
+
 def export_csv(path: str, records: List[Compensacao], selected_cols: List[str]):
     data = _records_to_dict_list(records, selected_cols)
     if not data:
@@ -200,51 +192,50 @@ def export_excel_two_sheets(
     pend_ele_sorted: List[Tuple[str, float]],
 ):
     data = _records_to_dict_list(records, selected_cols)
-    if data:
-        df_dados = pd.DataFrame(data)
-    else:
-        df_dados = pd.DataFrame(columns=_selected_headers(selected_cols))
-
-    df_kpis = pd.DataFrame(kpis, columns=["Métrica", "Valor"])
-    df_micro = pd.DataFrame(pend_micro_sorted, columns=["Microbacia", "Mudas Pendentes"])
-    df_ele = pd.DataFrame(pend_ele_sorted, columns=["Tipo", "Mudas Pendentes"])
+    df_dados = pd.DataFrame(data) if data else pd.DataFrame(columns=_selected_headers(selected_cols))
 
     try:
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            df_dados.to_excel(writer, sheet_name="Dados", index=False)
-            worksheet = writer.book.create_sheet("Resumo Gerencial")
-            writer.sheets["Resumo Gerencial"] = worksheet
+            df_dados.to_excel(writer, sheet_name=DATA_SHEET_NAME, index=False)
+            worksheet = writer.book.create_sheet(SUMMARY_SHEET_NAME)
+            writer.sheets[SUMMARY_SHEET_NAME] = worksheet
 
-            worksheet.cell(row=1, column=1, value="Filtros Aplicados:")
+            worksheet.cell(row=1, column=1, value=SUMMARY_LABEL_FILTERS)
             worksheet.cell(row=1, column=2, value=filtros_txt)
             worksheet["B1"].font = FONT_BOLD
 
-            worksheet.cell(row=3, column=1, value="INDICADORES GERAIS").font = FONT_BOLD
-            start_row = 4
-            worksheet.cell(row=start_row, column=1, value="Métrica").font = FONT_BOLD
-            worksheet.cell(row=start_row, column=2, value="Valor").font = FONT_BOLD
-            for index, row in df_kpis.iterrows():
-                worksheet.cell(row=start_row + 1 + index, column=1, value=row["Métrica"])
-                worksheet.cell(row=start_row + 1 + index, column=2, value=row["Valor"])
+            _write_summary_table(
+                worksheet,
+                start_row=3,
+                start_col=1,
+                title=SUMMARY_LABEL_GENERAL,
+                headers=(SUMMARY_LABEL_METRIC, SUMMARY_LABEL_VALUE),
+                rows=kpis,
+            )
+            _write_summary_table(
+                worksheet,
+                start_row=3,
+                start_col=5,
+                title=SUMMARY_LABEL_PENDING_MICRO,
+                headers=("Microbacia", "Mudas"),
+                rows=pend_micro_sorted,
+            )
+            _write_summary_table(
+                worksheet,
+                start_row=3,
+                start_col=9,
+                title=SUMMARY_LABEL_PENDING_TYPE,
+                headers=("Tipo", "Mudas"),
+                rows=pend_ele_sorted,
+            )
 
-            worksheet.cell(row=3, column=5, value="PENDÊNCIAS POR MICROBACIA").font = FONT_BOLD
-            worksheet.cell(row=4, column=5, value="Microbacia").font = FONT_BOLD
-            worksheet.cell(row=4, column=6, value="Mudas").font = FONT_BOLD
-            for index, row in df_micro.iterrows():
-                worksheet.cell(row=5 + index, column=5, value=row["Microbacia"])
-                worksheet.cell(row=5 + index, column=6, value=row["Mudas Pendentes"])
-
-            worksheet.cell(row=3, column=9, value="PENDÊNCIAS POR TIPO").font = FONT_BOLD
-            worksheet.cell(row=4, column=9, value="Tipo").font = FONT_BOLD
-            worksheet.cell(row=4, column=10, value="Mudas").font = FONT_BOLD
-            for index, row in df_ele.iterrows():
-                worksheet.cell(row=5 + index, column=9, value=row["Tipo"])
-                worksheet.cell(row=5 + index, column=10, value=row["Mudas Pendentes"])
-
-            _style_worksheet(writer.sheets["Dados"], highlight_compensado=True)
-            _style_worksheet(writer.sheets["Resumo Gerencial"], highlight_compensado=False)
+            _style_worksheet(writer.sheets[DATA_SHEET_NAME], highlight_compensado=True)
+            _style_worksheet(writer.sheets[SUMMARY_SHEET_NAME], highlight_compensado=False)
     except Exception as exc:
         raise RuntimeError(f"Erro ao salvar Excel: {exc}") from exc
+
+
+export_spreadsheet_two_sheets = export_excel_two_sheets
 
 
 def export_pdf(
@@ -255,6 +246,8 @@ def export_pdf(
     kpis: List[Tuple[str, Any]],
     pend_micro_sorted: List[Tuple[str, float]],
 ):
+    del pend_micro_sorted
+
     doc = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
@@ -265,30 +258,27 @@ def export_pdf(
     )
     elements = []
     styles = getSampleStyleSheet()
-    
-    # Estilos customizados para a tabela
+
     style_header = ParagraphStyle(
-        'HeaderStyle',
-        parent=styles['Normal'],
+        "HeaderStyle",
+        parent=styles["Normal"],
         fontSize=7,
         leading=8,
         textColor=colors.whitesmoke,
-        fontName='Helvetica-Bold',
-        alignment=1 # Center
+        fontName="Helvetica-Bold",
+        alignment=1,
     )
-    
     style_cell = ParagraphStyle(
-        'CellStyle',
-        parent=styles['Normal'],
+        "CellStyle",
+        parent=styles["Normal"],
         fontSize=7,
         leading=8,
-        alignment=0 # Left
+        alignment=0,
     )
-    
     style_cell_center = ParagraphStyle(
-        'CellStyleCenter',
+        "CellStyleCenter",
         parent=style_cell,
-        alignment=1
+        alignment=1,
     )
 
     title_style = styles["Title"]
@@ -296,14 +286,14 @@ def export_pdf(
     normal_style = styles["Normal"]
     normal_style.fontSize = 9
 
-    elements.append(Paragraph("Relatório de Compensações", title_style))
+    elements.append(Paragraph(REPORT_TITLE, title_style))
     elements.append(Spacer(1, 10))
     elements.append(Paragraph(f"<b>Filtros:</b> {filtros_txt}", normal_style))
     elements.append(Spacer(1, 10))
 
-    kpi_data = [["Métrica", "Valor"]] + [[str(key), str(value)] for key, value in kpis]
-    t_kpi = Table(kpi_data, colWidths=[200, 100])
-    t_kpi.setStyle(
+    kpi_data = [[SUMMARY_LABEL_METRIC, SUMMARY_LABEL_VALUE]] + [[str(key), str(value)] for key, value in kpis]
+    kpi_table = Table(kpi_data, colWidths=[200, 100])
+    kpi_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
@@ -313,46 +303,25 @@ def export_pdf(
             ]
         )
     )
-    elements.append(Paragraph("<b>Resumo do Relatório:</b>", normal_style))
-    elements.append(t_kpi)
+    elements.append(Paragraph(f"<b>{REPORT_SUMMARY_LABEL}</b>", normal_style))
+    elements.append(kpi_table)
     elements.append(Spacer(1, 15))
 
-    headers = _selected_headers(selected_cols)
-    
-    # 1. Calcular pesos para larguras das colunas baseado no conteúdo
-    # Colunas que tendem a ser longas ganham mais peso
-    weights = []
-    for attr in selected_cols:
-        if "endereco" in attr.lower():
-            weights.append(3.5) # Endereços precisam de mais espaço
-        elif "oficio" in attr.lower() or "processo" in attr.lower():
-            weights.append(2.0)
-        elif "micro" in attr.lower():
-            weights.append(2.0)
-        elif attr in ["caixa", "av_tec", "eletronico", "compensado", "compensacao"]:
-            weights.append(1.0) # Campos curtos
-        else:
-            weights.append(1.5)
-            
-    page_width = landscape(A4)[0] - 40 # Margens
-    total_weight = sum(weights)
-    col_widths = [(w / total_weight) * page_width for w in weights]
+    page_width = landscape(A4)[0] - 40
+    layout = build_grid_pdf_layout(selected_cols, page_width)
 
-    # 2. Montar dados da tabela com Paragraphs para wrapping
-    table_data = [[Paragraph(h, style_header) for h in headers]]
+    table_data = [[Paragraph(header, style_header) for header in layout.headers]]
     raw_data = _records_to_dict_list(records, selected_cols)
-    
     for row_dict in raw_data:
         row_elements = []
-        for i, attr in enumerate(selected_cols):
-            val = str(row_dict.get(headers[i], "") or "")
-            # Centralizar campos curtos/status
-            current_style = style_cell_center if weights[i] <= 1.0 else style_cell
-            row_elements.append(Paragraph(val, current_style))
+        for index, attr in enumerate(selected_cols):
+            value = str(row_dict.get(layout.headers[index], "") or "")
+            current_style = style_cell_center if layout.weights[index] <= 1.0 else style_cell
+            row_elements.append(Paragraph(value, current_style))
         table_data.append(row_elements)
 
-    t_main = Table(table_data, colWidths=col_widths, repeatRows=1)
-    t_main.setStyle(
+    main_table = Table(table_data, colWidths=list(layout.column_widths), repeatRows=1)
+    main_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
@@ -368,8 +337,8 @@ def export_pdf(
         )
     )
 
-    elements.append(Paragraph("<b>Detalhamento:</b>", normal_style))
-    elements.append(t_main)
+    elements.append(Paragraph(f"<b>{REPORT_DETAIL_LABEL}</b>", normal_style))
+    elements.append(main_table)
     doc.build(elements)
 
 
@@ -391,22 +360,15 @@ def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_t
         elements.append(Paragraph(f"- {line}", styles["Heading3"]))
     elements.append(Spacer(1, 20))
 
-    chart_objs = []
+    chart_objects = []
     for img_path in chart_images:
         if os.path.exists(img_path):
-            chart_objs.append(Image(img_path, width=350, height=250))
+            chart_objects.append(Image(img_path, width=350, height=250))
 
-    if chart_objs:
-        rows = []
-        if len(chart_objs) >= 2:
-            rows.append([chart_objs[0], chart_objs[1]])
-            if len(chart_objs) > 2:
-                rows.append([chart_objs[2], ""])
-        else:
-            rows.append([chart_objs[0]])
-
-        t_charts = Table(rows)
-        t_charts.setStyle(
+    chart_rows = build_dashboard_chart_rows(chart_objects)
+    if chart_rows:
+        charts_table = Table(list(chart_rows))
+        charts_table.setStyle(
             TableStyle(
                 [
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
@@ -414,66 +376,10 @@ def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_t
                 ]
             )
         )
-        elements.append(t_charts)
+        elements.append(charts_table)
 
     doc.build(elements)
 
 
-def export_individual_pdf(filepath: str, record: Compensacao):
-    doc = SimpleDocTemplate(
-        filepath,
-        pagesize=A4,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40,
-    )
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle(
-        "MainTitle",
-        parent=styles["Heading1"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        textColor=colors.HexColor("#2C3E50"),
-        alignment=1,
-        spaceAfter=20,
-    )
-
-    elements = [
-        Paragraph("Ficha de Compensação Ambiental", title_style),
-        Spacer(1, 0.2 * inch),
-    ]
-
-    data = _build_individual_pdf_rows(record)
-    table = Table(data, colWidths=[120, 150, 100, 140])
-    table_style = [
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2C3E50")),
-        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#2C3E50")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
-    ]
-
-    for row_index, row in enumerate(data):
-        if row[2] == "" and row[3] == "":
-            table_style.append(("SPAN", (1, row_index), (3, row_index)))
-    table.setStyle(TableStyle(table_style))
-
-    elements.append(table)
-    elements.append(Spacer(1, 0.5 * inch))
-    elements.append(Spacer(1, 2 * inch))
-    elements.append(Paragraph("_" * 40, ParagraphStyle(name="Sig", alignment=1, fontSize=12)))
-    elements.append(
-        Paragraph(
-            "Assinatura do Técnico Responsável",
-            ParagraphStyle(name="SigSub", alignment=1, fontSize=10),
-        )
-    )
-
-    doc.build(elements)
+def export_individual_pdf(filepath: str, record: Compensacao, observation: str = ""):
+    return export_ficha_report_pdf(filepath, record, observation)

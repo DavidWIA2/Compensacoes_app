@@ -10,8 +10,11 @@ from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, 
 
 from app.models.compensacao import Compensacao
 from app.services.coordinates import format_coordinate_pair
-from app.services.records_service import display_tipo_value
 from app.services.plantio_service import record_plantio_items
+from app.services.report_service_support import (
+    build_department_header_html_lines,
+    build_individual_report_rows,
+)
 from app.ui.components.ui_utils import resource_path
 
 
@@ -52,12 +55,10 @@ def _build_ficha_header(styles):
         textColor=colors.black,
     )
 
+    department_lines = build_department_header_html_lines()
     lines = [
-        Paragraph("PREFEITURA MUNICIPAL DE S&Atilde;O CARLOS", header_title),
-        Paragraph("Capital Nacional da Tecnologia", header_text),
-        Paragraph("Secretaria Municipal de Conserva&ccedil;&atilde;o e Qualidade Urbana", header_text),
-        Paragraph("Departamento de Poda de &Aacute;rvores", header_text),
-        Paragraph("Se&ccedil;&atilde;o de Recupera&ccedil;&atilde;o Ambiental", header_text),
+        Paragraph(department_lines[0], header_title),
+        *[Paragraph(line, header_text) for line in department_lines[1:]],
     ]
 
     table = Table([[logo, lines]], colWidths=[1.7 * inch, 4.5 * inch])
@@ -83,32 +84,8 @@ def _build_ficha_header(styles):
     ]
 
 
-def _status_label(record: Compensacao) -> str:
-    return "CONCLU\u00cdDO" if str(record.compensado or "").strip().upper() == "SIM" else "PENDENTE"
-
-
 def _build_ficha_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
-    rows = [
-        ["Of\u00edcio/Processo:", str(record.oficio_processo or ""), "Tipo:", display_tipo_value(record.eletronico)],
-        ["Av. T\u00e9cnica:", str(record.av_tec or ""), "Caixa:", str(record.caixa or "")],
-        ["Status:", _status_label(record), "Microbacia:", str(record.microbacia or "")],
-        ["Volume (Mudas):", str(record.compensacao or ""), "", ""],
-        ["End. Ocorr\u00eancia:", str(record.endereco or ""), "", ""],
-        ["End. Plantio:", str(record.endereco_plantio or ""), "", ""],
-    ]
-
-    ocorrencia_coords = format_coordinate_pair(record.latitude, record.longitude)
-    plantio_coords = format_coordinate_pair(record.latitude_plantio, record.longitude_plantio)
-    if ocorrencia_coords:
-        rows.append(["Coord. Ocorr\u00eancia:", ocorrencia_coords, "", ""])
-    if plantio_coords:
-        rows.append(["Coord. Plantio:", plantio_coords, "", ""])
-    if not ocorrencia_coords and not plantio_coords:
-        rows.append(["Coordenadas:", "", "", ""])
-    if str(observation or "").strip():
-        rows.append(["Observa\u00e7\u00f5es:", str(observation).strip(), "", ""])
-
-    return rows
+    return build_individual_report_rows(record, observation)
 
 
 def _build_plantios_rows(record: Compensacao) -> List[List[str]]:

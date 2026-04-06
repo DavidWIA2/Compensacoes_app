@@ -1,8 +1,16 @@
-import json
 import os
 from typing import List
 
 from PySide6.QtCore import Qt
+
+from app.ui.controllers.settings_support import (
+    build_loaded_window_settings_state,
+    coerce_recent_files,
+    collapse_recent_files_for_single_database_mode,
+    is_named_session_path,
+    normalize_session_path,
+    resolve_preferred_directory,
+)
 
 
 class SettingsController:
@@ -10,11 +18,12 @@ class SettingsController:
         self.window = window
 
     @staticmethod
+    def _is_named_session(path: str) -> bool:
+        return is_named_session_path(path)
+
+    @staticmethod
     def _normalize_path(path: str) -> str:
-        clean = str(path or "").strip()
-        if not clean:
-            return ""
-        return os.path.abspath(clean)
+        return normalize_session_path(path)
 
     def _value(self, key: str, default=None):
         return self.window.settings.value(key, default)
@@ -27,7 +36,9 @@ class SettingsController:
             self.window.settings.remove(key)
 
     def update_recent_files_menu(self):
-        menu_recent = self.window.menu_recent
+        menu_recent = getattr(self.window, "menu_recent", None)
+        if menu_recent is None:
+            return
         menu_recent.clear()
         if not self.window.recent_files:
             action = menu_recent.addAction("Nenhum")
@@ -35,58 +46,80 @@ class SettingsController:
             return
 
         for path in self.window.recent_files:
-            action = menu_recent.addAction(os.path.basename(path))
-            action.setToolTip(path)
-            action.triggered.connect(lambda checked=False, p=path: self.window._load_excel(p))
+            availability = self._resolve_session_availability(path)
+            action = menu_recent.addAction(availability.display_label)
+            action.setToolTip(availability.detail_message)
+            action.triggered.connect(lambda checked=False, p=path: self.window._load_session(p))
+
+    def _resolve_session_availability(self, path: str):
+        normalized = self._normalize_path(path)
+        persistence = getattr(self.window, "authoritative_persistence", None)
+        if persistence is not None:
+            return persistence.resolve_session_availability(normalized)
+
+        class _FallbackAvailability:
+            def __init__(self, target_path: str):
+                self.path = target_path
+                self.display_name = os.path.basename(target_path) or target_path
+                self.has_workbook_file = bool(target_path and os.path.exists(target_path))
+                self.has_local_snapshot = False
+                self.source_kind = "workbook_only" if self.has_workbook_file else "missing"
+
+            @property
+            def is_openable(self) -> bool:
+                return self.has_workbook_file
+
+            @property
+            def display_label(self) -> str:
+                return self.display_name or "nenhuma"
+
+            @property
+            def detail_message(self) -> str:
+                if self.has_workbook_file:
+                    return f"Sessão vinculada a {self.path} com arquivo original disponível."
+                return f"Sessão indisponível para {self.path}."
+
+        return _FallbackAvailability(normalized)
 
     def _sanitize_recent_files(self, recent_files: List[str]) -> List[str]:
-        cleaned = []
-        seen = set()
-        for path in recent_files:
-            normalized = self._normalize_path(path)
-            if not normalized or normalized in seen or not os.path.exists(normalized):
-                continue
-            cleaned.append(normalized)
-            seen.add(normalized)
-            if len(cleaned) >= 5:
-                break
-        return cleaned
+        return collapse_recent_files_for_single_database_mode(recent_files)
 
     def load_settings(self):
-        if hasattr(self.window.settings, "is_dark_mode"):
-            self.window.is_dark_mode = self.window.settings.is_dark_mode()
-        else:
-            self.window.is_dark_mode = str(self._value("dark_mode", "false")).lower() == "true"
+        is_dark_mode = (
+            self.window.settings.is_dark_mode()
+            if hasattr(self.window.settings, "is_dark_mode")
+            else str(self._value("dark_mode", "false")).lower() == "true"
+        )
+        geometry = (
+            self.window.settings.window_geometry()
+            if hasattr(self.window.settings, "window_geometry")
+            else self._value("window_geometry")
+        )
+        active_tab_index = (
+            self.window.settings.active_tab_index()
+            if hasattr(self.window.settings, "active_tab_index")
+            else int(self._value("active_tab_index", 0))
+        )
+        raw_recent_files = (
+            self.window.settings.recent_files()
+            if hasattr(self.window.settings, "recent_files")
+            else coerce_recent_files(self._value("recent_files"))
+        )
+        loaded_state = build_loaded_window_settings_state(
+            is_dark_mode=is_dark_mode,
+            geometry=geometry,
+            restore_geometry=self.window.restoreGeometry,
+            active_tab_index=active_tab_index,
+            tabs_count=self.window.tabs.count(),
+            recent_files=self._sanitize_recent_files(list(raw_recent_files)),
+        )
+        self.window.is_dark_mode = loaded_state.is_dark_mode
+        self.window._startup_geometry_restored = loaded_state.geometry_restored
+        self.window.tabs.setCurrentIndex(loaded_state.active_tab_index)
+        self.window.recent_files = list(loaded_state.recent_files)
 
-        geometry = None
-        if hasattr(self.window.settings, "window_geometry"):
-            geometry = self.window.settings.window_geometry()
-        else:
-            geometry = self._value("window_geometry")
-        self.window._startup_geometry_restored = bool(geometry and self.window.restoreGeometry(geometry))
-
-        if hasattr(self.window.settings, "active_tab_index"):
-            tab_index = self.window.settings.active_tab_index()
-        else:
-            tab_index = int(self._value("active_tab_index", 0))
-        if 0 <= tab_index < self.window.tabs.count():
-            self.window.tabs.setCurrentIndex(tab_index)
-
-        if hasattr(self.window.settings, "recent_files"):
-            self.window.recent_files = self.window.settings.recent_files()
-        else:
-            recents = self._value("recent_files")
-            if isinstance(recents, str):
-                try:
-                    self.window.recent_files = list(json.loads(recents))
-                except Exception:
-                    self.window.recent_files = []
-            elif isinstance(recents, list):
-                self.window.recent_files = list(recents)
-            else:
-                self.window.recent_files = []
-        cleaned_recents = self._sanitize_recent_files(self.window.recent_files)
-        if cleaned_recents != self.window.recent_files:
+        cleaned_recents = list(loaded_state.recent_files)
+        if cleaned_recents != list(raw_recent_files):
             self.restore_recent_files(cleaned_recents)
         else:
             self.window.recent_files = cleaned_recents
@@ -154,13 +187,7 @@ class SettingsController:
             self._set_value("map_layer", layer_name)
 
     def update_recent_files(self, path: str):
-        normalized = self._normalize_path(path)
-        if not normalized:
-            return
-
-        recents = [item for item in self.window.recent_files if self._normalize_path(item) != normalized]
-        recents.insert(0, normalized)
-        self.window.recent_files = recents[:5]
+        self.window.recent_files = self._sanitize_recent_files([path])
         if hasattr(self.window.settings, "set_recent_files"):
             self.window.settings.set_recent_files(self.window.recent_files)
         else:
@@ -168,7 +195,7 @@ class SettingsController:
         self.update_recent_files_menu()
 
     def restore_recent_files(self, recent_files: List[str]):
-        self.window.recent_files = self._sanitize_recent_files(list(recent_files))
+        self.window.recent_files = self._sanitize_recent_files(recent_files)
         if hasattr(self.window.settings, "set_recent_files"):
             self.window.settings.set_recent_files(self.window.recent_files)
         else:
@@ -186,29 +213,96 @@ class SettingsController:
         else:
             self._set_value("window_geometry", self.window.saveGeometry())
 
-    def restore_last_excel_path(self) -> str:
-        if hasattr(self.window.settings, "last_excel_path"):
-            return self.window.settings.last_excel_path()
-        return str(self._value("last_excel_path", "") or "")
+    def restore_last_session_path(self) -> str:
+        if hasattr(self.window.settings, "last_session_path"):
+            return self.window.settings.last_session_path()
+        return str(self._value("last_session_path", "") or "")
 
-    def save_last_excel_path(self, path: str):
-        if hasattr(self.window.settings, "set_last_excel_path"):
-            self.window.settings.set_last_excel_path(path)
+    def restore_legacy_workbook_path(self) -> str:
+        if hasattr(self.window.settings, "legacy_workbook_path"):
+            legacy_path = self.window.settings.legacy_workbook_path()
         else:
-            self._set_value("last_excel_path", path)
+            legacy_path = str(self._value("last_excel_path", "") or "")
+        normalized = self._normalize_path(legacy_path)
+        if not normalized or self._is_named_session(normalized):
+            return ""
+        return normalized
 
-    def clear_last_excel_path(self):
-        if hasattr(self.window.settings, "clear_last_excel_path"):
-            self.window.settings.clear_last_excel_path()
+    def restore_database_bootstrap_source_path(self) -> str:
+        if hasattr(self.window.settings, "database_bootstrap_source_path"):
+            return str(self.window.settings.database_bootstrap_source_path() or "").strip()
+        return str(self._value("database_bootstrap_source_path", "") or "").strip()
+
+    def pending_singleton_bootstrap_source_path(self) -> str:
+        legacy_path = self.restore_legacy_workbook_path()
+        if not legacy_path:
+            return ""
+        if self.restore_database_bootstrap_source_path():
+            return ""
+        return legacy_path
+
+    def mark_singleton_bootstrap_completed(self, source_path: str):
+        normalized = self._normalize_path(source_path)
+        if hasattr(self.window.settings, "set_database_bootstrap_source_path"):
+            self.window.settings.set_database_bootstrap_source_path(normalized)
+        else:
+            self._set_value("database_bootstrap_source_path", normalized)
+
+        if hasattr(self.window.settings, "clear_legacy_workbook_path"):
+            self.window.settings.clear_legacy_workbook_path()
         else:
             self._remove("last_excel_path")
 
-    def preferred_excel_dialog_dir(self) -> str:
-        current_path = getattr(self.window.excel, "path", "") or self.restore_last_excel_path()
-        normalized = self._normalize_path(current_path)
-        if normalized:
-            return normalized if os.path.isdir(normalized) else os.path.dirname(normalized)
-        return ""
+    def save_last_session_path(self, path: str):
+        self.clear_last_session_path()
+
+    def clear_last_session_path(self):
+        if hasattr(self.window.settings, "clear_last_session_path"):
+            self.window.settings.clear_last_session_path()
+        else:
+            self._remove("last_session_path")
+
+    def tcra_form_draft(self) -> dict:
+        if hasattr(self.window.settings, "tcra_form_draft"):
+            return dict(self.window.settings.tcra_form_draft() or {})
+        state = self._value("tcra_form_draft", {})
+        return dict(state) if isinstance(state, dict) else {}
+
+    def set_tcra_form_draft(self, state: dict):
+        if hasattr(self.window.settings, "set_tcra_form_draft"):
+            self.window.settings.set_tcra_form_draft(dict(state or {}))
+        else:
+            self._set_value("tcra_form_draft", dict(state or {}))
+
+    def clear_tcra_form_draft(self):
+        if hasattr(self.window.settings, "clear_tcra_form_draft"):
+            self.window.settings.clear_tcra_form_draft()
+        else:
+            self._remove("tcra_form_draft")
+
+
+    def preferred_session_dialog_dir(self) -> str:
+        current_path = (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else str(
+                getattr(
+                    getattr(self.window, "session_runtime", None),
+                    "session_path",
+                    getattr(getattr(self.window, "session_runtime", None), "path", ""),
+                )
+                or ""
+            )
+        ) or self.restore_last_session_path()
+        return resolve_preferred_directory(
+            current_path,
+            self.restore_database_bootstrap_source_path(),
+            self.restore_legacy_workbook_path(),
+        )
+
+    def preferred_import_dialog_dir(self) -> str:
+        return self.preferred_session_dialog_dir()
+
 
     def preferred_export_dir(self) -> str:
         export_dir = ""
@@ -217,11 +311,7 @@ class SettingsController:
         else:
             export_dir = str(self._value("last_export_dir", "") or "")
 
-        normalized = self._normalize_path(export_dir)
-        if normalized and os.path.isdir(normalized):
-            return normalized
-
-        return self.preferred_excel_dialog_dir()
+        return resolve_preferred_directory(export_dir, self.preferred_session_dialog_dir())
 
     def save_last_export_dir(self, path: str):
         normalized = self._normalize_path(path)
@@ -236,3 +326,18 @@ class SettingsController:
             self.window.settings.set_last_export_dir(export_dir)
         else:
             self._set_value("last_export_dir", export_dir)
+
+    def tcra_filter_state(self) -> dict:
+        if hasattr(self.window.settings, "tcra_filter_state"):
+            state = self.window.settings.tcra_filter_state()
+        else:
+            raw_state = self._value("tcra_filter_state", {})
+            state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        return dict(state or {})
+
+    def set_tcra_filter_state(self, state: dict):
+        clean_state = dict(state or {})
+        if hasattr(self.window.settings, "set_tcra_filter_state"):
+            self.window.settings.set_tcra_filter_state(clean_state)
+        else:
+            self._set_value("tcra_filter_state", clean_state)

@@ -8,10 +8,10 @@ from app.services.tcra_excel_service import TCRA_SHEET_NAME, TcraExcelService
 from app.services.tcra_sqlite_service import TcraSqliteService
 
 
-def build_legacy_tcra_workbook(path):
+def build_legacy_tcra_workbook(path, *, sheet_name=TCRA_SHEET_NAME):
     workbook = openpyxl.Workbook()
     worksheet = workbook.active
-    worksheet.title = TCRA_SHEET_NAME
+    worksheet.title = sheet_name
     worksheet.append(
         [
             "Processo",
@@ -239,3 +239,14 @@ def test_tcra_excel_service_analysis_summary_lines_include_top_issue_codes(tmp_p
     assert summary_lines[0] == "TCRAs importaveis: 1"
     assert any("Principais ocorrencias:" in line for line in summary_lines)
     assert any("Primeiros termos:" in line for line in summary_lines)
+
+
+def test_tcra_excel_service_accepts_legacy_apostrophe_sheet_name(tmp_path):
+    workbook_path = tmp_path / "tcras-apostrofo.xlsx"
+    build_legacy_tcra_workbook(workbook_path, sheet_name="TCRA's")
+
+    service = TcraExcelService(sqlite_service=TcraSqliteService(db_path=tmp_path / "local.db"), today=date(2026, 4, 3))
+    analysis = service.analyze_workbook(workbook_path)
+
+    assert analysis.worksheet_name == "TCRA's"
+    assert analysis.importable_count == 2

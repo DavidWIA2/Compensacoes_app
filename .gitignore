@@ -19,3 +19,5 @@ tcra_test_run*.log
 tmp_tcra_debug.db*
 data/audit/
 data/state/
+.env.supabase
+supabase/.temp/

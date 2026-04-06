@@ -18,6 +18,7 @@ from app.services.tcra_sqlite_service import TcraSqliteService
 
 
 TCRA_SHEET_NAME = "TCRAs"
+TCRA_SHEET_ALIASES = (TCRA_SHEET_NAME, "TCRA's")
 
 
 def _stringify(value: object) -> str:
@@ -169,10 +170,12 @@ class TcraExcelService:
             raise FileNotFoundError(f"Arquivo nao encontrado: {workbook_path}")
 
         workbook = openpyxl.load_workbook(workbook_path, data_only=False)
-        if TCRA_SHEET_NAME not in workbook.sheetnames:
-            raise KeyError(f"A aba '{TCRA_SHEET_NAME}' nao existe em {workbook_path}.")
+        worksheet_name = self._resolve_worksheet_name(tuple(workbook.sheetnames))
+        if not worksheet_name:
+            expected_names = "', '".join(TCRA_SHEET_ALIASES)
+            raise KeyError(f"Nenhuma aba de TCRA valida ('{expected_names}') existe em {workbook_path}.")
 
-        worksheet = workbook[TCRA_SHEET_NAME]
+        worksheet = workbook[worksheet_name]
         column_map = self._build_column_map(worksheet)
         missing_columns = tuple(
             field_name
@@ -215,7 +218,7 @@ class TcraExcelService:
 
         return TcraWorkbookAnalysis(
             workbook_path=workbook_path,
-            worksheet_name=TCRA_SHEET_NAME,
+            worksheet_name=worksheet_name,
             importable_count=len(tcras),
             skipped_count=skipped_count,
             missing_columns=missing_columns,
@@ -253,6 +256,15 @@ class TcraExcelService:
             updated_count=updated_count,
             imported_uids=tuple(imported_uids),
         )
+
+    @staticmethod
+    def _resolve_worksheet_name(sheet_names: Sequence[str]) -> str:
+        normalized_map = {_normalize_header(name): name for name in sheet_names}
+        for candidate in TCRA_SHEET_ALIASES:
+            match = normalized_map.get(_normalize_header(candidate))
+            if match:
+                return match
+        return ""
 
     @staticmethod
     def _row_has_meaningful_data(row_values: Sequence[openpyxl.cell.cell.Cell]) -> bool:

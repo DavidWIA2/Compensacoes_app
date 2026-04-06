@@ -130,6 +130,17 @@ Nas builds publicadas, o app consulta por padrão `https://github.com/DavidWIA2/
 
 Para detalhes de empacotamento, instalador, publicação e assinatura de código, veja [docs/release.md](docs/release.md).
 
+## Supabase
+
+O repositório já possui a base inicial para evoluir do SQLite local para um
+Postgres remoto com Supabase:
+
+- migrations em `supabase/migrations/`
+- seed seguro em `supabase/seed.sql`
+- script administrativo de carga em `scripts/sync_sqlite_to_supabase.py`
+
+O guia operacional está em [docs/supabase.md](docs/supabase.md).
+
 ## Distribuição sem assinatura
 
 O app pode ser usado normalmente sem assinatura digital, o que é suficiente para uso interno ou distribuição restrita. Nesse cenário, o recomendado é publicar o artefato com o `.sha256` e orientar a validação com:

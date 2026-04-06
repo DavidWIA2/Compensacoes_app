@@ -1,0 +1,3 @@
+-- Seed intencionalmente vazio.
+-- O projeto usa scripts administrativos para migrar dados reais do SQLite local
+-- para o Postgres remoto. Nao coloque dados de producao aqui.

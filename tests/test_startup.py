@@ -1,6 +1,7 @@
 import os
 
 from app import main as main_module
+from app.services.access_service import AccessEnvironment, AppAccessSession
 
 
 def test_resolve_startup_assets_returns_pair_when_files_exist(monkeypatch):
@@ -40,3 +41,104 @@ def test_create_startup_splash_uses_resolved_assets(monkeypatch):
 
     assert captured == [("gif", "splash")]
     assert isinstance(splash, FakeSplash)
+
+
+def test_request_app_access_returns_none_when_dialog_is_cancelled(monkeypatch):
+    monkeypatch.setattr(main_module, "AppSettings", lambda: object())
+    monkeypatch.setattr(main_module, "SupabaseAccessService", lambda: object())
+
+    class FakeDialog:
+        def __init__(self, **kwargs):
+            self.access_session = None
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(main_module, "AccessDialog", FakeDialog)
+
+    assert main_module.request_app_access() is None
+
+
+def test_main_stops_when_access_is_not_granted(monkeypatch):
+    calls = []
+
+    class FakeApp:
+        def __init__(self, argv):
+            self.argv = argv
+
+        def setOrganizationName(self, value):
+            calls.append(("org", value))
+
+        def setApplicationName(self, value):
+            calls.append(("name", value))
+
+        def setApplicationDisplayName(self, value):
+            calls.append(("display", value))
+
+        def exec(self):
+            calls.append(("exec", None))
+            return 99
+
+    monkeypatch.setattr(main_module, "QApplication", FakeApp)
+    monkeypatch.setattr(main_module, "request_app_access", lambda: None)
+
+    assert main_module.main() == 0
+    assert ("exec", None) not in calls
+
+
+def test_main_creates_window_with_access_session(monkeypatch):
+    access_session = AppAccessSession(
+        environment=AccessEnvironment.DEMO,
+        label="Demonstracao",
+        auth_mode="demo_local",
+        local_db_path="demo.db",
+    )
+    created = []
+    splash_calls = []
+
+    class FakeApp:
+        def __init__(self, argv):
+            self.argv = argv
+
+        def setOrganizationName(self, value):
+            return None
+
+        def setApplicationName(self, value):
+            return None
+
+        def setApplicationDisplayName(self, value):
+            return None
+
+        def exec(self):
+            return 321
+
+    class FakeSplash:
+        def show(self):
+            splash_calls.append("show")
+
+        def update_status(self, message):
+            splash_calls.append(message)
+
+        def finish(self, window):
+            splash_calls.append(("finish", window))
+
+    class FakeWindow:
+        def __init__(self, access_session=None):
+            created.append(access_session)
+
+        def show(self):
+            splash_calls.append("window-show")
+
+    monkeypatch.setattr(main_module, "QApplication", FakeApp)
+    monkeypatch.setattr(main_module, "request_app_access", lambda: access_session)
+    monkeypatch.setattr(main_module, "create_startup_splash", lambda: FakeSplash())
+    monkeypatch.setattr(main_module, "register_tile_scheme", lambda: splash_calls.append("register-tile"))
+    monkeypatch.setattr(main_module, "install_tile_scheme", lambda: splash_calls.append("install-tile"))
+    monkeypatch.setattr(main_module, "MainWindow", FakeWindow)
+
+    result = main_module.main()
+
+    assert result == 321
+    assert created == [access_session]
+    assert "register-tile" in splash_calls
+    assert "install-tile" in splash_calls

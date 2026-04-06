@@ -124,6 +124,30 @@ def build_authoritative_only_status(
     )
 
 
+def build_remote_authoritative_status(
+    *,
+    workbook_path: str,
+    operation: str,
+    sqlite_status: object,
+    record_count: int,
+    extra_issues: Sequence[str] = (),
+) -> AuthoritativeWriteStatus:
+    return AuthoritativeWriteStatus(
+        status="remote_authoritative",
+        operation=operation,
+        workbook_path=workbook_path,
+        authority_source="remote",
+        sqlite_status=str(getattr(sqlite_status, "status", "") or ""),
+        sqlite_strategy=str(getattr(sqlite_status, "strategy", "") or ""),
+        synced_at=str(getattr(sqlite_status, "synced_at", "") or ""),
+        record_count=max(int(getattr(sqlite_status, "record_count", 0) or 0), int(record_count or 0)),
+        excel_mirrored=False,
+        finalized=False,
+        rollback_applied=False,
+        issues=normalized_issues(getattr(sqlite_status, "issues", ()) or (), extra_issues),
+    )
+
+
 def resolve_finalized_records(
     *,
     current_records: Sequence[Compensacao],

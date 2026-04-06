@@ -12,11 +12,13 @@ from app.config import APP_WINDOW_TITLE, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.persistence_monitoring import PersistenceMonitoringUseCases
 from app.models.compensacao import Compensacao
+from app.services.access_service import AppAccessSession
 from app.services.app_settings import AppSettings
 from app.services.audit_service import AuditService
 from app.services.session_spreadsheet_adapter import ExternalSpreadsheetAdapter
 from app.services.session_workbook_runtime import SessionWorkbookRuntime
 from app.services.sqlite_mirror_service import SqliteMirrorService
+from app.services.sqlite_mirror_service import SqliteMirrorService as DirectSqliteMirrorService
 from app.services.coordinates import build_heatmap_point, build_heatmap_points
 from app.services.gis_service import GisService
 
@@ -59,8 +61,9 @@ MICROB_NAME_FIELD = "Nome_Do_Arquivo"
 MICROB_DIR = resource_path("data", "microbacias")
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, access_session: AppAccessSession | None = None):
         super().__init__()
+        self.access_session = access_session or AppAccessSession.local_default()
         self.setWindowTitle(APP_WINDOW_TITLE)
         configure_window_class_registry(
             self,
@@ -78,14 +81,19 @@ class MainWindow(QMainWindow):
         self.import_adapter_factory = ExternalSpreadsheetAdapter
         self.external_data_adapter_factory = self.import_adapter_factory
         self.is_dark_mode = False
+        settings_name = self.access_session.settings_name(APP_SETTINGS_NAME)
+        persistence_service_factory = SqliteMirrorService
+        if self.access_session.local_db_path:
+            target_db_path = os.fspath(self.access_session.local_db_path)
+            persistence_service_factory = lambda: DirectSqliteMirrorService(db_path=target_db_path)
         runtime_bundle = build_runtime_bundle(
             settings_factory=AppSettings,
             qsettings_factory=QSettings,
             qsettings_org=APP_SETTINGS_ORG,
-            qsettings_name=APP_SETTINGS_NAME,
+            qsettings_name=settings_name,
             loader_factory=self.external_data_adapter_factory,
             session_runtime_cls=SessionWorkbookRuntime,
-            persistence_service_factory=SqliteMirrorService,
+            persistence_service_factory=persistence_service_factory,
             audit_service_cls=AuditService,
             monitoring_use_cases_cls=PersistenceMonitoringUseCases,
             authoritative_persistence_cls=AuthoritativePersistenceUseCases,

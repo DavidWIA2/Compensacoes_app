@@ -12,8 +12,10 @@ from app.application.use_cases.authoritative_write_coordinator import (
 )
 from app.application.use_cases.local_mutation_sync import (
     LocalMutationApplyResult,
+    LocalMutationSyncStatus,
     LocalMutationSyncUseCases,
 )
+from app.application.use_cases.authoritative_write_support import build_remote_authoritative_status
 from app.application.use_cases.local_record_queries import (
     LocalDuplicateCheckResult,
     LocalFilterFacetsResult,
@@ -83,7 +85,9 @@ from app.application.use_cases.workbook_session import (
 )
 from app.models.compensacao import Compensacao
 from app.services.audit_service import serialize_record, serialize_records_sample
+from app.services.access_service import AccessEnvironment, AppAccessSession, SupabaseAccessService
 from app.services.sqlite_session_backup_service import SqliteSessionBackupService
+from app.services.supabase_compensacoes_rpc_service import SupabaseCompensacoesRpcService
 from app.utils.logger import get_logger
 
 
@@ -101,11 +105,16 @@ class AuthoritativePersistenceUseCases:
         *,
         loader_factory: Callable[[], object] | None = None,
         monitoring_use_cases: PersistenceMonitoringUseCases | None = None,
+        access_service: SupabaseAccessService | None = None,
+        remote_compensacoes_service: SupabaseCompensacoesRpcService | None = None,
     ):
         self.workbook = workbook
         self.audit_service = audit_service
         self.persistence_service = persistence_service
         self.session_backup_service = SqliteSessionBackupService()
+        self.access_service = access_service or SupabaseAccessService()
+        self.remote_compensacoes_service = remote_compensacoes_service or SupabaseCompensacoesRpcService()
+        self.access_session = AppAccessSession.local_default()
         self.persistence_monitoring_use_cases = monitoring_use_cases or PersistenceMonitoringUseCases(
             persistence_service
         )
@@ -348,12 +357,156 @@ class AuthoritativePersistenceUseCases:
 
     def bind_runtime_window(self, window) -> None:
         self.set_persistence_service(getattr(window, "persistence_service", None))
+        access_session = getattr(window, "access_session", None)
+        if isinstance(access_session, AppAccessSession):
+            self.access_session = access_session
 
     def set_persistence_service(self, persistence_service) -> None:
         self.persistence_service = persistence_service
         self.local_record_queries.snapshot_reader = persistence_service
         self.local_mutation_sync.snapshot_writer = persistence_service
         self.persistence_monitoring_use_cases.snapshot_reader = persistence_service
+
+    def _current_access_session(self) -> AppAccessSession:
+        return self.access_session if isinstance(self.access_session, AppAccessSession) else AppAccessSession.local_default()
+
+    def _can_use_remote_compensacoes_write(self, *, workbook_path: str | None = None) -> bool:
+        access_session = self._current_access_session()
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            return False
+
+        session_path = str(workbook_path or self.current_session_path() or "").strip()
+        expected_session_path = str(getattr(access_session, "local_session_path", "") or "").strip()
+        if not session_path or not expected_session_path or session_path != expected_session_path:
+            return False
+
+        return bool(
+            str(getattr(access_session, "access_token", "") or "").strip()
+            and str(getattr(access_session, "refresh_token", "") or "").strip()
+        )
+
+    def _create_remote_compensacoes_client(self):
+        return self.access_service.create_authenticated_client(self._current_access_session())
+
+    @staticmethod
+    def _with_local_sync_issues(
+        status: LocalMutationSyncStatus,
+        *extra_issues: str,
+    ) -> LocalMutationSyncStatus:
+        merged_issues = AuthoritativePersistenceUseCases._normalized_issues(status.issues, extra_issues)
+        if merged_issues == status.issues:
+            return status
+        return LocalMutationSyncStatus(
+            status=status.status,
+            operation=status.operation,
+            workbook_path=status.workbook_path,
+            strategy=status.strategy,
+            synced_at=status.synced_at,
+            record_count=status.record_count,
+            issues=merged_issues,
+        )
+
+    def _sync_remote_cache_after_write(
+        self,
+        *,
+        client,
+        operation: str,
+        projected_records: Sequence[Compensacao],
+        fallback_local_apply: Callable[[], LocalMutationApplyResult],
+    ) -> LocalMutationApplyResult:
+        workbook_path = self.current_session_path()
+        sync_service = getattr(self.access_service, "production_sync_service", None)
+        fallback_records = self._clone_records(projected_records)
+        target_db_path = getattr(self.persistence_service, "db_path", None)
+
+        if sync_service is None:
+            issue = "Servico de sincronizacao da producao indisponivel para atualizar o cache local."
+        else:
+            try:
+                sync_service.sync_authenticated_client(
+                    client,
+                    local_db_path=target_db_path,
+                    session_path=workbook_path,
+                )
+                synced_records, snapshot = self._load_records_from_sqlite(workbook_path)
+                synced_at = str(getattr(snapshot, "synced_at", "") or "")
+                return LocalMutationApplyResult(
+                    status=LocalMutationSyncStatus(
+                        status="sqlite",
+                        operation=operation,
+                        workbook_path=workbook_path,
+                        strategy="remote_snapshot_refresh",
+                        synced_at=synced_at,
+                        record_count=len(synced_records) or len(fallback_records),
+                    ),
+                    records=synced_records or fallback_records,
+                    source="sqlite" if synced_records else "projection",
+                )
+            except Exception as exc:
+                issue = f"Sincronizacao completa do cache local apos escrita remota falhou: {exc}"
+                logger.warning(issue, exc_info=True)
+
+        try:
+            fallback_result = fallback_local_apply()
+        except Exception as exc:
+            fallback_issue = f"Fallback local apos escrita remota tambem falhou: {exc}"
+            logger.warning(fallback_issue, exc_info=True)
+            status = LocalMutationSyncStatus(
+                status="falha",
+                operation=operation,
+                workbook_path=workbook_path,
+                strategy="remote_snapshot_refresh",
+                record_count=len(fallback_records),
+                issues=self._normalized_issues((issue,), (fallback_issue,)),
+            )
+            return LocalMutationApplyResult(
+                status=status,
+                records=fallback_records,
+                source="projection",
+            )
+
+        return LocalMutationApplyResult(
+            status=self._with_local_sync_issues(fallback_result.status, issue),
+            records=fallback_result.records,
+            source=fallback_result.source,
+        )
+
+    def _execute_remote_authoritative_write(
+        self,
+        *,
+        operation: str,
+        remote_call: Callable[[object], object],
+        projected_records_factory: Callable[[object], Sequence[Compensacao]],
+        fallback_local_apply: Callable[[object], LocalMutationApplyResult],
+    ) -> CoordinatedWriteResult[None]:
+        workbook_path = self.current_session_path()
+        client = self._create_remote_compensacoes_client()
+        remote_result = remote_call(client)
+        projected_records = self._clone_records(projected_records_factory(remote_result))
+        local_result = self._sync_remote_cache_after_write(
+            client=client,
+            operation=operation,
+            projected_records=projected_records,
+            fallback_local_apply=lambda: fallback_local_apply(remote_result),
+        )
+        write_status = build_remote_authoritative_status(
+            workbook_path=workbook_path,
+            operation=operation,
+            sqlite_status=local_result.status,
+            record_count=max(
+                len(local_result.records),
+                int(getattr(remote_result, "record_count", 0) or 0),
+                len(projected_records),
+            ),
+        )
+        return CoordinatedWriteResult(
+            status=local_result.status,
+            write_status=write_status,
+            records=local_result.records,
+            excel_result=None,
+            rollback_issues=(),
+            finalized=False,
+        )
 
     def snapshot_workbook_service_state(self) -> WorkbookServiceStateSnapshot:
         return snapshot_workbook_service_state(self.workbook)
@@ -889,6 +1042,17 @@ class AuthoritativePersistenceUseCases:
             backup_path=backup_path,
         )
 
+    @staticmethod
+    def _apply_remote_record_identity(record: Compensacao, remote_result: object) -> Compensacao:
+        finalized_record = deepcopy(record)
+        remote_uid = str(getattr(remote_result, "uid", "") or "").strip()
+        remote_excel_row = int(getattr(remote_result, "excel_row", 0) or 0)
+        if remote_uid:
+            finalized_record.uid = remote_uid
+        if remote_excel_row > 0:
+            finalized_record.excel_row = remote_excel_row
+        return finalized_record
+
     def _execute_coordinated_import(
         self,
         *,
@@ -932,6 +1096,29 @@ class AuthoritativePersistenceUseCases:
     ) -> CoordinatedWriteResult[None]:
         backup_path = self.create_operation_backup("add")
         self.assign_provisional_add_identity(record, existing_records=authoritative_records)
+        if self._can_use_remote_compensacoes_write():
+            return self._execute_remote_authoritative_write(
+                operation="add",
+                remote_call=lambda client: self.remote_compensacoes_service.save_record(
+                    client,
+                    workbook_path=self.current_session_path(),
+                    record=record,
+                    action="add",
+                    summary=f"Registro cadastrado: {record.av_tec or record.oficio_processo}",
+                    backup_path=backup_path,
+                    metadata={"authority": "supabase_remote", "environment": "production"},
+                    after=serialize_record(record),
+                ),
+                projected_records_factory=lambda remote_result: self.local_mutation_sync.project_after_add(
+                    authoritative_records,
+                    self._apply_remote_record_identity(record, remote_result),
+                ),
+                fallback_local_apply=lambda remote_result: self.local_mutation_sync.apply_after_add(
+                    workbook_path=self.current_session_path(),
+                    existing_records=authoritative_records,
+                    added_record=self._apply_remote_record_identity(record, remote_result),
+                ),
+            )
         return self._execute_coordinated_write(
             operation="add",
             sqlite_apply=lambda: self.local_mutation_sync.apply_after_add(
@@ -959,6 +1146,30 @@ class AuthoritativePersistenceUseCases:
         before_record: Compensacao | None,
     ) -> CoordinatedWriteResult[None]:
         backup_path = self.create_operation_backup("edit")
+        if self._can_use_remote_compensacoes_write():
+            return self._execute_remote_authoritative_write(
+                operation="edit",
+                remote_call=lambda client: self.remote_compensacoes_service.save_record(
+                    client,
+                    workbook_path=self.current_session_path(),
+                    record=record,
+                    action="edit",
+                    summary=f"Registro alterado: {record.av_tec or record.oficio_processo}",
+                    backup_path=backup_path,
+                    metadata={"authority": "supabase_remote", "environment": "production"},
+                    before=serialize_record(before_record) if before_record is not None else None,
+                    after=serialize_record(record),
+                ),
+                projected_records_factory=lambda remote_result: self.local_mutation_sync.project_after_edit(
+                    authoritative_records,
+                    self._apply_remote_record_identity(record, remote_result),
+                ),
+                fallback_local_apply=lambda remote_result: self.local_mutation_sync.apply_after_edit(
+                    workbook_path=self.current_session_path(),
+                    existing_records=authoritative_records,
+                    updated_record=self._apply_remote_record_identity(record, remote_result),
+                ),
+            )
         return self._execute_coordinated_write(
             operation="edit",
             sqlite_apply=lambda: self.local_mutation_sync.apply_after_edit(
@@ -982,6 +1193,29 @@ class AuthoritativePersistenceUseCases:
         authoritative_records: Sequence[Compensacao],
     ) -> CoordinatedWriteResult[None]:
         backup_path = self.create_operation_backup("delete")
+        if self._can_use_remote_compensacoes_write():
+            return self._execute_remote_authoritative_write(
+                operation="delete",
+                remote_call=lambda client: self.remote_compensacoes_service.delete_record(
+                    client,
+                    workbook_path=self.current_session_path(),
+                    uid=deleted_record.uid,
+                    action="delete",
+                    summary=f"Registro excluido: {deleted_record.av_tec or deleted_record.oficio_processo}",
+                    backup_path=backup_path,
+                    metadata={"authority": "supabase_remote", "environment": "production"},
+                    before=serialize_record(deleted_record),
+                ),
+                projected_records_factory=lambda _remote_result: self.local_mutation_sync.project_after_delete(
+                    authoritative_records,
+                    deleted_record,
+                ),
+                fallback_local_apply=lambda _remote_result: self.local_mutation_sync.apply_after_delete(
+                    workbook_path=self.current_session_path(),
+                    existing_records=authoritative_records,
+                    deleted_record=deleted_record,
+                ),
+            )
         return self._execute_coordinated_write(
             operation="delete",
             sqlite_apply=lambda: self.local_mutation_sync.apply_after_delete(
@@ -1014,6 +1248,54 @@ class AuthoritativePersistenceUseCases:
             total = len(imported_records)
             for index, _record in enumerate(imported_records, start=1):
                 progress_callback(index, total)
+
+        if self._can_use_remote_compensacoes_write():
+            result = self._execute_remote_authoritative_write(
+                operation="import",
+                remote_call=lambda client: self.remote_compensacoes_service.replace_records(
+                    client,
+                    workbook_path=self.current_session_path(),
+                    records=imported_records,
+                    action="import",
+                    summary=f"{len(imported_records)} registro(s) importado(s) de {os.path.basename(analysis.import_path)}",
+                    backup_path=backup_path,
+                    metadata={
+                        **build_import_audit_metadata(
+                            analysis=analysis,
+                            import_result=self._build_import_result(
+                                analysis=analysis,
+                                imported_records=imported_records,
+                                backup_path=backup_path,
+                            ),
+                        ),
+                        "authority": "supabase_remote",
+                        "environment": "production",
+                    },
+                    after=build_import_audit_after_payload(imported_records),
+                ),
+                projected_records_factory=lambda _remote_result: self.local_mutation_sync.project_after_import(
+                    base_records,
+                    imported_records,
+                ),
+                fallback_local_apply=lambda _remote_result: self.local_mutation_sync.apply_after_import(
+                    workbook_path=self.current_session_path(),
+                    existing_records=base_records,
+                    imported_records=imported_records,
+                ),
+            )
+            import_result = self._build_import_result(
+                analysis=analysis,
+                imported_records=imported_records,
+                backup_path=backup_path,
+            )
+            return CoordinatedWriteResult(
+                status=result.status,
+                write_status=result.write_status,
+                records=result.records,
+                excel_result=import_result,
+                rollback_issues=result.rollback_issues,
+                finalized=result.finalized,
+            )
 
         result = self._execute_coordinated_import(
             analysis=analysis,

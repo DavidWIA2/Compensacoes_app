@@ -620,9 +620,12 @@ class DataController:
         return self._load_singleton_database(confirm_discard=True, show_feedback=True)
 
     def load_last_session(self):
+        startup_session_path = str(
+            getattr(getattr(self.window, "access_session", None), "local_session_path", "") or ""
+        ).strip()
         plan = build_singleton_session_startup_plan(
             pending_legacy_source_path=self.window.settings_controller.pending_singleton_bootstrap_source_path(),
-            singleton_session_path=self.window.settings_controller.restore_last_session_path(),
+            singleton_session_path=self.window.settings_controller.restore_last_session_path() or startup_session_path,
         )
         if plan.should_bootstrap_legacy and self._bootstrap_singleton_database_from_legacy_source(plan.source_path):
             return True

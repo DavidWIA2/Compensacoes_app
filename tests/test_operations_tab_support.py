@@ -166,3 +166,27 @@ def test_operations_tab_support_builds_write_and_runtime_texts():
     assert "runtime-sync (2/5)" in runtime_texts.active
     assert "Sincronizando espelho local..." in runtime_texts.recent
     assert runtime_texts.cancel_enabled is True
+
+
+def test_operations_tab_support_describes_remote_authoritative_writes():
+    now = datetime.now(timezone.utc).isoformat()
+    remote_status = type(
+        "WriteStatus",
+        (),
+        {
+            "status": "remote_authoritative",
+            "operation": "delete",
+            "authority_source": "remote",
+            "sqlite_strategy": "remote_snapshot_refresh",
+            "synced_at": now,
+            "record_count": 12,
+            "finalized": False,
+            "rollback_applied": False,
+            "issues": (),
+        },
+    )()
+
+    text = build_authoritative_write_text(remote_status)
+
+    assert "Escrita autoritativa: Supabase | delete persistida na base oficial." in text
+    assert "sincronização completa do cache local" in text.lower()

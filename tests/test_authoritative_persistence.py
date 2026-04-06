@@ -11,6 +11,7 @@ from app.application.use_cases.local_mutation_sync import (
 )
 from app.application.use_cases.workbook_session import ImportWorkbookAnalysis
 from app.models.compensacao import Compensacao
+from app.services.access_service import AccessEnvironment, AppAccessSession
 
 
 def make_record(**overrides) -> Compensacao:
@@ -207,6 +208,82 @@ class FakeMonitoringPersistence:
         )
 
 
+class FakeRemoteCompensacoesRpcService:
+    def __init__(self, *, save_result=None, delete_result=None, replace_result=None):
+        self.save_result = save_result or SimpleNamespace(uid="remote-uid", excel_row=9, record_count=2)
+        self.delete_result = delete_result or SimpleNamespace(uid="remote-uid", record_count=0)
+        self.replace_result = replace_result or SimpleNamespace(record_count=0, imported_count=0)
+        self.save_calls = []
+        self.delete_calls = []
+        self.replace_calls = []
+
+    def save_record(self, client, **kwargs):
+        self.save_calls.append({"client": client, **kwargs})
+        return self.save_result
+
+    def delete_record(self, client, **kwargs):
+        self.delete_calls.append({"client": client, **kwargs})
+        return self.delete_result
+
+    def replace_records(self, client, **kwargs):
+        self.replace_calls.append({"client": client, **kwargs})
+        return self.replace_result
+
+
+class FakeRemoteSyncService:
+    def __init__(self, persistence, *, synced_records=None, fail: bool = False):
+        self.persistence = persistence
+        self.synced_records = list(synced_records or [])
+        self.fail = fail
+        self.calls = []
+
+    def sync_authenticated_client(self, client, *, local_db_path=None, session_path=None):
+        self.calls.append(
+            {
+                "client": client,
+                "local_db_path": str(local_db_path or ""),
+                "session_path": session_path,
+            }
+        )
+        if self.fail:
+            raise RuntimeError("remote cache offline")
+        self.persistence.sync_workbook_snapshot(session_path, list(self.synced_records))
+        return SimpleNamespace(
+            local_db_path=str(local_db_path or ""),
+            session_path=session_path,
+            record_count=len(self.synced_records),
+        )
+
+
+class FakeAccessService:
+    def __init__(self, *, client=None, sync_service=None):
+        self.client = client or object()
+        self.production_sync_service = sync_service
+        self.calls = []
+
+    def create_authenticated_client(self, access_session):
+        self.calls.append(access_session)
+        return self.client
+
+
+def make_production_session(**overrides) -> AppAccessSession:
+    base = {
+        "environment": AccessEnvironment.PRODUCTION,
+        "label": "Producao",
+        "auth_mode": "password",
+        "user_id": "user-123",
+        "user_email": "analista@prefeitura.sp.gov.br",
+        "supabase_url": "https://yonvcnnkewzoqwnnmcdx.supabase.co",
+        "local_db_path": "C:/tmp/producao.db",
+        "local_session_path": "session://banco-local",
+        "app_role": "editor",
+        "access_token": "token",
+        "refresh_token": "refresh-token",
+    }
+    base.update(overrides)
+    return AppAccessSession(**base)
+
+
 def test_execute_import_keeps_success_when_audit_append_fails():
     workbook = FakeWorkbook()
     audit = FakeAuditTrail(fail=True)
@@ -393,3 +470,100 @@ def test_resolve_monitoring_snapshot_uses_shared_monitoring_gateway():
     assert snapshot.record_overview_report.total_records == 4
     assert snapshot.record_overview_report.top_microbacias == (("Gregorio", 3),)
     assert snapshot.record_overview_report.sample_records[0].uid == "uid-1"
+
+
+def test_execute_add_uses_supabase_remote_write_in_production():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    audit = FakeAuditTrail()
+    existing = make_record(uid="base-uid", excel_row=8, av_tec="AT-BASE")
+    remote_added = make_record(uid="remote-uid", excel_row=9, av_tec="AT-NOVO")
+    persistence = FakeSnapshotPersistence(snapshot_records=[existing], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[existing, remote_added])
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteCompensacoesRpcService(
+        save_result=SimpleNamespace(uid="remote-uid", excel_row=9, record_count=2)
+    )
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=access_service,
+        remote_compensacoes_service=remote_rpc,
+    )
+    service.access_session = make_production_session()
+
+    result = service.execute_add(
+        make_record(uid="", excel_row=0, av_tec="AT-NOVO"),
+        authoritative_records=[existing],
+    )
+
+    assert len(remote_rpc.save_calls) == 1
+    assert remote_rpc.save_calls[0]["workbook_path"] == "session://banco-local"
+    assert len(remote_sync.calls) == 1
+    assert remote_sync.calls[0]["session_path"] == "session://banco-local"
+    assert result.write_status.status == "remote_authoritative"
+    assert result.status.strategy == "remote_snapshot_refresh"
+    assert [record.uid for record in result.records] == ["base-uid", "remote-uid"]
+    assert audit.events == []
+
+
+def test_execute_edit_falls_back_to_local_cache_sync_when_remote_refresh_fails():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    audit = FakeAuditTrail()
+    existing = make_record(uid="base-uid", excel_row=8, av_tec="AT-BASE")
+    updated = make_record(uid="base-uid", excel_row=8, av_tec="AT-EDIT")
+    persistence = FakeSnapshotPersistence(snapshot_records=[existing], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[updated], fail=True)
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteCompensacoesRpcService(
+        save_result=SimpleNamespace(uid="base-uid", excel_row=8, record_count=1)
+    )
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=access_service,
+        remote_compensacoes_service=remote_rpc,
+    )
+    service.access_session = make_production_session()
+
+    result = service.execute_edit(
+        updated,
+        authoritative_records=[existing],
+        before_record=existing,
+    )
+
+    assert len(remote_rpc.save_calls) == 1
+    assert result.write_status.status == "remote_authoritative"
+    assert result.status.strategy == "snapshot_rebuild"
+    assert "cache local" in " | ".join(result.write_status.issues).lower()
+    assert persistence.snapshot_records[0].av_tec == "AT-EDIT"
+
+
+def test_execute_delete_keeps_local_authority_outside_production():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    audit = FakeAuditTrail()
+    existing = make_record(uid="base-uid", excel_row=8, av_tec="AT-BASE")
+    persistence = FakeSnapshotPersistence(snapshot_records=[existing], synced_at="2026-03-31T12:00:00+00:00")
+    remote_rpc = FakeRemoteCompensacoesRpcService()
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=FakeAccessService(sync_service=FakeRemoteSyncService(persistence)),
+        remote_compensacoes_service=remote_rpc,
+    )
+
+    result = service.execute_delete(
+        existing,
+        authoritative_records=[existing],
+    )
+
+    assert result.write_status.status == "sqlite_authoritative"
+    assert remote_rpc.delete_calls == []

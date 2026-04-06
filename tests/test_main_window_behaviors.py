@@ -7,7 +7,6 @@ import openpyxl
 from app.models.compensacao import Compensacao
 from app.models.plantio_item import PlantioItem
 from app.services.app_settings import AppSettings
-from app.services.excel_service import WorkbookModifiedExternallyError
 from app.utils.logger import LOG_DIR
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -21,6 +20,7 @@ from app.application.use_cases.persistence_monitoring import (
     PersistenceRecordOverviewReport,
     PersistenceStatusReport,
 )
+from app.services.access_service import AccessEnvironment, AppAccessSession
 from app.models.display_columns import display_column_index
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
@@ -33,6 +33,7 @@ from app.application.use_cases.local_record_queries import (
     LocalRecordReadStatus,
 )
 from app.application.use_cases.local_mutation_sync import LocalMutationSyncStatus
+from app.services.sqlite_mirror_service import DEFAULT_SINGLETON_SESSION_PATH
 
 class MockQWebEngineView(QtWidgets.QWidget):
     loadFinished = Signal(bool)
@@ -160,6 +161,50 @@ def test_main_window_uses_readable_core_labels(monkeypatch):
     ]
 
     assert window.data_tab.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
+    window.close()
+
+
+def test_main_window_marks_demo_environment_and_uses_demo_database(monkeypatch, tmp_path):
+    demo_db = tmp_path / "demo-window.db"
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.DEMO,
+            label="Demonstracao",
+            auth_mode="demo_local",
+            local_db_path=str(demo_db),
+            is_anonymous=True,
+        )
+    )
+    get_app().processEvents()
+
+    window._refresh_window_chrome()
+
+    assert window.persistence_service.db_path == demo_db
+    assert window.session_environment_label.text() == "Ambiente: Demonstracao"
+    assert "[Demonstracao]" in window.windowTitle()
+    window.close()
+
+
+def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch, tmp_path):
+    demo_db = tmp_path / "prod-window.db"
+    sqlite_service = main_window_module.DirectSqliteMirrorService(db_path=demo_db)
+    sqlite_service.sync_workbook_snapshot(DEFAULT_SINGLETON_SESSION_PATH, [make_record()])
+
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Producao",
+            auth_mode="password",
+            user_email="analista@prefeitura.sp.gov.br",
+            local_db_path=str(demo_db),
+            local_session_path=DEFAULT_SINGLETON_SESSION_PATH,
+        )
+    )
+    get_app().processEvents()
+
+    assert len(window.records) == 1
+    assert window.shell_controller.current_session_path() == DEFAULT_SINGLETON_SESSION_PATH
+    assert window.session_environment_label.text() == "Ambiente: Producao"
     window.close()
 
 

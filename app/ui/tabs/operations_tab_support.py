@@ -205,6 +205,8 @@ def build_mutation_sync_text(status: object | None) -> str:
             lines.append("Modo de escrita local: sincronização incremental.")
         elif strategy == "snapshot_rebuild":
             lines.append("Modo de escrita local: reconstrução completa do snapshot.")
+        elif strategy == "remote_snapshot_refresh":
+            lines.append("Modo de escrita local: refresh completo do cache remoto.")
         if synced_at:
             lines.append(f"Última sincronização de escrita: {format_audit_timestamp(synced_at)}")
         if issues:
@@ -249,6 +251,21 @@ def build_authoritative_write_text(status: object | None) -> str:
             lines.append("Fluxo autoritativo: reconstrução do snapshot local antes do espelho de planilha.")
         if finalized:
             lines.append("Identidade final reconciliada após a gravação no espelho de planilha.")
+        if synced_at:
+            lines.append(f"Última confirmação local: {format_audit_timestamp(synced_at)}")
+        if issues:
+            lines.append("Observações: " + " | ".join(str(issue) for issue in issues))
+        return "\n".join(lines)
+
+    if status_value == "remote_authoritative":
+        lines = [f"Escrita autoritativa: Supabase | {operation} persistida na base oficial."]
+        lines.append(f"Cache local atualizado para {record_count} registro(s) na sessão.")
+        if sqlite_strategy == "remote_snapshot_refresh":
+            lines.append("Fluxo autoritativo: sincronização completa do cache local após a RPC remota.")
+        elif sqlite_strategy == "incremental":
+            lines.append("Fluxo autoritativo: fallback incremental do cache local após a escrita remota.")
+        elif sqlite_strategy == "snapshot_rebuild":
+            lines.append("Fluxo autoritativo: reconstrução local do snapshot após a escrita remota.")
         if synced_at:
             lines.append(f"Última confirmação local: {format_audit_timestamp(synced_at)}")
         if issues:

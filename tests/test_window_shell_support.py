@@ -58,3 +58,27 @@ def test_window_shell_support_builds_professional_window_chrome_snapshot():
     assert snapshot.selection_tooltip == "Registro atualmente carregado no formulário."
     assert "ofício" in COMPENSACOES_SEARCH_PLACEHOLDER.lower()
     assert "órgão" in TCRA_SEARCH_PLACEHOLDER.lower()
+
+
+def test_window_shell_support_distinguishes_remote_authoritative_writes():
+    snapshot = build_window_chrome_snapshot(
+        APP_WINDOW_TITLE,
+        session_path="session://banco-local",
+        availability=type("Availability", (), {"display_label": "Banco local", "detail_message": "ok"})(),
+        total_records=1,
+        filtered_records=1,
+        search_text="",
+        selected=None,
+        write_status=type(
+            "WriteStatus",
+            (),
+            {
+                "status": "remote_authoritative",
+                "operation": "edit",
+                "issues": (),
+            },
+        )(),
+    )
+
+    assert snapshot.write_label == "Escrita: Supabase"
+    assert "Supabase como autoridade da produção" in snapshot.write_tooltip

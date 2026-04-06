@@ -1,5 +1,6 @@
 from app.application.use_cases.authoritative_write_support import (
     build_authoritative_only_status,
+    build_remote_authoritative_status,
     build_write_status,
     clone_records,
     identity_signature,
@@ -55,11 +56,19 @@ def test_write_status_helpers_cover_primary_and_authoritative_flows():
         record_count=2,
         finalized=False,
     )
+    remote = build_remote_authoritative_status(
+        workbook_path="base.xlsx",
+        operation="edit",
+        sqlite_status=sqlite_status,
+        record_count=2,
+    )
 
     assert mirrored.status == "sqlite_primary"
     assert mirrored.finalized is True
     assert authoritative.status == "sqlite_authoritative"
     assert authoritative.uses_sqlite is True
+    assert remote.status == "remote_authoritative"
+    assert remote.authority_source == "remote"
 
 
 def test_finalize_resolution_detects_identity_change():

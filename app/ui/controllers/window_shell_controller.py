@@ -130,6 +130,20 @@ class WindowShellController:
         self.window.session_file_label.setMinimumWidth(int(220 * self.window.scale_factor))
         self.window.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
+        environment_chip_text = getattr(
+            getattr(self.window, "access_session", None),
+            "environment_chip_text",
+            "Ambiente: Local",
+        )
+        environment_chip_tooltip = getattr(
+            getattr(self.window, "access_session", None),
+            "environment_tooltip_text",
+            "Inicializacao local sem gateway de autenticacao.",
+        )
+        self.window.session_environment_label = QLabel(environment_chip_text)
+        self.window.session_environment_label.setObjectName("StatusChip")
+        self.window.session_environment_label.setToolTip(environment_chip_tooltip)
+
         self.window.session_records_label = QLabel("Registros: 0")
         self.window.session_records_label.setObjectName("StatusChip")
 
@@ -139,6 +153,7 @@ class WindowShellController:
         self.window.session_selection_label = QLabel("Modo: novo cadastro")
         self.window.session_selection_label.setObjectName("StatusChip")
 
+        self.window.statusBar().addPermanentWidget(self.window.session_environment_label)
         self.window.statusBar().addPermanentWidget(self.window.session_file_label)
         self.window.statusBar().addPermanentWidget(self.window.session_records_label)
         self.window.statusBar().addPermanentWidget(self.window.session_write_label)
@@ -423,7 +438,22 @@ class WindowShellController:
 
     def refresh_window_chrome(self):
         snapshot = self._build_window_chrome_snapshot()
-        self.window.setWindowTitle(snapshot.window_title)
+        window_title = snapshot.window_title
+        access_session = getattr(self.window, "access_session", None)
+        if bool(getattr(access_session, "is_demo", False)):
+            window_title = f"{window_title} [Demonstracao]"
+        self.window.setWindowTitle(window_title)
+        if hasattr(self.window, "session_environment_label"):
+            self.window.session_environment_label.setText(
+                getattr(access_session, "environment_chip_text", "Ambiente: Local")
+            )
+            self.window.session_environment_label.setToolTip(
+                getattr(
+                    access_session,
+                    "environment_tooltip_text",
+                    "Inicializacao local sem gateway de autenticacao.",
+                )
+            )
         self.window.session_file_label.setText(snapshot.file_label)
         self.window.session_file_label.setToolTip(snapshot.file_tooltip)
         self.window.session_records_label.setText(snapshot.records_label)

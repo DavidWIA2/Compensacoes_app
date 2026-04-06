@@ -9,6 +9,11 @@ Aplicativo desktop em Python para cadastro, consulta e acompanhamento de compens
 
 O projeto foi evoluído para um fluxo mais completo de operação: leitura e edição de planilhas Excel, filtros e métricas, mapa com apoio geoespacial, exportações em vários formatos, diagnósticos, logs e pipeline de release para distribuição no Windows.
 
+Agora o app tambem tem uma porta de entrada com dois modos:
+
+- `Producao`: acesso autenticado ao ambiente oficial
+- `Demonstracao`: base ficticia isolada para testes
+
 ## Download
 
 - Última versão publicada: [GitHub Releases](https://github.com/DavidWIA2/Compensacoes_app/releases/latest)
@@ -50,6 +55,7 @@ O projeto foi evoluído para um fluxo mais completo de operação: leitura e edi
 - fiona
 - pyproj
 - requests
+- supabase
 - PyInstaller
 - pytest
 
@@ -140,6 +146,7 @@ Postgres remoto com Supabase:
 - script administrativo de carga em `scripts/sync_sqlite_to_supabase.py`
 
 O guia operacional está em [docs/supabase.md](docs/supabase.md).
+O roadmap da transição definitiva está em [docs/supabase-transition-plan.md](docs/supabase-transition-plan.md).
 
 ## Distribuição sem assinatura
 
@@ -148,6 +155,22 @@ O app pode ser usado normalmente sem assinatura digital, o que é suficiente par
 ```powershell
 .\verify_release_checksum.ps1 -ArtifactPath .\Compensacoes-vX.Y.Z-win64.zip
 ```
+
+Para a tela de acesso, o app usa as variaveis publicas abaixo:
+
+```env
+COMPENSACOES_SUPABASE_PROD_URL=https://seu-projeto.supabase.co
+COMPENSACOES_SUPABASE_PROD_PUBLISHABLE_KEY=sb_publishable_...
+```
+
+Se voce quiser uma demonstracao online separada, configure tambem:
+
+```env
+COMPENSACOES_SUPABASE_DEMO_URL=https://seu-projeto-demo.supabase.co
+COMPENSACOES_SUPABASE_DEMO_PUBLISHABLE_KEY=sb_publishable_...
+```
+
+Sem um projeto demo configurado, o app continua oferecendo demonstracao com uma base local ficticia, reiniciada a cada abertura.
 
 ## Releases
 

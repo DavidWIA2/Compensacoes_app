@@ -1,8 +1,10 @@
-﻿from typing import Tuple
+from typing import Tuple
 
 import requests
 
+from app.services.access_service import AccessAuthError
 from app.services.excel_service import WorkbookModifiedExternallyError
+from app.services.supabase_compensacoes_rpc_service import SupabaseCompensacoesRpcError
 
 
 def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[str, str]:
@@ -22,6 +24,18 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
         return (
             "Planilha Desatualizada",
             "A planilha foi alterada fora do aplicativo. Recarregue antes de continuar.",
+        )
+
+    if isinstance(exc, AccessAuthError):
+        return (
+            "Sessao de Producao",
+            "Nao foi possivel concluir a operacao porque a sessao autenticada do Supabase nao esta valida. Entre novamente em Producao e tente de novo.",
+        )
+
+    if isinstance(exc, SupabaseCompensacoesRpcError):
+        return (
+            "Falha na Base Oficial",
+            f"Nao foi possivel {action} na base oficial do Supabase. {exc}",
         )
 
     if isinstance(exc, requests.exceptions.Timeout):

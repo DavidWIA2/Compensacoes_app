@@ -30,7 +30,7 @@ def _availability_label(availability: object | None) -> str:
 
 def _availability_tooltip(availability: object | None, *, has_active_session: bool) -> str:
     if not has_active_session:
-        return "Banco SQLite local ainda não foi inicializado."
+        return "Banco SQLite local ainda nao foi inicializado."
     return str(getattr(availability, "detail_message", "") or "").strip() or "Banco local carregado."
 
 
@@ -86,6 +86,8 @@ def build_write_label_text(status: object | None, *, has_active_session: bool) -
         return "Escrita: SQLite"
     if status_value == "session_authoritative":
         return "Escrita: memória"
+    if status_value == "remote_authoritative":
+        return "Escrita: Supabase"
     if status_value == "sqlite_primary":
         return "Escrita: SQLite -> espelho"
     if status_value == "session_fallback":
@@ -112,6 +114,8 @@ def build_write_tooltip_text(status: object | None, *, has_active_session: bool)
         lines.append("Fluxo: SQLite como autoridade operacional do banco local.")
     elif status_value == "session_authoritative":
         lines.append("Fluxo: estado em memória mantido sem confirmação em planilha externa.")
+    elif status_value == "remote_authoritative":
+        lines.append("Fluxo: Supabase como autoridade da produção com cache SQLite sincronizado.")
     elif status_value == "sqlite_primary":
         lines.append("Fluxo: SQLite primário com espelho em planilha externa.")
     elif status_value == "session_fallback":

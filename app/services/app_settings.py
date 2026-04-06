@@ -148,3 +148,15 @@ class AppSettings:
 
     def clear_tcra_form_draft(self):
         self.remove("tcra_form_draft")
+
+    def last_access_environment(self) -> str:
+        return str(self.value("last_access_environment", "production") or "production").strip()
+
+    def set_last_access_environment(self, environment: str):
+        self.setValue("last_access_environment", str(environment or "production").strip())
+
+    def last_access_email(self) -> str:
+        return str(self.value("last_access_email", "") or "").strip()
+
+    def set_last_access_email(self, email: str):
+        self.setValue("last_access_email", str(email or "").strip())

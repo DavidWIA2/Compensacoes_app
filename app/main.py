@@ -18,8 +18,11 @@ from PySide6.QtGui import QFont, QMovie, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QSplashScreen
 
 from app.config import APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
+from app.services.access_service import SupabaseAccessService
+from app.services.app_settings import AppSettings
 from app.services.tile_scheme_handler import install_tile_scheme, register_tile_scheme
 from app.ui.components.ui_utils import resource_path
+from app.ui.components.access_dialog import AccessDialog
 from app.ui.main_window import MainWindow
 
 
@@ -74,6 +77,17 @@ def create_startup_splash():
     return AnimatedSplashScreen(gif_path, splash_path)
 
 
+def request_app_access() -> object | None:
+    settings = AppSettings()
+    dialog = AccessDialog(
+        settings=settings,
+        access_service=SupabaseAccessService(),
+    )
+    if not dialog.exec():
+        return None
+    return dialog.access_session
+
+
 # =====================================================================
 # FUNCAO PRINCIPAL
 # =====================================================================
@@ -82,6 +96,10 @@ def main() -> int:
     app.setOrganizationName(APP_SETTINGS_ORG)
     app.setApplicationName(APP_SETTINGS_NAME)
     app.setApplicationDisplayName(APP_NAME)
+
+    access_session = request_app_access()
+    if access_session is None:
+        return 0
 
     splash = create_startup_splash()
     if splash is not None:
@@ -94,14 +112,16 @@ def main() -> int:
     if splash is not None:
         splash.update_status("Carregando interface...")
 
-    window = MainWindow()
+    window = MainWindow(access_session=access_session)
 
     if splash is not None:
         splash.update_status("Abrindo painel principal...")
 
     window.show()
     if splash is not None:
-        QApplication.processEvents()
+        process_events = getattr(QApplication, "processEvents", None)
+        if callable(process_events):
+            process_events()
         splash.finish(window)
 
     return app.exec()

@@ -82,5 +82,5 @@ def test_recovery_operations_wraps_rollback_choices(tmp_path):
     assert request is not None
     assert request.rollback_source == "operation_audit"
     assert request.metadata["summary"] == "2 registro(s) importado(s)"
-    assert "Tem certeza que deseja restaurar a versao de" in request.confirmation_message
+    assert "Tem certeza que deseja restaurar a versão de" in request.confirmation_message
     assert use_cases.build_no_backup_message() == "Nenhum backup encontrado ainda para este arquivo."

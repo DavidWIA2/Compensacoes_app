@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QTimer
@@ -10,6 +11,7 @@ from app.application.use_cases.local_record_queries import LocalRecordReadResult
 from app.application.use_cases.session_startup_use_cases import build_singleton_session_startup_plan
 from app.config import SEARCH_FILTER_DEBOUNCE_MS
 from app.models.compensacao import Compensacao
+from app.services.access_service import AccessEnvironment
 from app.services.error_service import friendly_error_message
 from app.services.gis_service import GisService
 from app.services.records_service import (
@@ -38,6 +40,7 @@ logger = get_logger("UI.Data")
 
 class DataController:
     NEW_SESSION_OPTION = "+ Nova sess\u00e3o..."
+    REMOTE_OPERATIONAL_REFRESH_INTERVAL_SECONDS = 60.0
 
     def __init__(self, window):
         self.window = window
@@ -58,6 +61,7 @@ class DataController:
         self.local_mutation_sync = self.persistence.local_mutation_sync
         self.local_write_authority = self.persistence.local_write_authority
         self.authoritative_write = self.persistence.authoritative_write
+        self._last_remote_operational_refresh_monotonic = 0.0
         self.filter_timer = QTimer(window)
         self.filter_timer.setSingleShot(True)
         self.filter_timer.timeout.connect(self.apply_filter)
@@ -191,7 +195,7 @@ class DataController:
             self.window._record_search_index = build_record_search_index(self.window.records)
             logger.info("Runtime de sessão retornou %s registros.", len(self.window.records))
             if not self.window.records:
-                logger.warning("Atencao: A sessao foi lida mas retornou 0 registros.")
+                logger.warning("Atenção: A sessão foi lida, mas retornou 0 registros.")
 
             self.window.settings_controller.save_last_session_path(path)
             self.window.settings_controller.update_recent_files(path)
@@ -319,7 +323,7 @@ class DataController:
             return True
         except Exception as exc:
             logger.warning(
-                "Falha ao atualizar sessao a partir do espelho local apos mutacao: %s",
+                "Falha ao atualizar sessão a partir do espelho local após mutação: %s",
                 exc,
                 exc_info=True,
             )
@@ -330,7 +334,7 @@ class DataController:
                     strategy="session_filter",
                     workbook_path=self._current_session_path(),
                     session_records=len(projected_records),
-                    issues=(f"Falha ao atualizar sessao apos mutacao: {exc}",),
+                    issues=(f"Falha ao atualizar sessão após mutação: {exc}",),
                 ),
                 filtered_records=len(projected_records),
             )
@@ -407,7 +411,7 @@ class DataController:
                 "clear-microbacias-load-failure",
             )
             self.window._run_map_js(
-                f"if(window.setStatus) window.setStatus({json.dumps('Mapa de microbacias indisponivel no momento.')});",
+                f"if(window.setStatus) window.setStatus({json.dumps('Mapa de microbacias indisponível no momento.')});",
                 "gis-load-failure-status",
             )
             return False
@@ -556,6 +560,14 @@ class DataController:
         return self.persistence.ensure_singleton_session()
 
     def _bootstrap_singleton_database_from_legacy_source(self, source_path: str) -> bool:
+        access_session = getattr(self.window, "access_session", None)
+        if getattr(access_session, "environment", None) == AccessEnvironment.PRODUCTION:
+            logger.info(
+                "Bootstrap legado por planilha ignorado em producao para '%s'.",
+                source_path,
+            )
+            return False
+
         normalized_source = self.window.settings_controller.restore_legacy_workbook_path() or str(source_path or "").strip()
         if not normalized_source:
             return False
@@ -600,7 +612,11 @@ class DataController:
             and current_path == target_path
             and (self.window.records or self.persistence.has_local_snapshot(target_path))
         )
-        loaded = already_loaded or self.load_session(target_path, confirm_discard=confirm_discard)
+        if already_loaded:
+            self.refresh_production_snapshot_if_stale(force=True)
+            loaded = True
+        else:
+            loaded = self.load_session(target_path, confirm_discard=confirm_discard)
         if loaded:
             self.window.settings_controller.save_last_session_path(target_path)
             if show_feedback:
@@ -613,6 +629,62 @@ class DataController:
             return int(self.window.shell_controller.resolved_total_records())
         return len(self.window.records)
 
+    def refresh_production_snapshot_if_stale(self, *, force: bool = False) -> bool:
+        access_session = getattr(self.window, "access_session", None)
+        session_path = self._current_session_path()
+        if (
+            access_session is None
+            or getattr(access_session, "environment", None) != AccessEnvironment.PRODUCTION
+            or not session_path
+        ):
+            return False
+
+        if self.window.form_controller.has_pending_changes():
+            return False
+
+        now = time.monotonic()
+        if (
+            not force
+            and (now - float(self._last_remote_operational_refresh_monotonic or 0.0))
+            < self.REMOTE_OPERATIONAL_REFRESH_INTERVAL_SECONDS
+        ):
+            return False
+
+        self._bind_runtime_persistence_service()
+        refresh_result = self.window.run_blocking_spec(
+            BlockingJobSpec(
+                name="refresh_remote_snapshot_if_production",
+                busy_message="Sincronizando base oficial...",
+                operation=lambda: self.persistence.refresh_remote_snapshot_if_production(session_path),
+                success_message="Base oficial sincronizada.",
+                failure_message="Falha ao sincronizar a base oficial.",
+            )
+        )
+        self._last_remote_operational_refresh_monotonic = now
+
+        if getattr(refresh_result, "refreshed", False):
+            record_source = self.persistence.resolve_runtime_record_source(
+                session_path,
+                fallback_records=self.window.records,
+            )
+            self.window._local_session_source_status = self.local_record_queries.build_read_status(
+                record_source,
+                filtered_records=len(record_source.records),
+            )
+            self._apply_loaded_runtime_state(list(record_source.records), sync_snapshot=False)
+            return True
+
+        issues = tuple(getattr(refresh_result, "issues", ()) or ())
+        if issues:
+            logger.warning(
+                "Atualização remota oficial da sessão concluiu com observações: %s",
+                " | ".join(str(issue) for issue in issues if str(issue).strip()),
+            )
+            self.window.statusBar().showMessage(
+                " | ".join(str(issue) for issue in issues if str(issue).strip())
+            )
+        return False
+
     def open_session(self):
         return self._load_singleton_database(confirm_discard=True, show_feedback=True)
 
@@ -620,12 +692,18 @@ class DataController:
         return self._load_singleton_database(confirm_discard=True, show_feedback=True)
 
     def load_last_session(self):
+        access_environment = getattr(
+            getattr(self.window, "access_session", None),
+            "environment",
+            AccessEnvironment.LOCAL,
+        )
         startup_session_path = str(
             getattr(getattr(self.window, "access_session", None), "local_session_path", "") or ""
         ).strip()
         plan = build_singleton_session_startup_plan(
             pending_legacy_source_path=self.window.settings_controller.pending_singleton_bootstrap_source_path(),
             singleton_session_path=self.window.settings_controller.restore_last_session_path() or startup_session_path,
+            allow_legacy_bootstrap=access_environment != AccessEnvironment.PRODUCTION,
         )
         if plan.should_bootstrap_legacy and self._bootstrap_singleton_database_from_legacy_source(plan.source_path):
             return True

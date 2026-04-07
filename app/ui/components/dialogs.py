@@ -110,10 +110,10 @@ TCRA_EVENT_PRESETS = (
     },
     {
         "key": "relatorio_entregue",
-        "label": "Relatorio entregue",
-        "tipo_evento": "Relatorio entregue",
+        "label": "Relatório entregue",
+        "tipo_evento": "Relatório entregue",
         "status_resultante": STATUS_EM_ACOMPANHAMENTO,
-        "descricao": "Relatorio periodico protocolado e anexado ao acompanhamento.",
+        "descricao": "Relatório periódico protocolado e anexado ao acompanhamento.",
     },
     {
         "key": "vistoria",
@@ -161,7 +161,7 @@ class ImportPreviewDialog(QDialog):
         self.presentation: ImportPreviewPresentation = self.presenter.build_presentation(analysis)
         self._rows: tuple[ImportPreviewRowView, ...] = self.presentation.rows
         self._visible_rows: list[ImportPreviewRowView] = []
-        self.setWindowTitle("Preflight de Importacao")
+        self.setWindowTitle("Preflight de Importação")
         self.resize(960, 540)
 
         layout = QVBoxLayout(self)
@@ -500,7 +500,7 @@ class OperationHistoryDialog(QDialog):
 
     def export_history(self):
         if not self.visible_events:
-            QMessageBox.information(self, "Historico de Operacoes", "Nao ha operacoes visiveis para exportar.")
+            QMessageBox.information(self, "Histórico de Operações", "Não há operações visíveis para exportar.")
             return
 
         path, _ = QFileDialog.getSaveFileName(
@@ -594,7 +594,7 @@ class PlantioRowEditorDialog(QDialog):
         self.in_endereco = QLineEdit(str(endereco or ""))
         self.in_qtd_mudas = QLineEdit(str(qtd_mudas or ""))
 
-        form.addRow("Endereco de Plantio:", self.in_endereco)
+        form.addRow("Endereço de Plantio:", self.in_endereco)
         form.addRow("Qtd. mudas:", self.in_qtd_mudas)
         layout.addLayout(form)
 
@@ -833,7 +833,7 @@ class TcraImportPreviewDialog(QDialog):
         super().__init__(parent)
         self.analysis = analysis
         self._visible_issues = list(analysis.issues)
-        self.setWindowTitle("Revisao da Importacao de TCRAs")
+        self.setWindowTitle("Revisão da Importação de TCRAs")
         self.resize(920, 520)
 
         layout = QVBoxLayout(self)

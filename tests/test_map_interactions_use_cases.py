@@ -15,7 +15,7 @@ def test_map_interactions_builds_street_view_plan_with_choices_and_marker_fallba
     )
 
     assert [choice.label for choice in plan.choices] == [
-        "Endereco Principal",
+        "Endereço Principal",
         "Plantio 1: Rua Plantio A (4 mudas)",
         "Plantio 2: Rua Plantio B (6 mudas)",
     ]
@@ -50,5 +50,5 @@ def test_map_interactions_builds_geocode_and_street_view_presentations():
     assert success.microbacia == "Gregorio"
     assert outside.status_message == "Localizado (fora de microbacia)"
     assert failure.found is False
-    assert failure.warning_title == "Nao encontrado"
-    assert street_failure.warning_message == "Nao foi possivel localizar o endereco: Rua D"
+    assert failure.warning_title == "Não encontrado"
+    assert street_failure.warning_message == "Não foi possível localizar o endereço: Rua D"

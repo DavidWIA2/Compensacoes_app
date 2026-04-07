@@ -71,10 +71,10 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "caixa": "42",
                     "av_tec": "300/2026",
                     "compensacao": "8",
-                    "endereco": "Rua A",
-                    "microbacia": "Gregorio",
+                    "endereco": "ExtensÃ£o da Rua A",
+                    "microbacia": "GregÃ³rio",
                     "compensado": "",
-                    "endereco_plantio": "Praca A",
+                    "endereco_plantio": "PraÃ§a A",
                     "latitude_plantio": "-22.01",
                     "longitude_plantio": "-47.90",
                     "latitude": "-22.00",
@@ -104,7 +104,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "id": 21,
                     "record_id": 11,
                     "sequence": 1,
-                    "endereco": "Praca A",
+                    "endereco": "PraÃ§a A",
                     "qtd_mudas": "8",
                     "latitude": "-22.01",
                     "longitude": "-47.90",
@@ -128,7 +128,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "uid": "tcra-001",
                     "numero_processo": "IC 100/2026",
                     "numero_tcra": "TCRA-01/2026",
-                    "local": "Parque A",
+                    "local": "Parque EcolÃ³gico",
                     "endereco": "Rua A",
                     "bairro": "Centro",
                     "orgao_acompanhamento": "SMMA",
@@ -142,7 +142,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "numero_mudas_previsto": 42,
                     "servicos_exigidos": "Plantio",
                     "responsavel_execucao": "Equipe",
-                    "observacoes": "Observacao",
+                    "observacoes": "RelatÃ³rio pendente de protocolo",
                     "mpsp_relacionado": "SIM",
                     "inquerito_civil": "IC-2026-10",
                 }
@@ -153,8 +153,8 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "tcra_uid": "tcra-001",
                     "sequence": 1,
                     "data_evento": "2026-03-01",
-                    "tipo_evento": "Relatorio",
-                    "descricao": "Relatorio recebido",
+                    "tipo_evento": "RelatÃ³rio",
+                    "descricao": "RelatÃ³rio recebido",
                     "prazo_resultante": "2026-09-01",
                     "status_resultante": "Em acompanhamento",
                 }
@@ -178,9 +178,15 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
     assert result.tcra_count == 1
     assert len(records) == 2
     assert isinstance(records[0], Compensacao)
+    assert records[0].endereco == "Extensão da Rua A"
+    assert records[0].microbacia == "Gregório"
+    assert records[0].plantios[0].endereco == "Praça A"
     assert len(records[0].plantios) == 1
     assert len(records[1].plantios) == 1
     assert len(audit_events) == 1
     assert audit_events[0]["action"] == "IMPORT"
     assert len(tcras) == 1
+    assert tcras[0].local == "Parque Ecológico"
+    assert tcras[0].observacoes == "Relatório pendente de protocolo"
+    assert tcras[0].eventos[0].tipo_evento == "Relatório"
     assert len(tcras[0].eventos) == 1

@@ -62,7 +62,7 @@ def test_export_tcra_excel_report_generates_summary_and_data_sheet(tmp_path):
     workbook = load_workbook(export_path)
 
     assert workbook.sheetnames == ["Resumo", "TCRAs"]
-    assert workbook["Resumo"]["A1"].value == "Relatorio Operacional de TCRAs"
+    assert workbook["Resumo"]["A1"].value == "Relatório Operacional de TCRAs"
     assert workbook["Resumo"]["B3"].value == "Busca: nenhuma | Status: Todos"
     summary_values = {
         str(cell.value)
@@ -78,7 +78,7 @@ def test_export_tcra_excel_report_generates_summary_and_data_sheet(tmp_path):
     assert "Sugestao" in summary_values
     assert "Cadastro" in summary_values
     assert workbook["TCRAs"]["A2"].value == "26207/2019"
-    assert workbook["TCRAs"]["G2"].value in {"Prazo vencido", "Em acompanhamento", "Cumprido", "Relatorio pendente"}
+    assert workbook["TCRAs"]["G2"].value in {"Prazo vencido", "Em acompanhamento", "Cumprido", "Relatório pendente"}
 
 
 def test_export_tcra_pdf_report_creates_non_empty_file(tmp_path):

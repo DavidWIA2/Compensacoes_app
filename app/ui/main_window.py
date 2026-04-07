@@ -12,13 +12,14 @@ from app.config import APP_WINDOW_TITLE, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.persistence_monitoring import PersistenceMonitoringUseCases
 from app.models.compensacao import Compensacao
-from app.services.access_service import AppAccessSession
+from app.services.access_service import AppAccessSession, SupabaseAccessService
 from app.services.app_settings import AppSettings
 from app.services.audit_service import AuditService
 from app.services.session_spreadsheet_adapter import ExternalSpreadsheetAdapter
 from app.services.session_workbook_runtime import SessionWorkbookRuntime
 from app.services.sqlite_mirror_service import SqliteMirrorService
 from app.services.sqlite_mirror_service import SqliteMirrorService as DirectSqliteMirrorService
+from app.services.supabase_admin_users_service import SupabaseAdminUsersService
 from app.services.coordinates import build_heatmap_point, build_heatmap_points
 from app.services.gis_service import GisService
 
@@ -49,6 +50,7 @@ from app.ui.tabs.data_tab import DataTab
 from app.ui.tabs.dashboard_tab import DashboardTab
 from app.ui.tabs.operations_tab import OperationsTab
 from app.ui.tabs.tcra_tab import TcraTab
+from app.ui.tabs.admin_users_tab import AdminUsersTab
 from app.utils.logger import get_logger
 
 _ajustar_ambiente_pyinstaller()
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
             dashboard_tab_cls=DashboardTab,
             operations_tab_cls=OperationsTab,
             tcra_tab_cls=TcraTab,
+            admin_users_tab_cls=AdminUsersTab,
             updater_cls=UpdaterWorker,
             microb_name_field=MICROB_NAME_FIELD,
             microb_dir=MICROB_DIR,
@@ -81,6 +84,10 @@ class MainWindow(QMainWindow):
         self.import_adapter_factory = ExternalSpreadsheetAdapter
         self.external_data_adapter_factory = self.import_adapter_factory
         self.is_dark_mode = False
+        self.access_service = SupabaseAccessService()
+        self.admin_users_service = SupabaseAdminUsersService(
+            production_profile=self.access_service.production_profile,
+        )
         settings_name = self.access_session.settings_name(APP_SETTINGS_NAME)
         persistence_service_factory = SqliteMirrorService
         if self.access_session.local_db_path:

@@ -28,8 +28,8 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
 
     if isinstance(exc, AccessAuthError):
         return (
-            "Sessao de Producao",
-            "Nao foi possivel concluir a operacao porque a sessao autenticada do Supabase nao esta valida. Entre novamente em Producao e tente de novo.",
+            "Sessão de Produção",
+            "Não foi possível concluir a operação porque a sessão autenticada do Supabase não está válida. Entre novamente em Produção e tente de novo.",
         )
 
     if isinstance(exc, SupabaseCompensacoesRpcError):
@@ -41,7 +41,7 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
     if isinstance(exc, requests.exceptions.Timeout):
         return (
             "Tempo Esgotado",
-            f"Nao foi possivel {action} porque a operacao demorou demais. Tente novamente.",
+            f"Não foi possível {action} porque a operação demorou demais. Tente novamente.",
         )
 
     if isinstance(exc, requests.exceptions.ConnectionError):

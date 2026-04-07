@@ -1,0 +1,8 @@
+[functions.bootstrap-first-admin]
+verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = false
+
+[functions.password-reset]
+verify_jwt = false

@@ -126,23 +126,23 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     if tcra_has_prazo_vencido(record, today=today):
         flags.append("Prazo vencido")
     if tcra_has_relatorio_pendente(record, today=today):
-        flags.append("Relatorio pendente")
+        flags.append("Relatório pendente")
     if tcra_has_report_due_soon(record, today=today):
         flags.append("Prox. 30d")
     if tcra_has_missing_identity(record):
-        flags.append("Sem numero")
+        flags.append("Sem número")
     if tcra_has_missing_responsavel(record):
-        flags.append("Sem responsavel")
+        flags.append("Sem responsável")
     if tcra_has_missing_orgao(record):
-        flags.append("Sem orgao")
+        flags.append("Sem órgão")
 
     details_lines = [
         f"Processo: {record.numero_processo or '--'}",
         f"TCRA: {record.numero_tcra or '--'}",
         f"Local: {record.local or '--'}",
-        f"Endereco: {record.endereco or '--'}",
+        f"Endereço: {record.endereco or '--'}",
         f"Bairro: {record.bairro or '--'}",
-        f"Responsavel: {record.responsavel_execucao or '--'}",
+        f"Responsável: {record.responsavel_execucao or '--'}",
         f"Area: {record.area_m2 if record.area_m2 is not None else '--'}",
         f"Mudas: {record.numero_mudas_previsto if record.numero_mudas_previsto is not None else '--'}",
         f"Flags: {', '.join(flags) if flags else '--'}",
@@ -157,8 +157,8 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
         [
             f"Status {operational_status}",
             f"Prazo {_format_date(record.prazo_final)}",
-            f"Relatorio {_format_date(record.data_proximo_relatorio)}",
-            f"Orgao {normalize_orgao_label(record.orgao_acompanhamento) or '--'}",
+            f"Relatório {_format_date(record.data_proximo_relatorio)}",
+            f"Órgão {normalize_orgao_label(record.orgao_acompanhamento) or '--'}",
         ]
     )
     return TcraRecordPanelData(
@@ -246,15 +246,15 @@ def build_row_hint(record: Tcra, *, today: date) -> str:
     if tcra_has_prazo_vencido(record, today=today):
         hints.append("Prazo final vencido.")
     if tcra_has_relatorio_pendente(record, today=today):
-        hints.append("Relatorio pendente.")
+        hints.append("Relatório pendente.")
     if tcra_has_report_due_soon(record, today=today):
-        hints.append(f"Relatorio previsto para os proximos {UPCOMING_REPORT_WINDOW_DAYS} dias.")
+        hints.append(f"Relatório previsto para os próximos {UPCOMING_REPORT_WINDOW_DAYS} dias.")
     if tcra_has_missing_identity(record):
-        hints.append("Sem numero de TCRA informado.")
+        hints.append("Sem número de TCRA informado.")
     if tcra_has_missing_responsavel(record):
-        hints.append("Sem responsavel de execucao.")
+        hints.append("Sem responsável de execução.")
     if tcra_has_missing_orgao(record):
-        hints.append("Sem orgao de acompanhamento informado.")
+        hints.append("Sem órgão de acompanhamento informado.")
     return "\n".join(hints)
 
 

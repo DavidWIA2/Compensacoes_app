@@ -169,7 +169,7 @@ def test_main_window_marks_demo_environment_and_uses_demo_database(monkeypatch, 
     window = MainWindow(
         access_session=AppAccessSession(
             environment=AccessEnvironment.DEMO,
-            label="Demonstracao",
+                label="Demonstração",
             auth_mode="demo_local",
             local_db_path=str(demo_db),
             is_anonymous=True,
@@ -180,8 +180,8 @@ def test_main_window_marks_demo_environment_and_uses_demo_database(monkeypatch, 
     window._refresh_window_chrome()
 
     assert window.persistence_service.db_path == demo_db
-    assert window.session_environment_label.text() == "Ambiente: Demonstracao"
-    assert "[Demonstracao]" in window.windowTitle()
+    assert window.session_environment_label.text() == "Ambiente: Demonstração"
+    assert "[Demonstração]" in window.windowTitle()
     window.close()
 
 
@@ -193,7 +193,7 @@ def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch
     window = MainWindow(
         access_session=AppAccessSession(
             environment=AccessEnvironment.PRODUCTION,
-            label="Producao",
+                label="Produção",
             auth_mode="password",
             user_email="analista@prefeitura.sp.gov.br",
             local_db_path=str(demo_db),
@@ -204,7 +204,60 @@ def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch
 
     assert len(window.records) == 1
     assert window.shell_controller.current_session_path() == DEFAULT_SINGLETON_SESSION_PATH
-    assert window.session_environment_label.text() == "Ambiente: Producao"
+    assert window.session_environment_label.text() == "Ambiente: Produção"
+    window.close()
+
+
+def test_main_window_adds_admin_tab_for_production_admin(monkeypatch):
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+                label="Produção",
+            auth_mode="password",
+            user_id="admin-1",
+            user_email="admin@prefeitura.sp.gov.br",
+            app_role="admin",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+
+    tab_titles = [window.tabs.tabText(index) for index in range(window.tabs.count())]
+
+    assert "Administração" in tab_titles
+    assert getattr(window, "admin_users_tab", None) is not None
+    window.close()
+
+
+def test_main_window_disables_global_search_on_admin_tab(monkeypatch):
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Producao",
+            auth_mode="password",
+            user_id="admin-1",
+            user_email="admin@prefeitura.sp.gov.br",
+            app_role="admin",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+
+    window.search.setText("consulta")
+    window.tabs.setCurrentWidget(window.admin_users_tab)
+    get_app().processEvents()
+
+    assert window.search.isEnabled() is False
+    assert "administração" in window.search.placeholderText().lower()
+
+    window.tabs.setCurrentWidget(window.data_tab)
+    get_app().processEvents()
+
+    assert window.search.isEnabled() is True
+    assert "ofício" in window.search.placeholderText().lower()
+    assert window.search.text() == "consulta"
     window.close()
 
 
@@ -2070,6 +2123,61 @@ def test_load_last_session_bootstraps_singleton_from_legacy_workbook(monkeypatch
     window.close()
 
 
+def test_load_last_session_ignores_legacy_bootstrap_in_production(monkeypatch, tmp_path):
+    legacy_path = tmp_path / "ultima.xlsx"
+    legacy_path.write_text("planilha-legada", encoding="utf-8")
+    state = {"last_excel_path": str(legacy_path)}
+
+    class MockSettings:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def value(self, key, default=""):
+            return state.get(key, default)
+
+        def setValue(self, key, val):
+            state[key] = val
+
+        def remove(self, key):
+            state.pop(key, None)
+
+    monkeypatch.setattr("app.ui.main_window.QSettings", MockSettings)
+    monkeypatch.setattr(MainWindow, "_load_last_session", lambda self: None)
+
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Producao",
+            auth_mode="password",
+            user_email="analista@prefeitura.sp.gov.br",
+            local_db_path=str(tmp_path / "producao.db"),
+            local_session_path="session://banco-local",
+        )
+    )
+    calls = {}
+
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "migrate_legacy_workbook_to_singleton",
+        lambda path: (_ for _ in ()).throw(AssertionError(f"nao deveria migrar legado em producao: {path}")),
+    )
+    monkeypatch.setattr(
+        window.data_controller.persistence,
+        "ensure_singleton_session",
+        lambda: SimpleNamespace(session_path="session://banco-local", display_name="Banco local"),
+    )
+    monkeypatch.setattr(
+        window.data_controller,
+        "load_session",
+        lambda path, confirm_discard=True: calls.update({"load": (path, confirm_discard)}) or True,
+    )
+
+    assert window.data_controller.load_last_session() is True
+    assert calls["load"] == ("session://banco-local", False)
+    assert state["last_excel_path"] == str(legacy_path)
+    window.close()
+
+
 def test_load_last_session_falls_back_to_singleton_database(monkeypatch):
     state = {}
 
@@ -3230,7 +3338,7 @@ def test_save_edit_requires_endereco_plantio_when_compensado(monkeypatch):
     window.save_edit()
 
     assert saved == []
-    assert warnings == ["Preencha Endereco Plantio para salvar um registro compensado."]
+    assert warnings == ["Preencha Endereço Plantio para salvar um registro compensado."]
     window.close()
 
 
@@ -3322,7 +3430,7 @@ def test_compensado_cannot_be_unchecked_when_endereco_plantio_has_data(monkeypat
 
     assert window.data_tab.chk_compensado.isChecked() is True
     assert window.data_tab.in_end_plantio.isEnabled() is True
-    assert warnings == ["Limpe Endereco Plantio antes de desmarcar Compensado."]
+    assert warnings == ["Limpe Endereço Plantio antes de desmarcar Compensado."]
     window.close()
 
 

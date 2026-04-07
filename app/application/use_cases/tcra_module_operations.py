@@ -22,6 +22,8 @@ from app.services.tcra_records_service import (
 )
 from app.services.tcra_report_service import export_tcra_excel_report, export_tcra_pdf_report
 from app.services.tcra_sqlite_service import TcraSqliteService
+from app.services.access_service import AccessEnvironment, AppAccessSession, SupabaseAccessService
+from app.services.supabase_tcra_rpc_service import SupabaseTcraRpcService, serialize_tcra
 from app.utils.logger import get_logger
 
 
@@ -87,6 +89,7 @@ def _record_label(record: Tcra | None) -> str:
 class TcraLoadResult:
     records: tuple[Tcra, ...]
     search_index: dict[str, str]
+    sync_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,8 @@ class TcraSaveResult:
     saved_uid: str = ""
     duplicate_record: Tcra | None = None
     consistency_issues: tuple[str, ...] = ()
+    authority_source: str = "local"
+    sync_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,8 @@ class TcraDeleteResult:
     status: str
     deleted_uid: str = ""
     previous_record: Tcra | None = None
+    authority_source: str = "local"
+    sync_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,8 @@ class TcraBulkActionResult:
     action: str
     updated_uids: tuple[str, ...] = ()
     updated_records: tuple[Tcra, ...] = ()
+    authority_source: str = "local"
+    sync_issues: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -120,6 +129,8 @@ class TcraImportExecutionResult:
     merge_result: TcraImportMergeResult
     merged_records: tuple[Tcra, ...]
     preferred_uid: str = ""
+    authority_source: str = "local"
+    sync_issues: tuple[str, ...] = ()
 
     @property
     def import_status_text(self) -> str:
@@ -152,11 +163,17 @@ class TcraModuleOperations:
         today: date,
         audit_service_provider: Callable[[], object | None] | None = None,
         session_path_provider: Callable[[], str] | None = None,
+        access_session_provider: Callable[[], object | None] | None = None,
+        access_service: SupabaseAccessService | None = None,
+        remote_tcra_service: SupabaseTcraRpcService | None = None,
     ):
         self.sqlite_service = sqlite_service
         self.today = today
         self.audit_service_provider = audit_service_provider
         self.session_path_provider = session_path_provider
+        self.access_session_provider = access_session_provider
+        self.access_service = access_service or SupabaseAccessService()
+        self.remote_tcra_service = remote_tcra_service or SupabaseTcraRpcService()
 
     def _audit_service(self):
         if self.audit_service_provider is None:
@@ -176,6 +193,105 @@ class TcraModuleOperations:
             logger.warning("Falha ao resolver session_path do modulo TCRA: %s", exc)
             return "session://banco-local"
         return session_path or "session://banco-local"
+
+    def _current_access_session(self) -> AppAccessSession:
+        if self.access_session_provider is None:
+            return AppAccessSession.local_default()
+        try:
+            access_session = self.access_session_provider()
+        except Exception as exc:
+            logger.warning("Falha ao resolver sessao de acesso do modulo TCRA: %s", exc)
+            return AppAccessSession.local_default()
+        if isinstance(access_session, AppAccessSession):
+            return access_session
+        return AppAccessSession.local_default()
+
+    def _can_use_remote_tcra_write(self) -> bool:
+        access_session = self._current_access_session()
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            return False
+
+        session_path = self._session_path()
+        expected_session_path = _stringify(getattr(access_session, "local_session_path", ""))
+        if expected_session_path and session_path != expected_session_path:
+            return False
+
+        return bool(
+            _stringify(getattr(access_session, "access_token", ""))
+            and _stringify(getattr(access_session, "refresh_token", ""))
+        )
+
+    def _create_remote_client(self):
+        return self.access_service.create_authenticated_client(self._current_access_session())
+
+    def _can_use_remote_tcra_snapshot_refresh(self) -> bool:
+        access_session = self._current_access_session()
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            return False
+
+        session_path = self._session_path()
+        expected_session_path = _stringify(getattr(access_session, "local_session_path", ""))
+        if expected_session_path and session_path != expected_session_path:
+            return False
+
+        return bool(
+            session_path
+            and _stringify(getattr(access_session, "access_token", ""))
+            and _stringify(getattr(access_session, "refresh_token", ""))
+        )
+
+    def refresh_remote_cache_if_production(self) -> tuple[str, ...]:
+        if not self._can_use_remote_tcra_snapshot_refresh():
+            return ()
+
+        sync_service = getattr(self.access_service, "production_sync_service", None)
+        if sync_service is None:
+            issue = "Servico de sincronizacao da producao indisponivel para leitura remote-first de TCRA."
+            logger.warning(issue)
+            return (issue,)
+
+        try:
+            client = self._create_remote_client()
+            sync_service.sync_authenticated_client(
+                client,
+                local_db_path=self.sqlite_service.db_path,
+                session_path=self._session_path(),
+            )
+        except Exception as exc:
+            issue = f"Falha ao sincronizar snapshot remoto de TCRA antes da leitura: {exc}"
+            logger.warning(issue, exc_info=True)
+            return (issue,)
+        return ()
+
+    def _sync_remote_cache_after_write(
+        self,
+        *,
+        client,
+        operation: str,
+        fallback_local_apply: Callable[[], object],
+    ) -> tuple[str, ...]:
+        sync_service = getattr(self.access_service, "production_sync_service", None)
+        if sync_service is None:
+            issue = "Servico de sincronizacao da producao indisponivel para atualizar o cache local de TCRA."
+        else:
+            try:
+                sync_service.sync_authenticated_client(
+                    client,
+                    local_db_path=self.sqlite_service.db_path,
+                    session_path=self._session_path(),
+                )
+                return ()
+            except Exception as exc:
+                issue = f"Sincronizacao completa do cache local de TCRA apos escrita remota falhou: {exc}"
+                logger.warning(issue, exc_info=True)
+
+        try:
+            fallback_local_apply()
+        except Exception as exc:
+            fallback_issue = f"Fallback local de TCRA apos escrita remota tambem falhou: {exc}"
+            logger.warning(fallback_issue, exc_info=True)
+            return (issue, fallback_issue)
+        return (issue,)
 
     def _append_audit_event(
         self,
@@ -201,9 +317,14 @@ class TcraModuleOperations:
         except Exception as exc:
             logger.warning("Falha ao registrar auditoria do modulo TCRA (%s): %s", action, exc)
 
-    def load_records(self) -> TcraLoadResult:
+    def load_records(self, *, refresh_remote: bool = False) -> TcraLoadResult:
+        sync_issues = self.refresh_remote_cache_if_production() if refresh_remote else ()
         records = tuple(self.sqlite_service.list_tcras())
-        return TcraLoadResult(records=records, search_index=build_record_search_index(records))
+        return TcraLoadResult(
+            records=records,
+            search_index=build_record_search_index(records),
+            sync_issues=tuple(sync_issues),
+        )
 
     def build_dashboard_payload(self, records: Sequence[Tcra]) -> TcraDashboardPayload:
         if not records:
@@ -242,6 +363,40 @@ class TcraModuleOperations:
                 consistency_issues=consistency_issues,
             )
 
+        if self._can_use_remote_tcra_write():
+            client = self._create_remote_client()
+            action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
+            verb = "atualizado" if previous_record is not None else "cadastrado"
+            metadata = {"uid": _stringify(record.uid), "authority": "supabase_remote", "environment": "production"}
+            metadata.update(dict(pending_audit_metadata or {}))
+            remote_result = self.remote_tcra_service.save_record(
+                client,
+                record=record,
+                workbook_path=self._session_path(),
+                action=action,
+                summary=f"TCRA {verb}: {_record_label(record)}",
+                metadata=metadata,
+                before=_serialize_tcra(previous_record),
+                after=_serialize_tcra(record),
+            )
+            saved_uid = _stringify(remote_result.uid or record.uid)
+            saved_record = replace(record, uid=saved_uid) if saved_uid else record
+            sync_issues = self._sync_remote_cache_after_write(
+                client=client,
+                operation="tcra_save",
+                fallback_local_apply=lambda: self.sqlite_service.upsert_tcra(saved_record),
+            )
+            cached_record = self.sqlite_service.get_tcra(saved_uid) if saved_uid else None
+            return TcraSaveResult(
+                status="saved",
+                record=record,
+                previous_record=previous_record,
+                saved_record=cached_record or saved_record,
+                saved_uid=saved_uid,
+                authority_source="remote",
+                sync_issues=sync_issues,
+            )
+
         saved_uid = self.sqlite_service.upsert_tcra(record)
         saved_record = self.sqlite_service.get_tcra(saved_uid) or replace(record, uid=saved_uid)
         action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
@@ -268,6 +423,30 @@ class TcraModuleOperations:
         if not normalized_uid:
             return TcraDeleteResult(status="missing")
         previous_record = self.sqlite_service.get_tcra(normalized_uid)
+        if self._can_use_remote_tcra_write():
+            client = self._create_remote_client()
+            self.remote_tcra_service.delete_record(
+                client,
+                uid=normalized_uid,
+                workbook_path=self._session_path(),
+                action="TCRA_DELETE",
+                summary=f"TCRA excluido: {_record_label(previous_record)}",
+                metadata={"uid": normalized_uid, "authority": "supabase_remote", "environment": "production"},
+                before=_serialize_tcra(previous_record),
+            )
+            sync_issues = self._sync_remote_cache_after_write(
+                client=client,
+                operation="tcra_delete",
+                fallback_local_apply=lambda: self.sqlite_service.delete_tcra(normalized_uid),
+            )
+            return TcraDeleteResult(
+                status="deleted",
+                deleted_uid=normalized_uid,
+                previous_record=previous_record,
+                authority_source="remote",
+                sync_issues=sync_issues,
+            )
+
         self.sqlite_service.delete_tcra(normalized_uid)
         self._append_audit_event(
             action="TCRA_DELETE",
@@ -379,14 +558,52 @@ class TcraModuleOperations:
         event_presets: Sequence[Mapping[str, object]],
     ) -> TcraBulkActionResult:
         action = _stringify(values.get("action"))
-        updated_uids: list[str] = []
+        updated_records: list[Tcra] = []
         for record in records:
-            updated_record = self._apply_bulk_action_to_record(
-                record,
-                values,
-                parse_date=parse_date,
-                event_presets=event_presets,
+            updated_records.append(
+                self._apply_bulk_action_to_record(
+                    record,
+                    values,
+                    parse_date=parse_date,
+                    event_presets=event_presets,
+                )
             )
+
+        if self._can_use_remote_tcra_write():
+            client = self._create_remote_client()
+            self.remote_tcra_service.save_records(
+                client,
+                records=updated_records,
+                workbook_path=self._session_path(),
+                action="TCRA_BULK_UPDATE",
+                summary=f"Acao em lote aplicada em {len(updated_records)} TCRA(s): {action}",
+                metadata={
+                    "count": len(updated_records),
+                    "bulk_action": action,
+                    "uids": [_stringify(record.uid) for record in updated_records[:20]],
+                    "authority": "supabase_remote",
+                    "environment": "production",
+                },
+                before=[_serialize_tcra(record) for record in records[:20]],
+                after=[_serialize_tcra(record) for record in updated_records[:20]],
+            )
+            sync_issues = self._sync_remote_cache_after_write(
+                client=client,
+                operation="tcra_bulk_update",
+                fallback_local_apply=lambda: [self.sqlite_service.upsert_tcra(record) for record in updated_records],
+            )
+            updated_uids = tuple(_stringify(record.uid) for record in updated_records if _stringify(record.uid))
+            cached_records = tuple(self.sqlite_service.get_tcras_by_uids(updated_uids)) if updated_uids else tuple(updated_records)
+            return TcraBulkActionResult(
+                action=action,
+                updated_uids=updated_uids,
+                updated_records=cached_records or tuple(updated_records),
+                authority_source="remote",
+                sync_issues=sync_issues,
+            )
+
+        updated_uids: list[str] = []
+        for updated_record in updated_records:
             saved_uid = self.sqlite_service.upsert_tcra(updated_record)
             updated_uids.append(saved_uid)
         updated_records = tuple(self.sqlite_service.get_tcras_by_uids(updated_uids))
@@ -408,7 +625,87 @@ class TcraModuleOperations:
     def analyze_import_workbook(self, path: str | Path) -> TcraWorkbookAnalysis:
         return TcraExcelService(sqlite_service=self.sqlite_service, today=self.today).analyze_workbook(path)
 
+    def _build_import_merge_records(
+        self,
+        analysis: TcraWorkbookAnalysis,
+    ) -> tuple[TcraImportMergeResult, tuple[Tcra, ...]]:
+        service = TcraExcelService(sqlite_service=self.sqlite_service, today=self.today)
+        created_count = 0
+        updated_count = 0
+        imported_uids: list[str] = []
+        merged_records: list[Tcra] = []
+        for imported_record in analysis.tcras:
+            existing = self.sqlite_service.find_duplicate_tcra(
+                numero_processo=imported_record.numero_processo,
+                numero_tcra=imported_record.numero_tcra,
+                local=imported_record.local,
+            )
+            if existing is None:
+                merged_record = imported_record
+                created_count += 1
+            else:
+                merged_record = service._merge_records(existing, imported_record)
+                updated_count += 1
+            merged_records.append(merged_record)
+            imported_uids.append(_stringify(merged_record.uid))
+
+        return (
+            TcraImportMergeResult(
+                importable_count=analysis.importable_count,
+                created_count=created_count,
+                updated_count=updated_count,
+                imported_uids=tuple(imported_uids),
+            ),
+            tuple(merged_records),
+        )
+
     def execute_import_merge(self, analysis: TcraWorkbookAnalysis) -> TcraImportExecutionResult:
+        if self._can_use_remote_tcra_write():
+            merge_result, merged_records = self._build_import_merge_records(analysis)
+            client = self._create_remote_client()
+            self.remote_tcra_service.save_records(
+                client,
+                records=merged_records,
+                workbook_path=self._session_path(),
+                action="TCRA_IMPORT",
+                summary=f"Importacao TCRA concluida: {analysis.importable_count} termo(s)",
+                metadata={
+                    "mode": "merge",
+                    "importable_count": analysis.importable_count,
+                    "created_count": merge_result.created_count,
+                    "updated_count": merge_result.updated_count,
+                    "skipped_count": analysis.skipped_count,
+                    "issue_count": len(analysis.issues),
+                    "issue_codes": [issue.code for issue in analysis.issues[:10]],
+                    "authority": "supabase_remote",
+                    "environment": "production",
+                },
+                after={
+                    "importable_count": analysis.importable_count,
+                    "sample_records": [serialize_tcra(record) for record in merged_records[:10]],
+                },
+            )
+            sync_issues = self._sync_remote_cache_after_write(
+                client=client,
+                operation="tcra_import",
+                fallback_local_apply=lambda: [self.sqlite_service.upsert_tcra(record) for record in merged_records],
+            )
+            cached_records = tuple(self.sqlite_service.get_tcras_by_uids(merge_result.imported_uids))
+            resolved_records = cached_records or merged_records
+            preferred_record = (
+                min(resolved_records, key=lambda record: operational_sort_key(record, today=self.today))
+                if resolved_records
+                else None
+            )
+            return TcraImportExecutionResult(
+                analysis=analysis,
+                merge_result=merge_result,
+                merged_records=resolved_records,
+                preferred_uid=_stringify(getattr(preferred_record, "uid", "")),
+                authority_source="remote",
+                sync_issues=sync_issues,
+            )
+
         service = TcraExcelService(sqlite_service=self.sqlite_service, today=self.today)
         merge_result = service.merge_workbook(analysis)
         merged_records = tuple(self.sqlite_service.get_tcras_by_uids(merge_result.imported_uids))

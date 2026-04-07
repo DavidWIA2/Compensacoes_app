@@ -35,7 +35,7 @@ def test_support_operations_build_about_dialog_data():
     assert about.title == "Sobre o Compensacoes"
     assert "Compensacoes 1.2.3" in about.message
     assert "Python 3.12.0" in about.message
-    assert "Manifest de atualizacao: https://example.com/manifest.json" in about.message
+    assert "Manifest de atualização: https://example.com/manifest.json" in about.message
     assert "Variavel de override: COMPENSACOES_UPDATE_URL" in about.message
 
 
@@ -83,14 +83,14 @@ def test_support_operations_build_update_offer_presentations():
     assert "Arquivo: Compensacoes-Setup.exe" in automatic.message
     assert "SHA-256: abc123" in automatic.message
     assert "Assinatura digital: ausente nesta release." in automatic.message
-    assert "Deseja baixar e instalar a atualizacao agora?" in automatic.message
+    assert "Deseja baixar e instalar a atualização agora?" in automatic.message
 
     assert download.action_kind == "open_download"
     assert download.download_url == "https://example.com/app.exe"
-    assert "Deseja abrir o link da atualizacao agora?" in download.message
+    assert "Deseja abrir o link da atualização agora?" in download.message
 
     assert info_only.action_kind == "informational"
-    assert "Sem notas de versao." in info_only.message
+    assert "Sem notas de versão." in info_only.message
 
 
 def test_support_operations_builds_runtime_outcomes_for_updates():
@@ -107,16 +107,16 @@ def test_support_operations_builds_runtime_outcomes_for_updates():
     auto_failed = use_cases.build_auto_update_failed_outcome("manifest invalido")
     no_update = use_cases.build_no_update_outcome("1.2.3")
 
-    assert runtime_message == "Atualizacao disponivel com link de download."
+    assert runtime_message == "Atualização disponível com link de download."
     assert progress.percent == 100
-    assert progress.message == "Baixando atualizacao... 100%"
+    assert progress.message == "Baixando atualização... 100%"
     assert use_cases.build_manual_update_completion_message(cancel_requested=True) == (
-        "Verificacao de atualizacoes interrompida."
+        "Verificação de atualizações interrompida."
     )
     assert manual_cancel.runtime_status == "cancelled"
-    assert manual_cancel.busy_message == "Verificacao de atualizacoes interrompida."
+    assert manual_cancel.busy_message == "Verificação de atualizações interrompida."
     assert auto_failed.runtime_status == "failed"
-    assert auto_failed.status_bar_message == "Falha ao baixar/preparar a atualizacao."
+    assert auto_failed.status_bar_message == "Falha ao baixar/preparar a atualização."
     assert auto_failed.dialog_message == "manifest invalido"
     assert no_update.runtime_status == "completed"
     assert "1.2.3" in no_update.dialog_message

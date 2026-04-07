@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import sys
+import importlib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 from app.config import (
     DEFAULT_SUPABASE_PRODUCTION_PUBLISHABLE_KEY,
@@ -13,6 +16,7 @@ from app.config import (
     SUPABASE_DEMO_URL_ENV_VAR,
     SUPABASE_PRODUCTION_KEY_ENV_VAR,
     SUPABASE_PRODUCTION_URL_ENV_VAR,
+    normalize_corporate_email,
 )
 from app.services.supabase_workspace_sync_service import (
     PRODUCTION_CACHE_SESSION_PATH,
@@ -75,25 +79,25 @@ class AppAccessSession:
     @property
     def environment_chip_text(self) -> str:
         if self.environment == AccessEnvironment.DEMO:
-            return "Ambiente: Demonstracao"
+            return "Ambiente: Demonstração"
         if self.environment == AccessEnvironment.PRODUCTION:
-            return "Ambiente: Producao"
+            return "Ambiente: Produção"
         return "Ambiente: Local"
 
     @property
     def environment_tooltip_text(self) -> str:
         if self.environment == AccessEnvironment.DEMO:
             if self.supabase_url:
-                return "Modo demonstracao autenticado no Supabase e executando com base ficticia isolada."
-            return "Modo demonstracao com base ficticia local reiniciada a cada abertura."
+                return "Modo demonstração autenticado no Supabase e executando com base fictícia isolada."
+            return "Modo demonstração com base fictícia local reiniciada a cada abertura."
         if self.environment == AccessEnvironment.PRODUCTION:
-            identity = self.user_email or self.user_id or "usuario autenticado"
+            identity = self.user_email or self.user_id or "usuário autenticado"
             role_suffix = f" (perfil: {self.app_role})" if self.app_role else ""
             return (
-                f"Acesso de producao autenticado via Supabase para {identity}{role_suffix}, "
+                f"Acesso de produção autenticado via Supabase para {identity}{role_suffix}, "
                 "com cache local sincronizado da base oficial."
             )
-        return "Inicializacao local sem gateway de autenticacao."
+        return "Inicialização local sem gateway de autenticação."
 
     def settings_name(self, base_name: str) -> str:
         if self.environment == AccessEnvironment.DEMO:
@@ -108,7 +112,7 @@ class AccessAuthError(RuntimeError):
 def resolve_production_access_profile() -> SupabaseAccessProfile:
     return SupabaseAccessProfile(
         environment=AccessEnvironment.PRODUCTION,
-        label="Producao",
+        label="Produção",
         url=str(os.getenv(SUPABASE_PRODUCTION_URL_ENV_VAR, DEFAULT_SUPABASE_PRODUCTION_URL) or "").strip(),
         publishable_key=str(
             os.getenv(
@@ -125,7 +129,7 @@ def resolve_production_access_profile() -> SupabaseAccessProfile:
 def resolve_demo_access_profile() -> SupabaseAccessProfile:
     return SupabaseAccessProfile(
         environment=AccessEnvironment.DEMO,
-        label="Demonstracao",
+        label="Demonstração",
         url=str(os.getenv(SUPABASE_DEMO_URL_ENV_VAR, "") or "").strip(),
         publishable_key=str(os.getenv(SUPABASE_DEMO_KEY_ENV_VAR, "") or "").strip(),
         allow_password=False,
@@ -161,16 +165,16 @@ class SupabaseAccessService:
 
     def demo_entry_label(self) -> str:
         if self.demo_profile.is_configured and self.demo_profile.allow_anonymous:
-            return "Demonstracao online"
-        return "Demonstracao local"
+            return "Demonstração online"
+        return "Demonstração local"
 
     def sign_in_production(self, *, email: str, password: str) -> AppAccessSession:
-        normalized_email = str(email or "").strip()
+        normalized_email = normalize_corporate_email(email)
         normalized_password = str(password or "")
         if not normalized_email or not normalized_password:
-            raise AccessAuthError("Informe email e senha para entrar em producao.")
+            raise AccessAuthError("Informe email e senha para entrar em produção.")
         if not self.can_sign_in_production():
-            raise AccessAuthError("A autenticacao de producao ainda nao esta configurada.")
+            raise AccessAuthError("A autenticação de produção ainda não está configurada.")
 
         try:
             client = self._create_client(self.production_profile)
@@ -196,14 +200,14 @@ class SupabaseAccessService:
         if not bool(profile.get("is_active", False)):
             self._best_effort_sign_out(client)
             raise AccessAuthError(
-                "Seu usuario existe, mas ainda nao foi liberado para o ambiente de producao. "
+                "Seu usuário existe, mas ainda não foi liberado para o ambiente de produção. "
                 "Peça para um administrador ativar seu perfil no Supabase."
             )
         try:
             sync_result = self.production_sync_service.sync_authenticated_client(client)
         except Exception as exc:
             raise AccessAuthError(
-                f"Autenticacao concluida, mas a base oficial nao pode ser sincronizada: {exc}"
+                f"Autenticação concluída, mas a base oficial não pode ser sincronizada: {exc}"
             ) from exc
         return AppAccessSession(
             environment=remote_session.environment,
@@ -220,6 +224,86 @@ class SupabaseAccessService:
             refresh_token=remote_session.refresh_token,
         )
 
+    def can_request_password_reset(self) -> bool:
+        return self.can_sign_in_production()
+
+    def request_password_reset(self, *, email: str) -> str:
+        normalized_email = normalize_corporate_email(email)
+        if not normalized_email:
+            raise AccessAuthError("Informe seu email corporativo para recuperar a senha.")
+        if not self.can_request_password_reset():
+            raise AccessAuthError("A recuperação de senha ainda não está configurada neste app.")
+
+        try:
+            client = self._create_client(self.production_profile)
+            client.auth.sign_in_with_otp(
+                {
+                    "email": normalized_email,
+                    "options": {
+                        "should_create_user": False,
+                    },
+                }
+            )
+        except Exception as exc:
+            raise AccessAuthError(f"Falha ao solicitar a recuperação de senha: {exc}") from exc
+
+        return (
+            "Se existir um usuário ativo com esse email, o Supabase enviará um link ou código "
+            "de acesso para a caixa corporativa. Depois, cole esse link ou código no app para definir a nova senha."
+        )
+
+    def complete_password_reset(
+        self,
+        *,
+        email: str,
+        recovery_value: str,
+        new_password: str,
+    ) -> str:
+        normalized_email = normalize_corporate_email(email)
+        normalized_recovery_value = str(recovery_value or "").strip()
+        normalized_password = str(new_password or "")
+        if not normalized_email:
+            raise AccessAuthError("Informe seu email corporativo para concluir a recuperação.")
+        if not normalized_recovery_value:
+            raise AccessAuthError("Cole o link ou o código recebido no email corporativo.")
+        if len(normalized_password) < 8:
+            raise AccessAuthError("A nova senha precisa ter pelo menos 8 caracteres.")
+
+        try:
+            client = self._create_client(self.production_profile)
+            verification_payload = self._build_password_reset_verification_payload(
+                normalized_email,
+                normalized_recovery_value,
+            )
+
+            access_token = verification_payload.pop("_access_token", "")
+            refresh_token = verification_payload.pop("_refresh_token", "")
+            if access_token and refresh_token:
+                client.auth.set_session(access_token, refresh_token)
+            else:
+                response = client.auth.verify_otp(verification_payload)
+                remote_session = self._build_remote_session(
+                    self.production_profile,
+                    response,
+                    auth_mode="password_recovery",
+                )
+                client.auth.set_session(remote_session.access_token, remote_session.refresh_token)
+
+            profile = self._fetch_production_profile_from_session(client)
+            if not bool(profile.get("is_active", False)):
+                raise AccessAuthError(
+                    "Seu usuário existe, mas ainda não foi liberado para o ambiente de produção. "
+                    "Peça a um administrador para ativar seu perfil no Supabase."
+                )
+            client.auth.update_user({"password": normalized_password})
+            self._best_effort_sign_out(client)
+        except AccessAuthError:
+            raise
+        except Exception as exc:
+            raise AccessAuthError(f"Falha ao concluir a redefinição da senha: {exc}") from exc
+
+        return "Senha atualizada com sucesso. Você já pode voltar ao app e entrar com a nova senha."
+
     def enter_demo(self) -> AppAccessSession:
         if self.demo_profile.is_configured and self.demo_profile.allow_anonymous:
             try:
@@ -233,7 +317,7 @@ class SupabaseAccessService:
                 demo_db_path = self._reset_demo_database()
                 return AppAccessSession(
                     environment=AccessEnvironment.DEMO,
-                    label="Demonstracao",
+                    label="Demonstração",
                     auth_mode=remote_session.auth_mode,
                     user_id=remote_session.user_id,
                     user_email=remote_session.user_email,
@@ -247,7 +331,7 @@ class SupabaseAccessService:
                 )
             except Exception as exc:
                 logger.warning(
-                    "Falha ao autenticar demonstracao online. Voltando para a base local ficticia: %s",
+                    "Falha ao autenticar demonstração online. Voltando para a base local fictícia: %s",
                     exc,
                     exc_info=True,
                 )
@@ -255,7 +339,7 @@ class SupabaseAccessService:
         demo_db_path = self._reset_demo_database()
         return AppAccessSession(
             environment=AccessEnvironment.DEMO,
-            label="Demonstracao",
+            label="Demonstração",
             auth_mode="demo_local",
             is_anonymous=True,
             local_db_path=str(demo_db_path),
@@ -265,13 +349,40 @@ class SupabaseAccessService:
 
     def _create_client(self, profile: SupabaseAccessProfile):
         try:
-            from supabase import create_client
+            create_client = self._import_supabase_create_client()
         except ImportError as exc:
             raise AccessAuthError(
-                "A dependencia 'supabase' nao esta instalada. Rode 'pip install -r requirements.txt'."
+                "A dependência 'supabase' não está instalada. Rode 'pip install -r requirements.txt'."
             ) from exc
 
         return create_client(profile.url, profile.publishable_key)
+
+    @staticmethod
+    def _import_supabase_create_client():
+        project_root = Path(__file__).resolve().parents[2]
+        original_path = list(sys.path)
+        filtered_path: list[str] = []
+        for entry in original_path:
+            try:
+                resolved = Path(entry or ".").resolve()
+            except Exception:
+                filtered_path.append(entry)
+                continue
+            if resolved == project_root:
+                continue
+            filtered_path.append(entry)
+
+        try:
+            sys.path = filtered_path
+            sys.modules.pop("supabase", None)
+            module = importlib.import_module("supabase")
+        finally:
+            sys.path = original_path
+
+        create_client = getattr(module, "create_client", None)
+        if not callable(create_client):
+            raise ImportError("cannot import name 'create_client' from 'supabase'")
+        return create_client
 
     @staticmethod
     def _build_remote_session(
@@ -286,7 +397,7 @@ class SupabaseAccessService:
         user_email = str(getattr(user, "email", "") or "")
         is_anonymous = bool(getattr(user, "is_anonymous", False) or auth_mode == "anonymous")
         if not user_id:
-            raise AccessAuthError("A autenticacao retornou sem usuario valido.")
+            raise AccessAuthError("A autenticação retornou sem usuário válido.")
 
         return AppAccessSession(
             environment=profile.environment,
@@ -306,21 +417,21 @@ class SupabaseAccessService:
         elif access_session.environment == AccessEnvironment.DEMO:
             profile = self.demo_profile
         else:
-            raise AccessAuthError("O ambiente atual nao usa autenticacao remota do Supabase.")
+            raise AccessAuthError("O ambiente atual não usa autenticação remota do Supabase.")
 
         if not profile.is_configured:
-            raise AccessAuthError("O projeto Supabase deste ambiente ainda nao esta configurado.")
+            raise AccessAuthError("O projeto Supabase deste ambiente ainda não está configurado.")
 
         access_token = str(getattr(access_session, "access_token", "") or "").strip()
         refresh_token = str(getattr(access_session, "refresh_token", "") or "").strip()
         if not access_token or not refresh_token:
-            raise AccessAuthError("A sessao autenticada nao possui tokens reutilizaveis do Supabase.")
+            raise AccessAuthError("A sessão autenticada não possui tokens reutilizáveis do Supabase.")
 
         try:
             client = self._create_client(profile)
             client.auth.set_session(access_token, refresh_token)
         except Exception as exc:
-            raise AccessAuthError(f"Nao foi possivel restaurar a sessao autenticada do Supabase: {exc}") from exc
+            raise AccessAuthError(f"Não foi possível restaurar a sessão autenticada do Supabase: {exc}") from exc
         return client
 
     def _reset_demo_database(self) -> Path:
@@ -334,7 +445,7 @@ class SupabaseAccessService:
     def _fetch_production_profile(self, client: Any, *, user_id: str) -> dict[str, Any]:
         normalized_user_id = str(user_id or "").strip()
         if not normalized_user_id:
-            raise AccessAuthError("Sessao autenticada sem identificador de usuario valido.")
+            raise AccessAuthError("Sessão autenticada sem identificador de usuário válido.")
         try:
             response = (
                 client.table("profiles")
@@ -344,14 +455,57 @@ class SupabaseAccessService:
                 .execute()
             )
         except Exception as exc:
-            raise AccessAuthError(f"Nao foi possivel consultar o perfil liberado do usuario: {exc}") from exc
+            raise AccessAuthError(f"Não foi possível consultar o perfil liberado do usuário: {exc}") from exc
 
         payload = getattr(response, "data", None)
         if not isinstance(payload, dict) or not payload:
             raise AccessAuthError(
-                "Seu usuario ainda nao possui um perfil configurado no ambiente de producao."
+                "Seu usuário ainda não possui um perfil configurado no ambiente de produção."
             )
         return dict(payload)
+
+    def _fetch_production_profile_from_session(self, client: Any) -> dict[str, Any]:
+        try:
+            response = client.auth.get_user()
+        except Exception as exc:
+            raise AccessAuthError(f"Não foi possível validar a sessão de recuperação: {exc}") from exc
+
+        user = getattr(response, "user", None)
+        if user is None:
+            data = getattr(response, "data", None)
+            user = getattr(data, "user", None) if data is not None else None
+        user_id = str(getattr(user, "id", "") or "")
+        if not user_id:
+            raise AccessAuthError("A sessão de recuperação não retornou um usuário válido.")
+        return self._fetch_production_profile(client, user_id=user_id)
+
+    @staticmethod
+    def _build_password_reset_verification_payload(email: str, recovery_value: str) -> dict[str, str]:
+        parsed = urlparse(recovery_value)
+        query = parse_qs(parsed.query)
+        fragment = parse_qs(parsed.fragment)
+
+        access_token = str((fragment.get("access_token") or [""])[0] or "").strip()
+        refresh_token = str((fragment.get("refresh_token") or [""])[0] or "").strip()
+        if access_token and refresh_token:
+            return {
+                "_access_token": access_token,
+                "_refresh_token": refresh_token,
+            }
+
+        token_hash = str((query.get("token_hash") or query.get("token") or [""])[0] or "").strip()
+        if token_hash:
+            recovery_type = str((query.get("type") or ["email"])[0] or "email").strip().lower()
+            return {
+                "token_hash": token_hash,
+                "type": recovery_type or "email",
+            }
+
+        return {
+            "email": email,
+            "token": recovery_value,
+            "type": "email",
+        }
 
     @staticmethod
     def _best_effort_sign_out(client: Any) -> None:
@@ -361,4 +515,4 @@ class SupabaseAccessService:
             try:
                 sign_out()
             except Exception:
-                logger.warning("Falha ao encerrar sessao Supabase apos login bloqueado.", exc_info=True)
+                logger.warning("Falha ao encerrar sessão Supabase após login bloqueado.", exc_info=True)

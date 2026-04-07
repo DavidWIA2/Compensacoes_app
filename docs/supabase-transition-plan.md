@@ -66,6 +66,38 @@ Este plano segue a ordem mais simples, segura e rapida para tirar a producao do 
 
 Enquanto `is_active = false`, o usuario consegue existir no Auth, mas o app nao libera acesso a producao.
 
+## Fase 4 entregue nesta rodada
+
+- RPCs transacionais de TCRA publicadas no Supabase:
+  - `public.rpc_save_tcra_record`
+  - `public.rpc_delete_tcra_record`
+  - `public.rpc_save_tcra_records`
+  - `public.rpc_replace_tcras_snapshot`
+- Helpers privados em `app_private` para normalizacao de busca, upsert de TCRA, substituicao atomica de eventos e auditoria remota.
+- Camada Python pronta para consumir essas RPCs em [app/services/supabase_tcra_rpc_service.py](C:/Users/david/Desktop/Pen%20Drive/Compensacoes_app/app/services/supabase_tcra_rpc_service.py).
+
+## Fase 5 entregue parcialmente nesta rodada
+
+- `TCRAs` em `Producao` agora usam o Supabase como caminho principal de escrita para `save`, `delete`, `bulk action` e `import merge`, via [app/application/use_cases/tcra_module_operations.py](C:/Users/david/Desktop/Pen%20Drive/Compensacoes_app/app/application/use_cases/tcra_module_operations.py).
+- Depois de cada escrita remota bem-sucedida, o app tenta sincronizar o snapshot oficial para o cache SQLite local.
+- Se essa sincronizacao completa falhar, o app aplica um fallback local controlado no cache de TCRA para nao deixar a tela desatualizada, mantendo a autoridade remota como fonte oficial.
+- `Demo` e `Local` continuam no fluxo anterior, sem gravacao remota.
+
+## Fase 6 entregue parcialmente nesta rodada
+
+- Em `Producao`, a carga/reload do banco local agora tenta sincronizar primeiro o snapshot oficial do Supabase antes de ler o SQLite, via [app/application/use_cases/authoritative_persistence.py](C:/Users/david/Desktop/Pen%20Drive/Compensacoes_app/app/application/use_cases/authoritative_persistence.py).
+- O SQLite fica explicitamente como cache operacional: se a sincronizacao remota falhar, o app mantem a leitura do cache local e registra a observacao para a UI operacional.
+- A aba `TCRAs` ganhou refresh remoto sob demanda no botao `Atualizar`, reaproveitando o mesmo snapshot oficial de producao antes de listar os registros locais.
+- `Demo` e `Local` continuam sem chamadas remotas, mesmo quando o usuario atualiza a tela.
+- Quando a sessao de producao ja esta aberta, a UI agora reutiliza um refresh remoto unificado e com throttle ao entrar em `Painel`, `Operacoes` e `TCRAs`, evitando ficar presa apenas ao cache ja carregado em memoria.
+- Aberturas repetidas do `Banco local` em producao tambem deixam de reaproveitar uma sessao stale sem nova sincronizacao oficial.
+
+## Fase 7 entregue parcialmente nesta rodada
+
+- Em `Producao`, o startup deixa de considerar `last_excel_path` como caminho de bootstrap oficial: se existir heranca de planilha legada no `QSettings`, ela e ignorada e o app volta direto para a sessao/cache oficial.
+- O bootstrap legado por planilha fica restrito a `Local` e `Demo`, preservando contingencia e migracao assistida fora da base real.
+- O restante do legado de planilha continua apenas como apoio operacional para importacao/exportacao e para ambientes nao produtivos.
+
 ## Risco principal remanescente
 
-`Compensacoes` ja escrevem remoto em producao, mas o modulo `TCRA` ainda nao migrou para RPC autoritativa no Supabase. A proxima etapa critica e repetir esse padrao para `save/delete/import` de TCRAs e eventos, mantendo o cache SQLite apenas como espelho operacional.
+`Compensacoes` e `TCRAs` ja escrevem remoto em producao, e startup/reload agora fazem leitura `remote-first` via sincronizacao do snapshot oficial. O proximo risco e publicar as migrations em producao, validar RLS/RPC no ambiente real e seguir removendo residuos de bootstrap legado que ainda fazem sentido apenas em `Local/Demo`.

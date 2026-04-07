@@ -46,7 +46,7 @@ def test_friendly_error_message_fallback():
 def test_friendly_error_message_handles_access_auth_error():
     title, msg = friendly_error_message(AccessAuthError("tokens invalidos"), "salvar")
 
-    assert title == "Sessao de Producao"
+    assert title == "Sessão de Produção"
     assert "supabase" in msg.lower()
 
 

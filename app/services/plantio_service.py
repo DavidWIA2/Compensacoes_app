@@ -200,7 +200,7 @@ def validate_record_plantios(record: Compensacao) -> str:
     is_compensado = _safe_upper(getattr(record, "compensado", "")) == "SIM"
 
     if is_compensado and not normalized:
-        return "Preencha Endereco Plantio para salvar um registro compensado."
+        return "Preencha Endereço Plantio para salvar um registro compensado."
 
     for index, item in enumerate(normalized, start=1):
         if not _clean_text(item.endereco):

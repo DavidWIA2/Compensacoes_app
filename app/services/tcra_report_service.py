@@ -61,11 +61,11 @@ def _build_summary_rows(records: Sequence[Tcra], *, today: date | None = None) -
         ("Cumpridos", metrics["count_cumpridos"]),
         ("Alertas", metrics["count_alertas"]),
         ("Prazo vencido", metrics["count_prazo_vencido"]),
-        ("Relatorio pendente", metrics["count_relatorio_pendente"]),
-        ("Proximo relatorio em 30 dias", metrics["count_relatorio_proximo_30d"]),
+        ("Relatório pendente", metrics["count_relatorio_pendente"]),
+        ("Próximo relatório em 30 dias", metrics["count_relatorio_proximo_30d"]),
         ("Relacionados ao MPSP", metrics["count_mpsp_relacionados"]),
-        ("Sem numero TCRA", metrics["count_sem_numero_tcra"]),
-        ("Sem responsavel", metrics["count_sem_responsavel"]),
+        ("Sem número TCRA", metrics["count_sem_numero_tcra"]),
+        ("Sem responsável", metrics["count_sem_responsavel"]),
         ("Com eventos", overview.com_eventos_count),
     ]
 
@@ -88,7 +88,7 @@ def _build_data_rows(records: Sequence[Tcra], *, today: date | None = None) -> l
                 "" if record.area_m2 is None else str(record.area_m2),
                 "" if record.numero_mudas_previsto is None else str(record.numero_mudas_previsto),
                 _stringify(record.responsavel_execucao),
-                "Sim" if tcra_is_mpsp_related(record) else "Nao",
+                "Sim" if tcra_is_mpsp_related(record) else "Não",
                 _stringify(record.inquerito_civil),
                 _stringify(record.servicos_exigidos),
                 _stringify(record.observacoes),
@@ -155,7 +155,7 @@ def _style_worksheet(worksheet) -> None:
                 row_fill = DONE_FILL
             elif status_value == "Prazo vencido":
                 row_fill = ALERT_FILL
-            elif status_value == "Relatorio pendente":
+            elif status_value == "Relatório pendente":
                 row_fill = SOON_FILL
 
         for cell in row:
@@ -191,7 +191,7 @@ def export_tcra_excel_report(
     summary_sheet.title = "Resumo"
     data_sheet = workbook.create_sheet("TCRAs")
 
-    summary_sheet["A1"] = "Relatorio Operacional de TCRAs"
+    summary_sheet["A1"] = "Relatório Operacional de TCRAs"
     summary_sheet["A1"].font = Font(bold=True, size=14)
     summary_sheet["A2"] = "Gerado em"
     summary_sheet["B2"] = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -214,7 +214,7 @@ def export_tcra_excel_report(
     next_row = _append_labeled_section(
         summary_sheet,
         start_row=next_row,
-        title="Proximos relatorios",
+        title="Próximos relatórios",
         headers=("Termo", "Data"),
         rows=tuple(
             (
@@ -273,20 +273,20 @@ def export_tcra_excel_report(
         "Processo",
         "Numero TCRA",
         "Local",
-        "Endereco",
+        "Endereço",
         "Bairro",
-        "Orgao",
+        "Órgão",
         "Status operacional",
         "Prazo final",
-        "Ultimo relatorio",
-        "Proximo relatorio",
+        "Último relatório",
+        "Próximo relatório",
         "Area (m2)",
         "Numero de mudas",
         "Responsavel",
         "MPSP",
         "Inquerito civil",
         "Servicos exigidos",
-        "Observacoes",
+        "Observações",
         "Eventos",
     ]
     data_sheet.append(headers)
@@ -336,7 +336,7 @@ def export_tcra_pdf_report(
     )
 
     elements = [
-        Paragraph("Relatorio Operacional de TCRAs", title_style),
+        Paragraph("Relatório Operacional de TCRAs", title_style),
         Spacer(1, 8),
         Paragraph(f"<b>Filtros:</b> {filter_summary}", normal_style),
         Spacer(1, 8),
@@ -383,7 +383,7 @@ def export_tcra_pdf_report(
                 ]
             )
         )
-        elements.append(Paragraph("<b>Proximos relatorios</b>", normal_style))
+        elements.append(Paragraph("<b>Próximos relatórios</b>", normal_style))
         elements.append(upcoming_table)
         elements.append(Spacer(1, 10))
 
@@ -515,7 +515,7 @@ def export_tcra_pdf_report(
         "Status",
         "Prazo",
         "Prox. rel.",
-        "Orgao",
+        "Órgão",
         "Resp.",
     ]
     table_rows = [[Paragraph(label, table_header_style) for label in headers]]

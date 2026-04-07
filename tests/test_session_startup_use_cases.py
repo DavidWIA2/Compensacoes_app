@@ -21,6 +21,18 @@ def test_session_startup_plan_can_load_existing_singleton():
     assert plan.singleton_path == "session://banco-local"
 
 
+def test_session_startup_plan_ignores_legacy_bootstrap_when_disabled():
+    plan = build_singleton_session_startup_plan(
+        pending_legacy_source_path="C:/dados/ultima.xlsx",
+        singleton_session_path="session://banco-local",
+        allow_legacy_bootstrap=False,
+    )
+
+    assert plan.should_bootstrap_legacy is False
+    assert plan.should_load_singleton is True
+    assert plan.singleton_path == "session://banco-local"
+
+
 def test_session_startup_plan_can_be_noop():
     plan = build_singleton_session_startup_plan(
         pending_legacy_source_path="",

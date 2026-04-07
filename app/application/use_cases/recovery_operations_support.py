@@ -54,8 +54,8 @@ def build_operation_restore_request_content(
         label=normalized_summary,
         confirmation_title="ATENCAO",
         confirmation_message=(
-            f"Tem certeza que deseja restaurar a operacao '{normalized_summary}'? "
-            "As alteracoes atuais serao perdidas!"
+            f"Tem certeza que deseja restaurar a operação '{normalized_summary}'? "
+            "As alterações atuais serão perdidas!"
         ),
         metadata={
             "event_id": str(event_id or "").strip(),
@@ -76,8 +76,8 @@ def build_rollback_restore_request_content(
         label=resolved_label,
         confirmation_title="ATENCAO",
         confirmation_message=(
-            f"Tem certeza que deseja restaurar a versao de {timestamp_prefix}? "
-            "As alteracoes atuais serao perdidas!"
+            f"Tem certeza que deseja restaurar a versão de {timestamp_prefix}? "
+            "As alterações atuais serão perdidas!"
         ),
         metadata=dict(metadata or {}),
     )
@@ -106,7 +106,7 @@ def build_operation_history_plan(events: tuple[AuditEvent, ...]) -> OperationHis
     return OperationHistoryPlan(
         events=events,
         empty_title="Historico de Operacoes",
-        empty_message="Nenhuma operacao auditada foi encontrada para esta sessao.",
+        empty_message="Nenhuma operação auditada foi encontrada para esta sessão.",
     )
 
 

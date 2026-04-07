@@ -103,11 +103,11 @@ class BatchGeocodeOperationsUseCases:
     @staticmethod
     def build_cancelled_message(message: str) -> str:
         resolved = str(message or "").strip()
-        return resolved or "Geocodificacao em lote cancelada."
+        return resolved or "Geocodificação em lote cancelada."
 
     @staticmethod
     def build_failure_runtime_message(exc: Exception) -> str:
-        return f"Falha ao salvar geocodificacao: {exc}"
+        return f"Falha ao salvar geocodificação: {exc}"
 
     @staticmethod
     def build_completion_presentation(

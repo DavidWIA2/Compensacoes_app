@@ -14,6 +14,7 @@ from app.services.sqlite_mirror_service import DEFAULT_SINGLETON_SESSION_PATH, S
 from app.services.tcra_sqlite_service import TcraSqliteService
 from app.utils.app_paths import ensure_dir, resolve_data_path
 from app.utils.logger import get_logger
+from app.utils.text_normalization import repair_mojibake_object, repair_mojibake_text
 
 
 logger = get_logger("Supabase.Sync")
@@ -116,8 +117,8 @@ class SupabaseWorkspaceSyncService:
         tcra_event_rows = self._fetch_table_rows(client, "tcra_eventos", order_by="id")
 
         return SimpleNamespace(
-            workbook_name=str(workbook_row.get("workbook_name", "") or "Base oficial"),
-            workbook_path=str(workbook_row.get("workbook_path", "") or self.session_path),
+            workbook_name=repair_mojibake_text(str(workbook_row.get("workbook_name", "") or "Base oficial")),
+            workbook_path=repair_mojibake_text(str(workbook_row.get("workbook_path", "") or self.session_path)),
             records=self._build_records(record_rows, plantio_rows),
             audit_events=tuple(self._normalize_audit_payloads(audit_rows)),
             tcras=self._build_tcras(tcra_rows, tcra_event_rows),
@@ -172,14 +173,14 @@ class SupabaseWorkspaceSyncService:
             if record_id <= 0:
                 continue
             plantios_by_record_id.setdefault(record_id, []).append(
-                PlantioItem(
-                    sequence=int(row.get("sequence") or 0),
-                    endereco=str(row.get("endereco", "") or ""),
-                    qtd_mudas=str(row.get("qtd_mudas", "") or ""),
-                    latitude=str(row.get("latitude", "") or ""),
-                    longitude=str(row.get("longitude", "") or ""),
+                    PlantioItem(
+                        sequence=int(row.get("sequence") or 0),
+                        endereco=repair_mojibake_text(row.get("endereco", "")),
+                        qtd_mudas=repair_mojibake_text(row.get("qtd_mudas", "")),
+                        latitude=repair_mojibake_text(row.get("latitude", "")),
+                        longitude=repair_mojibake_text(row.get("longitude", "")),
+                    )
                 )
-            )
 
         records: list[Compensacao] = []
         for row in record_rows:
@@ -187,20 +188,20 @@ class SupabaseWorkspaceSyncService:
             records.append(
                 Compensacao(
                     excel_row=int(row.get("excel_row") or 0),
-                    oficio_processo=str(row.get("oficio_processo", "") or ""),
-                    eletronico=str(row.get("eletronico", "") or ""),
-                    caixa=str(row.get("caixa", "") or ""),
-                    av_tec=str(row.get("av_tec", "") or ""),
-                    compensacao=str(row.get("compensacao", "") or ""),
-                    endereco=str(row.get("endereco", "") or ""),
-                    microbacia=str(row.get("microbacia", "") or ""),
-                    compensado=str(row.get("compensado", "") or ""),
-                    endereco_plantio=str(row.get("endereco_plantio", "") or ""),
-                    latitude_plantio=str(row.get("latitude_plantio", "") or ""),
-                    longitude_plantio=str(row.get("longitude_plantio", "") or ""),
-                    latitude=str(row.get("latitude", "") or ""),
-                    longitude=str(row.get("longitude", "") or ""),
-                    uid=str(row.get("uid", "") or ""),
+                    oficio_processo=repair_mojibake_text(row.get("oficio_processo", "")),
+                    eletronico=repair_mojibake_text(row.get("eletronico", "")),
+                    caixa=repair_mojibake_text(row.get("caixa", "")),
+                    av_tec=repair_mojibake_text(row.get("av_tec", "")),
+                    compensacao=repair_mojibake_text(row.get("compensacao", "")),
+                    endereco=repair_mojibake_text(row.get("endereco", "")),
+                    microbacia=repair_mojibake_text(row.get("microbacia", "")),
+                    compensado=repair_mojibake_text(row.get("compensado", "")),
+                    endereco_plantio=repair_mojibake_text(row.get("endereco_plantio", "")),
+                    latitude_plantio=repair_mojibake_text(row.get("latitude_plantio", "")),
+                    longitude_plantio=repair_mojibake_text(row.get("longitude_plantio", "")),
+                    latitude=repair_mojibake_text(row.get("latitude", "")),
+                    longitude=repair_mojibake_text(row.get("longitude", "")),
+                    uid=repair_mojibake_text(row.get("uid", "")),
                     plantios=sorted(
                         plantios_by_record_id.get(record_id, []),
                         key=lambda item: int(item.sequence or 0),
@@ -224,10 +225,10 @@ class SupabaseWorkspaceSyncService:
                 TcraEvento(
                     sequence=int(row.get("sequence") or 0),
                     data_evento=cls._parse_date(row.get("data_evento")),
-                    tipo_evento=str(row.get("tipo_evento", "") or ""),
-                    descricao=str(row.get("descricao", "") or ""),
+                    tipo_evento=repair_mojibake_text(row.get("tipo_evento", "")),
+                    descricao=repair_mojibake_text(row.get("descricao", "")),
                     prazo_resultante=cls._parse_date(row.get("prazo_resultante")),
-                    status_resultante=str(row.get("status_resultante", "") or ""),
+                    status_resultante=repair_mojibake_text(row.get("status_resultante", "")),
                 )
             )
 
@@ -236,14 +237,14 @@ class SupabaseWorkspaceSyncService:
             uid = str(row.get("uid", "") or "")
             records.append(
                 Tcra(
-                    uid=uid,
-                    numero_processo=str(row.get("numero_processo", "") or ""),
-                    numero_tcra=str(row.get("numero_tcra", "") or ""),
-                    local=str(row.get("local", "") or ""),
-                    endereco=str(row.get("endereco", "") or ""),
-                    bairro=str(row.get("bairro", "") or ""),
-                    orgao_acompanhamento=str(row.get("orgao_acompanhamento", "") or ""),
-                    status=str(row.get("status", "") or ""),
+                    uid=repair_mojibake_text(uid),
+                    numero_processo=repair_mojibake_text(row.get("numero_processo", "")),
+                    numero_tcra=repair_mojibake_text(row.get("numero_tcra", "")),
+                    local=repair_mojibake_text(row.get("local", "")),
+                    endereco=repair_mojibake_text(row.get("endereco", "")),
+                    bairro=repair_mojibake_text(row.get("bairro", "")),
+                    orgao_acompanhamento=repair_mojibake_text(row.get("orgao_acompanhamento", "")),
+                    status=repair_mojibake_text(row.get("status", "")),
                     data_assinatura=cls._parse_date(row.get("data_assinatura")),
                     prazo_final=cls._parse_date(row.get("prazo_final")),
                     periodicidade_relatorio_meses=cls._parse_int(row.get("periodicidade_relatorio_meses")),
@@ -251,11 +252,11 @@ class SupabaseWorkspaceSyncService:
                     data_proximo_relatorio=cls._parse_date(row.get("data_proximo_relatorio")),
                     area_m2=cls._parse_float(row.get("area_m2")),
                     numero_mudas_previsto=cls._parse_int(row.get("numero_mudas_previsto")),
-                    servicos_exigidos=str(row.get("servicos_exigidos", "") or ""),
-                    responsavel_execucao=str(row.get("responsavel_execucao", "") or ""),
-                    observacoes=str(row.get("observacoes", "") or ""),
-                    mpsp_relacionado=str(row.get("mpsp_relacionado", "") or ""),
-                    inquerito_civil=str(row.get("inquerito_civil", "") or ""),
+                    servicos_exigidos=repair_mojibake_text(row.get("servicos_exigidos", "")),
+                    responsavel_execucao=repair_mojibake_text(row.get("responsavel_execucao", "")),
+                    observacoes=repair_mojibake_text(row.get("observacoes", "")),
+                    mpsp_relacionado=repair_mojibake_text(row.get("mpsp_relacionado", "")),
+                    inquerito_civil=repair_mojibake_text(row.get("inquerito_civil", "")),
                     eventos=sorted(
                         events_by_uid.get(uid, []),
                         key=lambda item: int(item.sequence or 0),
@@ -270,14 +271,14 @@ class SupabaseWorkspaceSyncService:
         for row in rows:
             payloads.append(
                 {
-                    "event_id": str(row.get("event_id", "") or ""),
-                    "timestamp": str(row.get("timestamp", "") or ""),
-                    "action": str(row.get("action", "") or ""),
-                    "summary": str(row.get("summary", "") or ""),
-                    "backup_path": str(row.get("backup_path", "") or ""),
-                    "metadata_json": dict(row.get("metadata_json") or {}),
-                    "before_json": dict(row.get("before_json") or {}) or None,
-                    "after_json": dict(row.get("after_json") or {}) or None,
+                    "event_id": repair_mojibake_text(row.get("event_id", "")),
+                    "timestamp": repair_mojibake_text(row.get("timestamp", "")),
+                    "action": repair_mojibake_text(row.get("action", "")),
+                    "summary": repair_mojibake_text(row.get("summary", "")),
+                    "backup_path": repair_mojibake_text(row.get("backup_path", "")),
+                    "metadata_json": repair_mojibake_object(dict(row.get("metadata_json") or {})),
+                    "before_json": repair_mojibake_object(dict(row.get("before_json") or {}) or None),
+                    "after_json": repair_mojibake_object(dict(row.get("after_json") or {}) or None),
                 }
             )
         return tuple(payloads)

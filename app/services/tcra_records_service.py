@@ -14,7 +14,7 @@ STATUS_SEM_STATUS = "Sem status"
 STATUS_EM_ACOMPANHAMENTO = "Em acompanhamento"
 STATUS_CUMPRIDO = "Cumprido"
 STATUS_PRAZO_VENCIDO = "Prazo vencido"
-STATUS_RELATORIO_PENDENTE = "Relatorio pendente"
+STATUS_RELATORIO_PENDENTE = "Relatório pendente"
 STATUS_ARQUIVADO = "Arquivado"
 STATUS_SEM_VALIDADE = "Sem validade"
 
@@ -172,6 +172,20 @@ def normalize_orgao_label(value: object) -> str:
     return _smart_label(text)
 
 
+def normalize_event_type_label(value: object) -> str:
+    text = _stringify(value)
+    normalized = normalize_key(text)
+    if not normalized:
+        return ""
+    if normalized == "RELATORIO":
+        return "Relatório"
+    if normalized == "RELATORIO ENTREGUE":
+        return "Relatório entregue"
+    if normalized == "OBSERVACAO":
+        return "Observação"
+    return _smart_label(text)
+
+
 def unique_non_empty(values: Iterable[str]) -> List[str]:
     seen: set[str] = set()
     unique_values: list[str] = []
@@ -310,15 +324,15 @@ def resolve_operational_issues(record: Tcra, *, today: date | None = None) -> tu
     if tcra_has_prazo_vencido(record, today=today):
         issues.append("Prazo final vencido")
     if tcra_has_relatorio_pendente(record, today=today):
-        issues.append("Relatorio pendente")
+        issues.append("Relatório pendente")
     elif tcra_has_report_due_soon(record, today=today):
-        issues.append(f"Relatorio nos proximos {UPCOMING_REPORT_WINDOW_DAYS} dias")
+        issues.append(f"Relatório nos próximos {UPCOMING_REPORT_WINDOW_DAYS} dias")
     if tcra_has_missing_identity(record):
-        issues.append("Sem numero TCRA")
+        issues.append("Sem número TCRA")
     if tcra_has_missing_responsavel(record):
-        issues.append("Sem responsavel")
+        issues.append("Sem responsável")
     if tcra_has_missing_orgao(record):
-        issues.append("Sem orgao")
+        issues.append("Sem órgão")
     return tuple(issues)
 
 
@@ -327,20 +341,20 @@ def resolve_record_consistency_issues(record: Tcra, *, today: date | None = None
     normalized_status = normalize_status_label(record.status)
 
     if record.periodicidade_relatorio_meses is not None and record.periodicidade_relatorio_meses <= 0:
-        issues.append("Periodicidade de relatorio deve ser maior que zero.")
+        issues.append("Periodicidade de relatório deve ser maior que zero.")
     if record.data_assinatura and record.prazo_final and record.prazo_final < record.data_assinatura:
-        issues.append("Prazo final nao pode ser anterior a data de assinatura.")
+        issues.append("Prazo final não pode ser anterior à data de assinatura.")
     if record.data_ultimo_relatorio and record.data_proximo_relatorio:
         if record.data_proximo_relatorio < record.data_ultimo_relatorio:
-            issues.append("Proximo relatorio nao pode ser anterior ao ultimo relatorio.")
+            issues.append("Próximo relatório não pode ser anterior ao último relatório.")
     if normalized_status in {STATUS_CUMPRIDO, STATUS_ARQUIVADO} and record.data_proximo_relatorio is not None:
-        issues.append("TCRA cumprido/arquivado nao deve manter proximo relatorio em aberto.")
+        issues.append("TCRA cumprido/arquivado não deve manter próximo relatório em aberto.")
     if normalized_status == STATUS_RELATORIO_PENDENTE and record.data_proximo_relatorio is None:
-        issues.append("Status 'Relatorio pendente' exige data do proximo relatorio.")
+        issues.append("Status 'Relatório pendente' exige data do próximo relatório.")
     if normalized_status == STATUS_PRAZO_VENCIDO and record.prazo_final is None:
         issues.append("Status 'Prazo vencido' exige prazo final informado.")
     if tcra_has_prazo_vencido(record, today=today) and normalized_status in {STATUS_CUMPRIDO, STATUS_ARQUIVADO}:
-        issues.append("Status concluido conflita com prazo vencido em aberto.")
+        issues.append("Status concluído conflita com prazo vencido em aberto.")
     return tuple(issues)
 
 
@@ -358,11 +372,11 @@ def build_quality_queue(
         consistency_issues = list(resolve_record_consistency_issues(record, today=current_day))
         cadastro_issues: list[str] = []
         if tcra_has_missing_identity(record):
-            cadastro_issues.append("Sem numero TCRA")
+            cadastro_issues.append("Sem número TCRA")
         if tcra_has_missing_responsavel(record):
-            cadastro_issues.append("Sem responsavel")
+            cadastro_issues.append("Sem responsável")
         if tcra_has_missing_orgao(record):
-            cadastro_issues.append("Sem orgao")
+            cadastro_issues.append("Sem órgão")
 
         issues = consistency_issues + [issue for issue in cadastro_issues if issue not in consistency_issues]
         if not issues:
@@ -426,26 +440,26 @@ def build_operational_agenda(
             detalhe_principal = f"Prazo final em {_format_agenda_date(record.prazo_final)}."
         elif tcra_has_relatorio_pendente(record, today=current_day):
             priority_rank = 1
-            prioridade_label = "Relatorio pendente"
+            prioridade_label = "Relatório pendente"
             data_referencia = record.data_proximo_relatorio
-            detalhe_principal = f"Relatorio previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
+            detalhe_principal = f"Relatório previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
         elif tcra_has_report_due_soon(record, today=current_day):
             priority_rank = 2
-            prioridade_label = "Relatorio proximo"
+            prioridade_label = "Relatório próximo"
             data_referencia = record.data_proximo_relatorio
-            detalhe_principal = f"Relatorio previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
+            detalhe_principal = f"Relatório previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
         elif tcra_has_missing_identity(record):
             priority_rank = 3
             prioridade_label = "Cadastro incompleto"
-            detalhe_principal = "Sem numero TCRA informado."
+            detalhe_principal = "Sem número TCRA informado."
         elif tcra_has_missing_responsavel(record):
             priority_rank = 4
-            prioridade_label = "Sem responsavel"
-            detalhe_principal = "Defina um responsavel de execucao."
+            prioridade_label = "Sem responsável"
+            detalhe_principal = "Defina um responsável de execução."
         elif tcra_has_missing_orgao(record):
             priority_rank = 5
-            prioridade_label = "Sem orgao"
-            detalhe_principal = "Informe o orgao de acompanhamento."
+            prioridade_label = "Sem órgão"
+            detalhe_principal = "Informe o órgão de acompanhamento."
         else:
             consistency_issues = resolve_record_consistency_issues(record, today=current_day)
             if consistency_issues:
@@ -548,28 +562,28 @@ def build_work_agenda(
 
 
 def suggest_issue_fix(issue: str) -> str:
-    normalized_issue = _stringify(issue).lower()
+    normalized_issue = remove_accents(issue).lower()
     if "numero tcra" in normalized_issue:
-        return "Informe o numero oficial do termo ou registre um identificador interno temporario."
+        return "Informe o número oficial do termo ou registre um identificador interno temporário."
     if "responsavel" in normalized_issue:
-        return "Defina o responsavel pela execucao para a equipe conseguir acompanhar o termo."
+        return "Defina o responsável pela execução para a equipe conseguir acompanhar o termo."
     if "orgao" in normalized_issue:
-        return "Preencha o orgao de acompanhamento para orientar cobrancas e relatorios."
+        return "Preencha o órgão de acompanhamento para orientar cobranças e relatórios."
     if "periodicidade" in normalized_issue:
-        return "Use um numero de meses maior que zero para o ciclo de relatorios."
+        return "Use um número de meses maior que zero para o ciclo de relatórios."
     if "prazo final nao pode ser anterior" in normalized_issue:
-        return "Revise as datas de assinatura e prazo final; o prazo precisa ser posterior a assinatura."
+        return "Revise as datas de assinatura e prazo final; o prazo precisa ser posterior à assinatura."
     if "proximo relatorio nao pode ser anterior" in normalized_issue:
-        return "Ajuste o ultimo ou o proximo relatorio para manter a sequencia cronologica."
+        return "Ajuste o último ou o próximo relatório para manter a sequência cronológica."
     if "cumprido/arquivado" in normalized_issue and "proximo relatorio" in normalized_issue:
-        return "Se o termo foi encerrado, limpe o proximo relatorio; se ainda esta ativo, revise o status."
+        return "Se o termo foi encerrado, limpe o próximo relatório; se ainda está ativo, revise o status."
     if "relatorio pendente" in normalized_issue and "exige data do proximo relatorio" in normalized_issue:
-        return "Informe a data prevista do proximo relatorio para manter o status pendente coerente."
+        return "Informe a data prevista do próximo relatório para manter o status pendente coerente."
     if "prazo vencido" in normalized_issue and "exige prazo final" in normalized_issue:
         return "Preencha o prazo final antes de marcar o termo como prazo vencido."
     if "status concluido conflita" in normalized_issue:
         return "Revise o status ou atualize o prazo final para remover o conflito de encerramento."
-    return "Revise esse campo no cadastro e confirme a informacao mais atual do termo."
+    return "Revise esse campo no cadastro e confirme a informação mais atual do termo."
 
 
 def _format_agenda_date(value: date | None) -> str:
@@ -641,7 +655,7 @@ def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Di
     for record in records:
         operational_status = resolve_operational_status(record, today=today)
         status_counter[operational_status] += 1
-        orgao_counter[normalize_orgao_label(record.orgao_acompanhamento) or "(Sem orgao)"] += 1
+        orgao_counter[normalize_orgao_label(record.orgao_acompanhamento) or "(Sem órgão)"] += 1
 
         if operational_status == STATUS_CUMPRIDO:
             cumpridos_count += 1

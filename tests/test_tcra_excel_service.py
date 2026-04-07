@@ -124,7 +124,7 @@ def test_tcra_excel_service_loads_legacy_sheet_with_operational_mapping(tmp_path
     assert first.area_m2 == 2920.0
     assert first.numero_mudas_previsto == 486
     assert first.mpsp_relacionado == "Nao"
-    assert first.eventos[0].tipo_evento == "Relatorio"
+    assert first.eventos[0].tipo_evento == "Relatório"
 
     second = tcras[1]
     assert second.status == "Cumprido"

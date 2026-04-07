@@ -484,7 +484,7 @@ def test_tcra_tab_audits_event_edit_only_after_save(tmp_path, monkeypatch):
                 "tipo_evento": "Despacho",
                 "descricao": "Evento revisado antes do save.",
                 "prazo_resultante": "10/05/2026",
-                "status_resultante": "Relatorio pendente",
+                    "status_resultante": "Relatório pendente",
             }
 
     tab.table.selectRow(0)
@@ -507,7 +507,7 @@ def test_tcra_tab_audits_event_edit_only_after_save(tmp_path, monkeypatch):
     assert audit_calls[-1]["action"] == "TCRA_EDIT"
     assert audit_calls[-1]["metadata"]["event_change_action"] == "edit"
     assert audit_calls[-1]["metadata"]["event_change_type"] == "Despacho"
-    assert audit_calls[-1]["before"]["eventos"][0]["tipo_evento"] == "Relatorio"
+    assert audit_calls[-1]["before"]["eventos"][0]["tipo_evento"] == "Relatório"
     assert audit_calls[-1]["after"]["eventos"][0]["tipo_evento"] == "Despacho"
 
 
@@ -561,7 +561,7 @@ def test_tcra_tab_can_manage_event_rows(tmp_path, monkeypatch):
     tab.edit_selected_event()
 
     assert tab.form_eventos[0].tipo_evento == "Despacho"
-    assert tab.form_eventos[0].status_resultante == "Relatorio pendente"
+    assert tab.form_eventos[0].status_resultante == "Relatório pendente"
 
     tab.events_table.selectRow(0)
     get_app().processEvents()
@@ -669,7 +669,7 @@ def test_tcra_tab_blocks_inconsistent_save(tmp_path, monkeypatch):
     assert service.list_tcras() == []
     assert warnings
     assert "Revise o cadastro do TCRA antes de salvar" in warnings[-1]
-    assert focused_issues == ["Proximo relatorio nao pode ser anterior ao ultimo relatorio."]
+    assert focused_issues == ["Próximo relatório não pode ser anterior ao último relatório."]
 
 
 def test_tcra_tab_live_preview_updates_fix_guidance(tmp_path):
@@ -683,7 +683,7 @@ def test_tcra_tab_live_preview_updates_fix_guidance(tmp_path):
     tab.in_data_proximo_relatorio.setText("01/04/2026")
     get_app().processEvents()
 
-    assert "sequencia cronologica" in tab.lbl_fix_guidance.text().lower()
+    assert "sequência cronológica" in tab.lbl_fix_guidance.text().lower()
 
 
 def test_tcra_tab_quality_selection_routes_to_editor_and_focuses_issue(tmp_path, monkeypatch):
@@ -711,7 +711,7 @@ def test_tcra_tab_quality_selection_routes_to_editor_and_focuses_issue(tmp_path,
     get_app().processEvents()
 
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
-    assert focused == ["Sem numero TCRA"]
+    assert focused == ["Sem número TCRA"]
 
 
 def test_tcra_tab_imports_legacy_workbook_into_local_database(tmp_path, monkeypatch):
@@ -804,7 +804,7 @@ def test_tcra_tab_blocks_duplicate_save(tmp_path, monkeypatch):
 
     assert len(service.list_tcras()) == 1
     assert warnings
-    assert "Ja existe um TCRA parecido" in warnings[-1]
+    assert "Já existe um TCRA parecido" in warnings[-1]
 
 
 def test_tcra_tab_quick_filters_update_counts_and_alert_style(tmp_path):
@@ -835,7 +835,7 @@ def test_tcra_tab_quick_filters_update_counts_and_alert_style(tmp_path):
 
     assert "Alertas (1)" in tab.quick_filter_buttons["alertas"].text()
     assert "Prox. 30d (1)" in tab.quick_filter_buttons["proximos"].text()
-    assert "Sem numero (1)" in tab.quick_filter_buttons["sem_numero"].text()
+    assert "Sem número (1)" in tab.quick_filter_buttons["sem_numero"].text()
 
     tab.quick_filter_buttons["alertas"].click()
     get_app().processEvents()

@@ -14,6 +14,7 @@ class MainWindowClassRegistry:
     dashboard_tab_cls: type
     operations_tab_cls: type
     tcra_tab_cls: type
+    admin_users_tab_cls: type | None
     updater_cls: type
     microb_name_field: str
     microb_dir: str
@@ -76,6 +77,7 @@ def configure_window_class_registry(
     dashboard_tab_cls,
     operations_tab_cls,
     tcra_tab_cls,
+    admin_users_tab_cls,
     updater_cls,
     microb_name_field: str,
     microb_dir: str,
@@ -85,6 +87,7 @@ def configure_window_class_registry(
         dashboard_tab_cls=dashboard_tab_cls,
         operations_tab_cls=operations_tab_cls,
         tcra_tab_cls=tcra_tab_cls,
+        admin_users_tab_cls=admin_users_tab_cls,
         updater_cls=updater_cls,
         microb_name_field=microb_name_field,
         microb_dir=microb_dir,
@@ -95,6 +98,7 @@ def configure_window_class_registry(
     window._dashboard_tab_cls = registry.dashboard_tab_cls
     window._operations_tab_cls = registry.operations_tab_cls
     window._tcra_tab_cls = registry.tcra_tab_cls
+    window._admin_users_tab_cls = registry.admin_users_tab_cls
     window._updater_cls = registry.updater_cls
     return registry
 

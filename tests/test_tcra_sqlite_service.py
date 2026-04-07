@@ -73,7 +73,7 @@ def test_upsert_tcra_roundtrips_with_nested_eventos(tmp_path):
     assert loaded.numero_mudas_previsto == 486
     assert loaded.data_proximo_relatorio == date(2025, 3, 10)
     assert len(loaded.eventos) == 1
-    assert loaded.eventos[0].tipo_evento == "Relatorio"
+    assert loaded.eventos[0].tipo_evento == "Relatório"
     assert loaded.eventos[0].prazo_resultante == date(2025, 3, 10)
 
 
@@ -186,7 +186,7 @@ def test_tcra_sqlite_service_exposes_query_helpers_for_future_ui(tmp_path):
 
     filtered = service.query_tcras(
         text="varjao",
-        status="Relatorio pendente",
+        status="Relatório pendente",
         selected_orgaos=["MPSP"],
         selected_bairros=["Varjao"],
         selected_year="2022",
@@ -199,7 +199,7 @@ def test_tcra_sqlite_service_exposes_query_helpers_for_future_ui(tmp_path):
     overview = service.build_record_overview(today=today)
 
     assert [item.uid for item in filtered] == ["tcra-2"]
-    assert "Relatorio pendente" in facets.statuses
+    assert "Relatório pendente" in facets.statuses
     assert facets.anos_processo == ("2022", "2019", "2011")
     assert metrics["count_total"] == 1
     assert metrics["count_prazo_vencido"] == 1
@@ -253,5 +253,5 @@ def test_tcra_sqlite_service_normalizes_status_orgao_and_event_status(tmp_path):
 
     assert loaded is not None
     assert loaded.orgao_acompanhamento == "MPSP"
-    assert loaded.status == "Relatorio pendente"
+    assert loaded.status == "Relatório pendente"
     assert loaded.eventos[0].status_resultante == "Cumprido"

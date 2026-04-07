@@ -60,6 +60,24 @@ class AuthoritativeMonitoringSnapshot:
 
 
 @dataclass(frozen=True)
+class RemoteSnapshotRefreshResult:
+    status: str
+    session_path: str = ""
+    local_db_path: str = ""
+    record_count: int = 0
+    tcra_count: int = 0
+    issues: tuple[str, ...] = ()
+
+    @property
+    def refreshed(self) -> bool:
+        return self.status == "refreshed"
+
+    @property
+    def failed(self) -> bool:
+        return self.status in {"failed", "unavailable"}
+
+
+@dataclass(frozen=True)
 class SessionAvailability:
     path: str
     display_name: str

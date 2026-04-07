@@ -91,7 +91,7 @@ def test_form_support_captures_and_restores_event_rows():
 
     assert snapshot["numero_processo"] == "26207/2019"
     assert len(restored) == 1
-    assert restored[0].tipo_evento == "Relatorio"
+    assert restored[0].tipo_evento == "Relatório"
     assert restored[0].prazo_resultante == date(2025, 8, 1)
 
 
@@ -128,7 +128,7 @@ def test_form_support_builds_preview_and_safe_fix_metadata():
         today=date(2026, 4, 3),
     )
 
-    assert "Correcao assistida:" in preview.guidance_text
+    assert "Correção assistida:" in preview.guidance_text
     assert "Processo: 26207/2019" in preview.details_text
     assert "Timeline recente:" in preview.details_text
     assert preview.primary_issue

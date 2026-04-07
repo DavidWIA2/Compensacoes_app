@@ -26,9 +26,10 @@ def build_singleton_session_startup_plan(
     *,
     pending_legacy_source_path: str,
     singleton_session_path: str,
+    allow_legacy_bootstrap: bool = True,
 ) -> SingletonSessionStartupPlan:
     legacy_source = str(pending_legacy_source_path or "").strip()
-    if legacy_source:
+    if legacy_source and allow_legacy_bootstrap:
         return SingletonSessionStartupPlan(
             action="bootstrap_legacy",
             source_path=legacy_source,

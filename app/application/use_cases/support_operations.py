@@ -71,10 +71,10 @@ class SupportOperationsUseCases:
         lines = [
             f"{self.app_name} {self.app_version}",
             "",
-            "Gestao de compensacoes ambientais com cadastro, filtros, mapa e exportacoes.",
+            "Gestão de compensações ambientais com cadastro, filtros, mapa e exportações.",
             f"Python {self.python_version_resolver()}",
             f"Logs: {self.log_dir}",
-            f"Manifest de atualizacao: {update_source}",
+            f"Manifest de atualização: {update_source}",
             f"Variavel de override: {self.update_url_env_var}",
         ]
         return AboutDialogData(
@@ -98,7 +98,7 @@ class SupportOperationsUseCases:
     ) -> UpdateOfferPresentation:
         payload = dict(details or {})
         version = str(payload.get("version") or "").strip()
-        notes = str(payload.get("notes") or "Sem notas de versao.").strip() or "Sem notas de versao."
+        notes = str(payload.get("notes") or "Sem notas de versão.").strip() or "Sem notas de versão."
         download_url = str(payload.get("download_url") or payload.get("homepage_url") or "").strip()
         published_at = str(payload.get("published_at") or "").strip()
         filename = str(payload.get("filename") or "").strip()
@@ -107,7 +107,7 @@ class SupportOperationsUseCases:
         signature_mode = str(payload.get("signature_mode") or "").strip()
         automatic = can_automatically_apply_update(payload)
 
-        lines = [f"Uma nova versao ({version}) esta disponivel."]
+        lines = [f"Uma nova versão ({version}) está disponível."]
         if published_at:
             lines.append(f"Publicado em: {published_at}")
         if filename:
@@ -122,16 +122,16 @@ class SupportOperationsUseCases:
         lines.extend(["", "Novidades:", notes])
 
         if automatic:
-            lines.extend(["", "Deseja baixar e instalar a atualizacao agora?"])
+            lines.extend(["", "Deseja baixar e instalar a atualização agora?"])
             action_kind = "automatic_update"
         elif download_url:
-            lines.extend(["", "Deseja abrir o link da atualizacao agora?"])
+            lines.extend(["", "Deseja abrir o link da atualização agora?"])
             action_kind = "open_download"
         else:
             action_kind = "informational"
 
         return UpdateOfferPresentation(
-            title="Atualizacao Disponivel",
+            title="Atualização Disponível",
             message="\n".join(lines),
             action_kind=action_kind,
             payload=payload,
@@ -141,26 +141,26 @@ class SupportOperationsUseCases:
     @staticmethod
     def build_update_offer_runtime_message(presentation: UpdateOfferPresentation) -> str:
         if presentation.action_kind == "automatic_update":
-            return "Atualizacao disponivel encontrada."
+            return "Atualização disponível encontrada."
         if presentation.action_kind == "open_download":
-            return "Atualizacao disponivel com link de download."
-        return "Atualizacao encontrada sem link de download."
+            return "Atualização disponível com link de download."
+        return "Atualização encontrada sem link de download."
 
     @staticmethod
     def normalize_update_progress(percent: int, message: str) -> UpdateProgressState:
         resolved_percent = max(0, min(int(percent), 100))
-        resolved_message = str(message or "").strip() or f"Baixando atualizacao... {resolved_percent}%"
+        resolved_message = str(message or "").strip() or f"Baixando atualização... {resolved_percent}%"
         return UpdateProgressState(percent=resolved_percent, message=resolved_message)
 
     @staticmethod
     def build_manual_update_completion_message(cancel_requested: bool) -> str:
         if cancel_requested:
-            return "Verificacao de atualizacoes interrompida."
-        return "Verificacao de atualizacoes concluida."
+            return "Verificação de atualizações interrompida."
+        return "Verificação de atualizações concluída."
 
     @staticmethod
     def build_manual_update_cancel_outcome() -> UpdateJobOutcome:
-        message = "Verificacao de atualizacoes interrompida."
+        message = "Verificação de atualizações interrompida."
         return UpdateJobOutcome(
             runtime_status="cancelled",
             runtime_message=message,
@@ -170,7 +170,7 @@ class SupportOperationsUseCases:
 
     @staticmethod
     def build_auto_update_ready_outcome() -> UpdateJobOutcome:
-        message = "Atualizacao pronta para instalar."
+        message = "Atualização pronta para instalar."
         return UpdateJobOutcome(
             runtime_status="completed",
             runtime_message=message,
@@ -183,21 +183,21 @@ class SupportOperationsUseCases:
         return UpdateJobOutcome(
             runtime_status="failed",
             runtime_message=message,
-            status_bar_message="Falha ao baixar/preparar a atualizacao.",
-            busy_message="Falha ao baixar/preparar a atualizacao.",
-            dialog_title="Atualizacao Automatica",
+            status_bar_message="Falha ao baixar/preparar a atualização.",
+            busy_message="Falha ao baixar/preparar a atualização.",
+            dialog_title="Atualização Automática",
             dialog_message=message,
         )
 
     @staticmethod
     def build_auto_update_cancelled_outcome(message: str) -> UpdateJobOutcome:
-        resolved_message = str(message or "").strip() or "Atualizacao automatica cancelada."
+        resolved_message = str(message or "").strip() or "Atualização automática cancelada."
         return UpdateJobOutcome(
             runtime_status="cancelled",
             runtime_message=resolved_message,
-            status_bar_message="Atualizacao automatica cancelada.",
-            busy_message="Atualizacao automatica cancelada.",
-            dialog_title="Atualizacao Automatica",
+            status_bar_message="Atualização automática cancelada.",
+            busy_message="Atualização automática cancelada.",
+            dialog_title="Atualização Automática",
             dialog_message=resolved_message,
         )
 
@@ -205,10 +205,10 @@ class SupportOperationsUseCases:
     def build_no_update_outcome(current_version: str) -> UpdateJobOutcome:
         return UpdateJobOutcome(
             runtime_status="completed",
-            runtime_message="Nenhuma atualizacao encontrada.",
-            status_bar_message="Nenhuma atualizacao encontrada.",
-            dialog_title="Atualizacoes",
-            dialog_message=f"Voce ja esta na versao mais recente disponivel ({current_version}).",
+            runtime_message="Nenhuma atualização encontrada.",
+            status_bar_message="Nenhuma atualização encontrada.",
+            dialog_title="Atualizações",
+            dialog_message=f"Você já está na versão mais recente disponível ({current_version}).",
         )
 
     @staticmethod
@@ -216,7 +216,7 @@ class SupportOperationsUseCases:
         return UpdateJobOutcome(
             runtime_status="failed",
             runtime_message=message,
-            status_bar_message="Falha ao verificar atualizacoes.",
-            dialog_title="Atualizacoes",
+            status_bar_message="Falha ao verificar atualizações.",
+            dialog_title="Atualizações",
             dialog_message=message,
         )

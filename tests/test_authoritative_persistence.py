@@ -383,6 +383,77 @@ def test_load_workbook_syncs_snapshot_before_reloading_runtime_session_from_sqli
     assert result.issues == ()
 
 
+def test_load_workbook_refreshes_remote_snapshot_before_sqlite_read_in_production():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    workbook.loaded_records = [make_record(uid="runtime-uid", av_tec="AT-RUNTIME")]
+    audit = FakeAuditTrail()
+    existing = make_record(uid="stale-uid", av_tec="AT-STALE")
+    remote_record = make_record(uid="remote-uid", av_tec="AT-REMOTE")
+    persistence = FakeSnapshotPersistence(snapshot_records=[existing], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[remote_record])
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=FakeAccessService(sync_service=remote_sync),
+    )
+    service.access_session = make_production_session()
+
+    result = service.load_workbook("session://banco-local")
+
+    assert len(remote_sync.calls) == 1
+    assert remote_sync.calls[0]["session_path"] == "session://banco-local"
+    assert [record.uid for record in result.records] == ["remote-uid"]
+    assert result.local_session_source_status.strategy == "sqlite_session_load"
+    assert workbook.load_calls == []
+
+
+def test_load_workbook_keeps_local_cache_when_remote_snapshot_refresh_fails_in_production():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    audit = FakeAuditTrail()
+    cached_record = make_record(uid="cached-uid", av_tec="AT-CACHE")
+    persistence = FakeSnapshotPersistence(snapshot_records=[cached_record], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[make_record(uid="remote-uid")], fail=True)
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=FakeAccessService(sync_service=remote_sync),
+    )
+    service.access_session = make_production_session()
+
+    result = service.load_workbook("session://banco-local")
+
+    assert len(remote_sync.calls) == 1
+    assert [record.uid for record in result.records] == ["cached-uid"]
+    assert "snapshot remoto" in " | ".join(result.issues)
+    assert workbook.load_calls == []
+
+
+def test_load_workbook_does_not_refresh_remote_snapshot_outside_production():
+    workbook = FakeWorkbook()
+    audit = FakeAuditTrail()
+    cached_record = make_record(uid="local-cache", av_tec="AT-LOCAL")
+    persistence = FakeSnapshotPersistence(snapshot_records=[cached_record], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[make_record(uid="remote-uid")])
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=FakeAccessService(sync_service=remote_sync),
+    )
+
+    result = service.load_workbook("session://banco-local")
+
+    assert remote_sync.calls == []
+    assert [record.uid for record in result.records] == ["local-cache"]
+
+
 def test_load_workbook_falls_back_to_session_when_snapshot_sync_fails(monkeypatch):
     workbook = FakeWorkbook()
     workbook.loaded_records = [make_record(uid="excel-uid", av_tec="AT-EXCEL")]

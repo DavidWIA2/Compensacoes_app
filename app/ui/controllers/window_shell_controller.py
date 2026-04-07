@@ -99,6 +99,13 @@ class WindowShellController:
         self.window.dash_tab = self.window._dashboard_tab_cls(self.window)
         self.window.operations_tab = self.window._operations_tab_cls(self.window)
         self.window.tcra_tab = self.window._tcra_tab_cls(self.window)
+        self.window.admin_users_tab = None
+        admin_tab_cls = getattr(self.window, "_admin_users_tab_cls", None)
+        if self._can_show_admin_users_tab() and admin_tab_cls is not None:
+            self.window.admin_users_tab = admin_tab_cls(
+                self.window,
+                admin_service=getattr(self.window, "admin_users_service", None),
+            )
         self.window.data_tab.search = self.window.search
         self.window.search.textChanged.connect(self._on_global_search_changed)
         if hasattr(self.window.tcra_tab, "search_input"):
@@ -107,6 +114,8 @@ class WindowShellController:
         self.window.tabs.addTab(self.window.dash_tab, "Painel")
         self.window.tabs.addTab(self.window.operations_tab, "Opera\u00e7\u00f5es")
         self.window.tabs.addTab(self.window.tcra_tab, "TCRAs")
+        if self.window.admin_users_tab is not None:
+            self.window.tabs.addTab(self.window.admin_users_tab, "Administração")
         layout.addWidget(self.window.tabs)
 
         self.window.progress_bar = QProgressBar()
@@ -138,7 +147,7 @@ class WindowShellController:
         environment_chip_tooltip = getattr(
             getattr(self.window, "access_session", None),
             "environment_tooltip_text",
-            "Inicializacao local sem gateway de autenticacao.",
+            "Inicialização local sem gateway de autenticação.",
         )
         self.window.session_environment_label = QLabel(environment_chip_text)
         self.window.session_environment_label.setObjectName("StatusChip")
@@ -163,6 +172,12 @@ class WindowShellController:
         self.update_filters_from_records()
         self.setup_dynamic_form_options_from_records()
         self.sync_global_search_context()
+
+    def _can_show_admin_users_tab(self) -> bool:
+        access_session = getattr(self.window, "access_session", None)
+        environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+        role = str(getattr(access_session, "app_role", "") or "").strip().lower()
+        return environment == "production" and role == "admin"
 
     def _resolve_session_availability(self, path: str | None = None):
         target_path = str(path if path is not None else self.current_session_path() or "").strip()
@@ -225,6 +240,8 @@ class WindowShellController:
 
     def _on_global_search_changed(self, text: str) -> None:
         if self._syncing_global_search:
+            return
+        if self.window.tabs.currentWidget() is getattr(self.window, "admin_users_tab", None):
             return
         if self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None):
             tcra_search = getattr(getattr(self.window, "tcra_tab", None), "search_input", None)
@@ -441,7 +458,7 @@ class WindowShellController:
         window_title = snapshot.window_title
         access_session = getattr(self.window, "access_session", None)
         if bool(getattr(access_session, "is_demo", False)):
-            window_title = f"{window_title} [Demonstracao]"
+            window_title = f"{window_title} [Demonstração]"
         self.window.setWindowTitle(window_title)
         if hasattr(self.window, "session_environment_label"):
             self.window.session_environment_label.setText(
@@ -451,7 +468,7 @@ class WindowShellController:
                 getattr(
                     access_session,
                     "environment_tooltip_text",
-                    "Inicializacao local sem gateway de autenticacao.",
+                    "Inicialização local sem gateway de autenticação.",
                 )
             )
         self.window.session_file_label.setText(snapshot.file_label)
@@ -563,11 +580,24 @@ class WindowShellController:
         self.window.operations_tab.btn_open_backup.clicked.connect(build_command("open_selected_operation_backup"))
 
     def sync_global_search_context(self):
+        is_admin_tab_active = getattr(self.window, "tabs", None) is not None and (
+            self.window.tabs.currentWidget() is getattr(self.window, "admin_users_tab", None)
+        )
         is_tcra_tab_active = getattr(self.window, "tabs", None) is not None and (
             self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None)
         )
         tcra_tab = getattr(self.window, "tcra_tab", None)
         self.window.search.setEnabled(True)
+        if is_admin_tab_active:
+            if self._search_context != "admin":
+                self._compensacoes_search_text = self.window.search.text()
+            self._search_context = "admin"
+            if tcra_tab is not None and hasattr(tcra_tab, "set_global_search_mode"):
+                tcra_tab.set_global_search_mode(False)
+            self.window.search.clear()
+            self.window.search.setPlaceholderText("Busca indisponível na administração")
+            self.window.search.setEnabled(False)
+            return
         if is_tcra_tab_active:
             if self._search_context != "tcra":
                 self._compensacoes_search_text = self.window.search.text()

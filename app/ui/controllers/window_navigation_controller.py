@@ -9,6 +9,16 @@ class WindowNavigationController:
     def __init__(self, window):
         self.window = window
 
+    def _refresh_official_cache_if_needed(self) -> bool:
+        data_controller = getattr(self.window, "data_controller", None)
+        refresh = getattr(data_controller, "refresh_production_snapshot_if_stale", None)
+        if not callable(refresh):
+            return False
+        try:
+            return bool(refresh(force=False))
+        except Exception:
+            return False
+
     def is_dashboard_tab_active(self) -> bool:
         return self.window.tabs.currentWidget() is self.window.dash_tab
 
@@ -17,6 +27,9 @@ class WindowNavigationController:
 
     def is_tcra_tab_active(self) -> bool:
         return self.window.tabs.currentWidget() is getattr(self.window, "tcra_tab", None)
+
+    def is_admin_tab_active(self) -> bool:
+        return self.window.tabs.currentWidget() is getattr(self.window, "admin_users_tab", None)
 
     def update_dashboard(self, metrics: Dict[str, object]):
         self.window._pending_dashboard_metrics = dict(metrics)
@@ -50,13 +63,20 @@ class WindowNavigationController:
         if hasattr(self.window, "shell_controller"):
             self.window.shell_controller.sync_global_search_context()
 
-        if self.is_dashboard_tab_active() and self.window._dashboard_dirty:
+        refreshed = False
+        if self.is_dashboard_tab_active() or self.is_operations_tab_active() or self.is_tcra_tab_active():
+            refreshed = self._refresh_official_cache_if_needed()
+
+        if self.is_dashboard_tab_active() and self.window._dashboard_dirty and not refreshed:
             self._render_dashboard()
             if self.window._pending_dashboard_metrics is not None:
                 self.window._dashboard_dirty = False
 
-        if self.is_operations_tab_active():
+        if self.is_operations_tab_active() and not refreshed:
             self.window.operations_controller.refresh_overview()
 
         if self.is_tcra_tab_active():
             self.window.tcra_tab.handle_tab_activated()
+
+        if self.is_admin_tab_active() and getattr(self.window, "admin_users_tab", None) is not None:
+            self.window.admin_users_tab.handle_tab_activated()

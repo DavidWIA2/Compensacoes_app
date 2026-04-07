@@ -35,8 +35,8 @@ def build_diagnostics_success_message(path: str) -> str:
 
 
 def create_update_progress_dialog(parent: Any, cancel_callback: Any) -> QProgressDialog:
-    dialog = QProgressDialog("Baixando atualizacao...", "Cancelar", 0, 100, parent)
-    dialog.setWindowTitle("Atualizacao Automatica")
+    dialog = QProgressDialog("Baixando atualização...", "Cancelar", 0, 100, parent)
+    dialog.setWindowTitle("Atualização Automática")
     dialog.setWindowModality(Qt.WindowModal)
     dialog.setMinimumDuration(0)
     dialog.setAutoClose(False)

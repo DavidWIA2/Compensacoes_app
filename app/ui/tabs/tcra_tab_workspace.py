@@ -93,9 +93,9 @@ def _build_quick_filter_labels(records: Sequence[Tcra], *, today: date) -> dict[
         QUICK_FILTER_ALL: f"Todos ({len(records)})",
         QUICK_FILTER_ALERTAS: f"Alertas ({resolve_quick_filter_count(records, QUICK_FILTER_ALERTAS, today=today)})",
         QUICK_FILTER_PROXIMOS: f"Prox. 30d ({resolve_quick_filter_count(records, QUICK_FILTER_PROXIMOS, today=today)})",
-        QUICK_FILTER_SEM_NUMERO: f"Sem numero ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_NUMERO, today=today)})",
+        QUICK_FILTER_SEM_NUMERO: f"Sem número ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_NUMERO, today=today)})",
         QUICK_FILTER_SEM_RESPONSAVEL: (
-            f"Sem responsavel ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_RESPONSAVEL, today=today)})"
+            f"Sem responsável ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_RESPONSAVEL, today=today)})"
         ),
     }
 
@@ -190,7 +190,7 @@ def build_workspace_snapshot(
     if not all_records:
         context_text = "Banco local de TCRA sem registros."
         radar_summary_text = (
-            f"Alertas 0 | Revisoes 0 | Relatorios pendentes 0 | Prox. {UPCOMING_REPORT_WINDOW_DAYS}d 0"
+            f"Alertas 0 | Revisões 0 | Relatórios pendentes 0 | Próx. {UPCOMING_REPORT_WINDOW_DAYS}d 0"
         )
         data_quality_text = "Qualidade cadastral: sem registros."
     else:
@@ -201,7 +201,7 @@ def build_workspace_snapshot(
         )
         radar_summary_text = (
             f"Alertas {base_metrics['count_alertas']} | Revisoes {len(base_quality_items)} | "
-            f"Relatorios pendentes {base_metrics['count_relatorio_pendente']} | "
+            f"Relatórios pendentes {base_metrics['count_relatorio_pendente']} | "
             f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d {upcoming_count}"
         )
         data_quality_text = (
@@ -244,7 +244,7 @@ def build_workspace_snapshot(
         context_text=context_text,
         radar_summary_text=radar_summary_text,
         data_quality_text=data_quality_text,
-        upcoming_summary_text=f"Proximos: {upcoming_text}",
+        upcoming_summary_text=f"Próximos: {upcoming_text}",
         upcoming_button_text=upcoming_button_text,
         upcoming_button_enabled=bool(upcoming_count),
         results_text=(

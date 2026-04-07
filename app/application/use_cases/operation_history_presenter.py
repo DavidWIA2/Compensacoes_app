@@ -131,7 +131,7 @@ class OperationHistoryPresenter:
         state: OperationHistoryFilterState,
     ) -> str:
         if not visible_events:
-            return "Nenhuma operacao corresponde aos filtros atuais."
+            return "Nenhuma operação corresponde aos filtros atuais."
 
         actions = Counter(
             str(getattr(event, "action", "")).strip().upper() or "SEM ACAO"
@@ -228,9 +228,9 @@ class OperationHistoryPresenter:
         today = datetime.now().astimezone().date()
         if state.period == "Hoje":
             return event_date == today
-        if state.period == "Ultimos 7 dias":
+        if state.period == "Últimos 7 dias":
             return today - timedelta(days=6) <= event_date <= today
-        if state.period == "Ultimos 30 dias":
+        if state.period == "Últimos 30 dias":
             return today - timedelta(days=29) <= event_date <= today
         if state.period == "Personalizado" and state.date_from is not None and state.date_to is not None:
             return state.date_from <= event_date <= state.date_to

@@ -362,7 +362,7 @@ class MapController:
         worker = self.window.geo_worker
         if worker is None:
             return
-        self.window.statusBar().showMessage("Cancelando geocodificacao em lote...")
+        self.window.statusBar().showMessage("Cancelando geocodificação em lote...")
         if hasattr(worker, "stop"):
             worker.stop()
 
@@ -409,7 +409,7 @@ class MapController:
             disconnect_callbacks=disconnect_callbacks,
             stop_callback=getattr(worker, "stop", None),
             wait_ms=10000,
-            busy_message="Iniciando geocodificacao em lote...",
+            busy_message="Iniciando geocodificação em lote...",
             total=len(pending),
             cancellable=True,
             cancel_callback=self.cancel_batch_geocode,
@@ -435,7 +435,7 @@ class MapController:
                 BATCH_GEOCODE_JOB_NAME,
                 self.batch_geocode_use_cases.build_failure_runtime_message(root_exc),
             )
-            logger.error(f"Falha ao salvar geocodificacao em lote: {root_exc}", exc_info=True)
+            logger.error(f"Falha ao salvar geocodificação em lote: {root_exc}", exc_info=True)
             QMessageBox.critical(self.window, "Erro", f"Falha ao salvar coordenadas do GPS em lote: {root_exc}")
             return
 

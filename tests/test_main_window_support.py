@@ -124,6 +124,7 @@ def test_configure_window_class_registry_populates_window():
         dashboard_tab_cls=list,
         operations_tab_cls=tuple,
         tcra_tab_cls=set,
+        admin_users_tab_cls=frozenset,
         updater_cls=object,
         microb_name_field="Nome_Do_Arquivo",
         microb_dir="C:/tmp/microbacias",
@@ -133,6 +134,7 @@ def test_configure_window_class_registry_populates_window():
     assert window._dashboard_tab_cls is list
     assert window._operations_tab_cls is tuple
     assert window._tcra_tab_cls is set
+    assert window._admin_users_tab_cls is frozenset
     assert window._updater_cls is object
     assert window.MICROB_NAME_FIELD == "Nome_Do_Arquivo"
     assert window.MICROB_DIR == "C:/tmp/microbacias"

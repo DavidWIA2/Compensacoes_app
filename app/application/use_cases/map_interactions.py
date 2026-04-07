@@ -47,7 +47,7 @@ class MapInteractionsUseCases:
         choices: list[AddressChoice] = []
         normalized_main = str(main_address or "").strip()
         if normalized_main:
-            choices.append(AddressChoice(label="Endereco Principal", address=normalized_main))
+            choices.append(AddressChoice(label="Endereço Principal", address=normalized_main))
 
         for index, item in enumerate(plantios or [], start=1):
             address = str(getattr(item, "endereco", "") or "").strip()
@@ -62,8 +62,8 @@ class MapInteractionsUseCases:
 
         return AddressSelectionPlan(
             choices=tuple(choices),
-            chooser_title="Escolha o Endereco",
-            chooser_prompt="Qual endereco voce deseja visualizar no Street View?",
+            chooser_title="Escolha o Endereço",
+            chooser_prompt="Qual endereço você deseja visualizar no Street View?",
             empty_title="Atencao",
             empty_message="Nenhum endereco ou ponto no mapa selecionado para o Street View.",
             marker_fallback=marker_coords,
@@ -78,7 +78,7 @@ class MapInteractionsUseCases:
         return AddressSelectionPlan(
             choices=tuple(choices),
             chooser_title="Escolher Plantio",
-            chooser_prompt="Qual endereco de plantio voce deseja buscar?",
+            chooser_prompt="Qual endereço de plantio você deseja buscar?",
             empty_title="Atencao",
             empty_message="Cadastre ao menos um endereco de plantio para pesquisar.",
         )
@@ -109,9 +109,9 @@ class MapInteractionsUseCases:
         if not coords:
             return GeocodePresentation(
                 found=False,
-                status_message="Endereco nao encontrado",
-                warning_title="Nao encontrado",
-                warning_message="Nao consegui localizar esse endereco.",
+                status_message="Endereço não encontrado",
+                warning_title="Não encontrado",
+                warning_message="Não consegui localizar esse endereço.",
             )
 
         normalized_micro = str(microbacia or "").strip()
@@ -132,9 +132,9 @@ class MapInteractionsUseCases:
         normalized = str(address or "").strip()
         return GeocodePresentation(
             found=False,
-            status_message="Endereco nao encontrado",
+            status_message="Endereço não encontrado",
             warning_title="Erro",
-            warning_message=f"Nao foi possivel localizar o endereco: {normalized}",
+            warning_message=f"Não foi possível localizar o endereço: {normalized}",
         )
 
     @staticmethod

@@ -19,6 +19,7 @@ from app.services.tcra_records_service import (
     build_record_search_index,
     compute_metrics,
     filter_tcras,
+    normalize_event_type_label,
     normalize_orgao_label,
     normalize_status_label,
 )
@@ -436,7 +437,7 @@ class TcraSqliteService:
                 TcraEvento(
                     sequence=sequence,
                     data_evento=evento.data_evento,
-                    tipo_evento=_stringify(evento.tipo_evento),
+                    tipo_evento=normalize_event_type_label(evento.tipo_evento),
                     descricao=_stringify(evento.descricao),
                     prazo_resultante=evento.prazo_resultante,
                     status_resultante=normalize_status_label(evento.status_resultante),
@@ -510,7 +511,7 @@ class TcraSqliteService:
                 TcraEvento(
                     sequence=int(row["sequence"] or 0),
                     data_evento=_date_from_storage(row["data_evento"]),
-                    tipo_evento=_stringify(row["tipo_evento"]),
+                    tipo_evento=normalize_event_type_label(row["tipo_evento"]),
                     descricao=_stringify(row["descricao"]),
                     prazo_resultante=_date_from_storage(row["prazo_resultante"]),
                     status_resultante=_stringify(row["status_resultante"]),
@@ -532,7 +533,7 @@ class TcraSqliteService:
             TcraEvento(
                 sequence=int(row["sequence"] or 0),
                 data_evento=_date_from_storage(row["data_evento"]),
-                tipo_evento=_stringify(row["tipo_evento"]),
+                tipo_evento=normalize_event_type_label(row["tipo_evento"]),
                 descricao=_stringify(row["descricao"]),
                 prazo_resultante=_date_from_storage(row["prazo_resultante"]),
                 status_resultante=_stringify(row["status_resultante"]),

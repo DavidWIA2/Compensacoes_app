@@ -251,7 +251,7 @@ class ExportController:
                 job_name="export_dashboard_pdf",
                 path=path,
                 busy_message="Gerando relatorio do painel...",
-                success_message="Relatorio de Painel exportado.",
+                success_message="Relatório de Painel exportado.",
                 error_action="exportar o painel em PDF",
                 operation=lambda: export_dashboard_pdf(
                     path,
@@ -278,7 +278,7 @@ class ExportController:
             job_name="export_dashboard_pdf",
             path=path,
             busy_message="Gerando relatorio do painel...",
-            success_message="Relatorio de Painel exportado.",
+            success_message="Relatório de Painel exportado.",
             error_action="exportar o painel em PDF",
             operation=lambda: export_dashboard_pdf(
                 path,

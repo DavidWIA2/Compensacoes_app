@@ -110,10 +110,10 @@ logger = get_logger("UI.TCRA")
 
 
 class TcraTab(QWidget):
-    FORM_CLEAN_TEXT = "Sem alteracoes"
-    FORM_DIRTY_TEXT = "Alteracoes pendentes"
+    FORM_CLEAN_TEXT = "Sem alterações"
+    FORM_DIRTY_TEXT = "Alterações pendentes"
     FORM_DRAFT_TEXT = "Rascunho automatico salvo"
-    IMPORT_STATUS_IDLE_TEXT = "Importacao: nenhuma revisao nesta sessao."
+    IMPORT_STATUS_IDLE_TEXT = "Importação: nenhuma revisão nesta sessão."
     OVERVIEW_SUMMARY_HEIGHT = 88
     OVERVIEW_SUMMARY_WITH_IMPORT_HEIGHT = 114
     OVERVIEW_DETAIL_HEIGHT = 232
@@ -135,6 +135,12 @@ class TcraTab(QWidget):
             if self.main_window is not None
             else None,
             session_path_provider=self._current_session_path,
+            access_session_provider=lambda: getattr(self.main_window, "access_session", None)
+            if self.main_window is not None
+            else None,
+            access_service=getattr(getattr(self.main_window, "authoritative_persistence", None), "access_service", None)
+            if self.main_window is not None
+            else None,
         )
         self.all_tcras: list[Tcra] = []
         self.base_filtered_tcras: list[Tcra] = []
@@ -196,7 +202,7 @@ class TcraTab(QWidget):
         self.card_ativos = KPICard("Ativos", "0", "#ff9800")
         self.card_cumpridos = KPICard("Cumpridos", "0", "#2e7d32")
         self.card_alertas = KPICard("Alertas", "0", "#d32f2f")
-        self.card_proximos = KPICard("Prox. 30 Dias", "0", "#fb8c00")
+        self.card_proximos = KPICard("Próx. 30 Dias", "0", "#fb8c00")
         self.card_mpsp = KPICard("MPSP", "0", "#5e35b1")
         for index, card in enumerate(
             [
@@ -223,7 +229,7 @@ class TcraTab(QWidget):
         self.lbl_data_quality.setWordWrap(True)
         self.lbl_data_quality.setObjectName("FormStateLabel")
         self.lbl_data_quality.setVisible(False)
-        self.lbl_upcoming_reports = QLabel("Proximos relatorios: --")
+        self.lbl_upcoming_reports = QLabel("Próximos relatórios: --")
         self.lbl_upcoming_reports.setWordWrap(True)
         self.lbl_upcoming_reports.setObjectName("FormStateLabel")
         self.lbl_upcoming_reports.setVisible(False)
@@ -241,7 +247,7 @@ class TcraTab(QWidget):
         self.btn_summary_inbox.setProperty("kind", "secondary")
         self.btn_summary_quality = QPushButton("Qualidade (0)")
         self.btn_summary_quality.setProperty("kind", "secondary")
-        self.btn_summary_upcoming = QPushButton(f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d")
+        self.btn_summary_upcoming = QPushButton(f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d")
         self.btn_summary_upcoming.setProperty("kind", "secondary")
         summary_actions.addWidget(self.lbl_context, 1)
         summary_actions.addWidget(self.btn_summary_inbox)
@@ -390,18 +396,18 @@ class TcraTab(QWidget):
         filters_layout.setVerticalSpacing(int(6 * self.sf))
 
         self.search_input = QLineEdit(self)
-        self.search_input.setPlaceholderText("Buscar TCRA por processo, local, endereco, orgao ou observacao...")
+        self.search_input.setPlaceholderText("Buscar TCRA por processo, local, endereço, órgão ou observação...")
         self.search_input.setClearButtonEnabled(True)
 
         self.filter_status = QComboBox(self)
         self.filter_status.addItem(STATUS_TODOS)
-        self.filter_orgao = CheckableComboBox("Todos os Orgaos")
+        self.filter_orgao = CheckableComboBox("Todos os Órgãos")
         self.filter_bairro = CheckableComboBox("Todos os Bairros")
         self.filter_year = QComboBox(self)
         self.filter_year.addItem(STATUS_TODOS)
 
         self.chk_only_mpsp = QCheckBox("Somente MPSP")
-        self.chk_only_relatorio_pendente = QCheckBox("Relatorio pendente")
+        self.chk_only_relatorio_pendente = QCheckBox("Relatório pendente")
         self.chk_only_prazo_vencido = QCheckBox("Prazo vencido")
 
         self.btn_clear_filters = QPushButton("Limpar Filtros")
@@ -422,8 +428,8 @@ class TcraTab(QWidget):
         self.action_refresh = self.more_actions_menu.addAction("Atualizar TCRAs")
         self.action_select_alerts = self.more_actions_menu.addAction("Selecionar alertas")
         self.more_actions_menu.addSeparator()
-        self.action_export_excel = self.more_actions_menu.addAction("Exportar relatorio Excel")
-        self.action_export_pdf = self.more_actions_menu.addAction("Exportar relatorio PDF")
+        self.action_export_excel = self.more_actions_menu.addAction("Exportar relatório Excel")
+        self.action_export_pdf = self.more_actions_menu.addAction("Exportar relatório PDF")
         self.more_actions_menu.addSeparator()
         self.action_import_legacy = self.more_actions_menu.addAction("Importar planilha legada")
         self.btn_more_actions.setMenu(self.more_actions_menu)
@@ -441,9 +447,9 @@ class TcraTab(QWidget):
         for mode, label in [
             (QUICK_FILTER_ALL, "Todos"),
             (QUICK_FILTER_ALERTAS, "Alertas"),
-            (QUICK_FILTER_PROXIMOS, "Prox. 30d"),
-            (QUICK_FILTER_SEM_NUMERO, "Sem numero"),
-            (QUICK_FILTER_SEM_RESPONSAVEL, "Sem responsavel"),
+            (QUICK_FILTER_PROXIMOS, "Próx. 30d"),
+            (QUICK_FILTER_SEM_NUMERO, "Sem número"),
+            (QUICK_FILTER_SEM_RESPONSAVEL, "Sem responsável"),
         ]:
             button = QPushButton(label)
             button.setCheckable(True)
@@ -471,7 +477,7 @@ class TcraTab(QWidget):
         advanced_filters_layout.setContentsMargins(0, 0, 0, 0)
         advanced_filters_layout.setHorizontalSpacing(int(8 * self.sf))
         advanced_filters_layout.setVerticalSpacing(int(6 * self.sf))
-        advanced_filters_layout.addWidget(QLabel("Orgao:"), 0, 0)
+        advanced_filters_layout.addWidget(QLabel("Órgão:"), 0, 0)
         advanced_filters_layout.addWidget(self.filter_orgao, 0, 1)
         advanced_filters_layout.addWidget(QLabel("Bairro:"), 0, 2)
         advanced_filters_layout.addWidget(self.filter_bairro, 0, 3)
@@ -491,10 +497,10 @@ class TcraTab(QWidget):
         self.btn_open_selected.setEnabled(False)
         self.btn_bulk_alerts = QPushButton("Selecionar alertas")
         self.btn_bulk_alerts.setProperty("kind", "secondary")
-        self.btn_clear_selection = QPushButton("Limpar Selecao")
+        self.btn_clear_selection = QPushButton("Limpar Seleção")
         self.btn_clear_selection.setProperty("kind", "secondary")
         self.btn_clear_selection.setEnabled(False)
-        self.btn_bulk_action = QPushButton("Acoes em lote")
+        self.btn_bulk_action = QPushButton("Ações em lote")
         self.btn_bulk_action.setProperty("kind", "secondary")
         self.btn_bulk_action.setEnabled(False)
         primary_actions_layout.addWidget(self.lbl_selection_summary)
@@ -521,7 +527,7 @@ class TcraTab(QWidget):
 
         self.table = QTableWidget(0, 8, self)
         self.table.setHorizontalHeaderLabels(
-            ["Processo", "TCRA", "Local", "Status", "Prazo", "Prox. Relatorio", "Orgao", "MPSP"]
+            ["Processo", "TCRA", "Local", "Status", "Prazo", "Próx. Relatório", "Órgão", "MPSP"]
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -580,20 +586,20 @@ class TcraTab(QWidget):
         form_page_layout.setContentsMargins(0, 0, 0, 0)
         form_page_layout.setSpacing(int(6 * self.sf))
 
-        self.form_group = QGroupBox("Cadastro / Edicao de TCRA")
+        self.form_group = QGroupBox("Cadastro / Edição de TCRA")
         form_layout = QVBoxLayout(self.form_group)
         form_layout.setContentsMargins(10, 10, 10, 10)
         form_layout.setSpacing(int(8 * self.sf))
         form_nav_layout = QHBoxLayout()
         form_nav_layout.setSpacing(int(6 * self.sf))
         form_nav_layout.addWidget(QLabel("Ir para:"))
-        self.btn_section_identificacao = QPushButton("Identificacao")
+        self.btn_section_identificacao = QPushButton("Identificação")
         self.btn_section_identificacao.setProperty("kind", "secondary")
         self.btn_section_prazos = QPushButton("Prazos")
         self.btn_section_prazos.setProperty("kind", "secondary")
         self.btn_section_acompanhamento = QPushButton("Acompanhamento")
         self.btn_section_acompanhamento.setProperty("kind", "secondary")
-        self.btn_section_observacoes = QPushButton("Observacoes")
+        self.btn_section_observacoes = QPushButton("Observações")
         self.btn_section_observacoes.setProperty("kind", "secondary")
         for button in [
             self.btn_section_identificacao,
@@ -605,7 +611,7 @@ class TcraTab(QWidget):
         form_nav_layout.addStretch(1)
         form_layout.addLayout(form_nav_layout)
 
-        self.lbl_fix_guidance = QLabel("Correcao assistida: cadastro pronto para edicao.")
+        self.lbl_fix_guidance = QLabel("Correção assistida: cadastro pronto para edição.")
         self.lbl_fix_guidance.setWordWrap(True)
         self.lbl_fix_guidance.setObjectName("FormStateLabel")
         form_layout.addWidget(self.lbl_fix_guidance)
@@ -672,18 +678,18 @@ class TcraTab(QWidget):
             "observacoes": self.in_observacoes,
         }
 
-        self.section_identificacao = QGroupBox("Identificacao")
+        self.section_identificacao = QGroupBox("Identificação")
         identificacao_grid = QGridLayout(self.section_identificacao)
         identificacao_grid.setHorizontalSpacing(int(8 * self.sf))
         identificacao_grid.setVerticalSpacing(int(6 * self.sf))
         self._add_grid_field(identificacao_grid, 0, 0, "Processo:", self.in_numero_processo)
-        self._add_grid_field(identificacao_grid, 0, 2, "Numero TCRA:", self.in_numero_tcra)
+        self._add_grid_field(identificacao_grid, 0, 2, "Número TCRA:", self.in_numero_tcra)
         self._add_grid_field(identificacao_grid, 1, 0, "Local:", self.in_local)
-        self._add_grid_field(identificacao_grid, 1, 2, "Endereco:", self.in_endereco)
+        self._add_grid_field(identificacao_grid, 1, 2, "Endereço:", self.in_endereco)
         self._add_grid_field(identificacao_grid, 2, 0, "Bairro:", self.in_bairro)
         form_layout.addWidget(self.section_identificacao)
 
-        self.section_prazos = QGroupBox("Prazos e relatorios")
+        self.section_prazos = QGroupBox("Prazos e relatórios")
         prazos_grid = QGridLayout(self.section_prazos)
         prazos_grid.setHorizontalSpacing(int(8 * self.sf))
         prazos_grid.setVerticalSpacing(int(6 * self.sf))
@@ -691,29 +697,29 @@ class TcraTab(QWidget):
         self._add_grid_field(prazos_grid, 0, 2, "Assinatura:", self.in_data_assinatura)
         self._add_grid_field(prazos_grid, 1, 0, "Prazo final:", self.in_prazo_final)
         self._add_grid_field(prazos_grid, 1, 2, "Periodicidade (meses):", self.in_periodicidade)
-        self._add_grid_field(prazos_grid, 2, 0, "Ultimo relatorio:", self.in_data_ultimo_relatorio)
-        self._add_grid_field(prazos_grid, 2, 2, "Proximo relatorio:", self.in_data_proximo_relatorio)
+        self._add_grid_field(prazos_grid, 2, 0, "Último relatório:", self.in_data_ultimo_relatorio)
+        self._add_grid_field(prazos_grid, 2, 2, "Próximo relatório:", self.in_data_proximo_relatorio)
         form_layout.addWidget(self.section_prazos)
 
         self.section_acompanhamento = QGroupBox("Acompanhamento")
         acompanhamento_grid = QGridLayout(self.section_acompanhamento)
         acompanhamento_grid.setHorizontalSpacing(int(8 * self.sf))
         acompanhamento_grid.setVerticalSpacing(int(6 * self.sf))
-        self._add_grid_field(acompanhamento_grid, 0, 0, "Orgao:", self.in_orgao)
-        self._add_grid_field(acompanhamento_grid, 0, 2, "Responsavel:", self.in_responsavel)
+        self._add_grid_field(acompanhamento_grid, 0, 0, "Órgão:", self.in_orgao)
+        self._add_grid_field(acompanhamento_grid, 0, 2, "Responsável:", self.in_responsavel)
         self._add_grid_field(acompanhamento_grid, 1, 0, "Area (m2):", self.in_area_m2)
-        self._add_grid_field(acompanhamento_grid, 1, 2, "Numero de mudas:", self.in_numero_mudas)
-        self._add_grid_field(acompanhamento_grid, 2, 0, "Inquerito civil:", self.in_inquerito)
+        self._add_grid_field(acompanhamento_grid, 1, 2, "Número de mudas:", self.in_numero_mudas)
+        self._add_grid_field(acompanhamento_grid, 2, 0, "Inquérito civil:", self.in_inquerito)
         acompanhamento_grid.addWidget(self.chk_mpsp, 2, 2, 1, 2)
         form_layout.addWidget(self.section_acompanhamento)
 
-        self.section_observacoes = QGroupBox("Observacoes e servicos")
+        self.section_observacoes = QGroupBox("Observações e serviços")
         observacoes_form = QFormLayout(self.section_observacoes)
         observacoes_form.setContentsMargins(10, 10, 10, 10)
         observacoes_form.setHorizontalSpacing(10)
         observacoes_form.setVerticalSpacing(8)
-        observacoes_form.addRow("Servicos exigidos:", self.in_servicos)
-        observacoes_form.addRow("Observacoes:", self.in_observacoes)
+        observacoes_form.addRow("Serviços exigidos:", self.in_servicos)
+        observacoes_form.addRow("Observações:", self.in_observacoes)
         form_layout.addWidget(self.section_observacoes)
 
         self.form_scroll = QScrollArea(self)
@@ -756,7 +762,7 @@ class TcraTab(QWidget):
         events_layout.addLayout(events_header)
 
         self.lbl_event_hint = QLabel(
-            "Use presets para registrar relatorios, vistorias e cumprimentos. O ultimo evento pode atualizar status e prazos do formulario."
+            "Use presets para registrar relatórios, vistorias e cumprimentos. O último evento pode atualizar status e prazos do formulário."
         )
         self.lbl_event_hint.setWordWrap(True)
         self.lbl_event_hint.setObjectName("FormStateLabel")
@@ -771,7 +777,7 @@ class TcraTab(QWidget):
         quick_event_layout = QHBoxLayout()
         quick_event_layout.setSpacing(int(6 * self.sf))
         quick_event_layout.addWidget(QLabel("Atalhos de evento:"))
-        self.btn_quick_report = QPushButton("Relatorio")
+        self.btn_quick_report = QPushButton("Relatório")
         self.btn_quick_report.setProperty("kind", "secondary")
         self.btn_quick_vistoria = QPushButton("Vistoria")
         self.btn_quick_vistoria.setProperty("kind", "secondary")
@@ -1076,7 +1082,7 @@ class TcraTab(QWidget):
             if not msg_confirm(
                 self,
                 "Trocar TCRA",
-                "Existem alteracoes pendentes no formulario. Deseja descartalas para editar outro termo?",
+                "Existem alterações pendentes no formulário. Deseja descartá-las para editar outro termo?",
             ):
                 self._select_uid_in_table(self.current_form_uid or self.selected_uid)
                 return
@@ -1096,7 +1102,7 @@ class TcraTab(QWidget):
             if not msg_confirm(
                 self,
                 "Trocar TCRA",
-                "Existem alteracoes pendentes no formulario. Deseja descartalas para editar outro termo?",
+                "Existem alterações pendentes no formulário. Deseja descartá-las para editar outro termo?",
             ):
                 self._select_uid_in_table(self.current_form_uid or self.selected_uid)
                 return None
@@ -1185,10 +1191,10 @@ class TcraTab(QWidget):
         if self.has_pending_form_changes() and not msg_confirm(
             self,
             "Atualizar TCRAs",
-            "Existem alteracoes pendentes no formulario. Deseja descartalas para recarregar os TCRAs do banco local?",
+            "Existem alterações pendentes no formulário. Deseja descartá-las para recarregar os TCRAs da base oficial/cache local?",
         ):
             return
-        self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid)
+        self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid, refresh_remote=True)
 
     def _preferred_export_dir(self) -> str:
         if self.main_window is not None and hasattr(self.main_window, "settings_controller"):
@@ -1409,11 +1415,16 @@ class TcraTab(QWidget):
         self._update_quality_queue(snapshot)
         self._populate_table(preferred_uid=preferred_uid)
 
-    def refresh_data(self, *, preferred_uid: str | None = None):
+    def refresh_data(self, *, preferred_uid: str | None = None, refresh_remote: bool = False):
         try:
-            load_result = self.module_operations.load_records()
+            load_result = self.module_operations.load_records(refresh_remote=refresh_remote)
             self.all_tcras = list(load_result.records)
             self.search_index = dict(load_result.search_index)
+            if load_result.sync_issues:
+                logger.warning(
+                    "Atualização remota de TCRA concluiu com observações: %s",
+                    " | ".join(load_result.sync_issues),
+                )
             self._sync_filter_options()
             self._restore_filter_state_if_pending()
             self._apply_filters(preferred_uid=preferred_uid)
@@ -1433,18 +1444,18 @@ class TcraTab(QWidget):
             self.lbl_context.setText(f"Falha ao carregar TCRAs do banco local: {exc}")
             self.lbl_results.setText("0 de 0 TCRAs")
             self.lbl_radar_summary.setText("Sem dados operacionais no momento.")
-            self.lbl_data_quality.setText("Qualidade cadastral: indisponivel.")
-            self.lbl_upcoming_reports.setText("Proximos relatorios: --")
-            self.lbl_agenda_summary.setText("Inbox operacional indisponivel.")
-            self.lbl_quality_summary.setText("Fila de qualidade indisponivel.")
+            self.lbl_data_quality.setText("Qualidade cadastral: indisponível.")
+            self.lbl_upcoming_reports.setText("Próximos relatórios: --")
+            self.lbl_agenda_summary.setText("Inbox operacional indisponível.")
+            self.lbl_quality_summary.setText("Fila de qualidade indisponível.")
             self._set_overview_tab_counts(inbox_count=0, quality_count=0)
             self.overview_tabs.tabBar().setTabToolTip(1, self.lbl_agenda_summary.text())
             self.overview_tabs.tabBar().setTabToolTip(2, self.lbl_quality_summary.text())
             self.btn_summary_inbox.setToolTip(self.lbl_agenda_summary.text())
             self.btn_summary_quality.setToolTip(self.lbl_quality_summary.text())
-            self.btn_summary_upcoming.setText(f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d")
+            self.btn_summary_upcoming.setText(f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d")
             self.btn_summary_upcoming.setEnabled(False)
-            self._set_import_status("Importacao: indisponivel por falha na leitura do banco local.", visible=True)
+            self._set_import_status("Importação: indisponível por falha na leitura do banco local.", visible=True)
             self.btn_export_excel.setEnabled(False)
             self.btn_export_pdf.setEnabled(False)
             self.btn_open_selected.setEnabled(False)
@@ -1497,7 +1508,7 @@ class TcraTab(QWidget):
         if self.has_pending_form_changes() and not msg_confirm(
             self,
             "Novo TCRA",
-            "Existem alteracoes pendentes no formulario. Deseja descartalas para iniciar um novo termo?",
+            "Existem alterações pendentes no formulário. Deseja descartá-las para iniciar um novo termo?",
         ):
             return
         self._restoring_selection = True
@@ -1532,7 +1543,7 @@ class TcraTab(QWidget):
             QMessageBox.warning(
                 self,
                 "Aviso",
-                f"Ja existe um TCRA parecido cadastrado no banco local: {label}. Revise processo/TCRA antes de salvar.",
+                f"Já existe um TCRA parecido cadastrado no banco local: {label}. Revise processo/TCRA antes de salvar.",
             )
             self._focus_form_widget(self.in_numero_tcra if record.numero_tcra else self.in_numero_processo)
             return
@@ -1584,7 +1595,7 @@ class TcraTab(QWidget):
         if self.has_pending_form_changes() and not msg_confirm(
             self,
             "Importar TCRAs",
-            "Existem alteracoes pendentes no formulario. Deseja descartalas antes de importar a planilha legada?",
+            "Existem alterações pendentes no formulário. Deseja descartá-las antes de importar a planilha legada?",
         ):
             return
 
@@ -1607,12 +1618,12 @@ class TcraTab(QWidget):
         if analysis.importable_count <= 0:
             dialog = TcraImportPreviewDialog(self, analysis)
             dialog.exec()
-            self._set_import_status("Importacao: nenhuma linha importavel encontrada.", visible=True)
+            self._set_import_status("Importação: nenhuma linha importável encontrada.", visible=True)
             return
 
         preview_dialog = TcraImportPreviewDialog(self, analysis)
         if not preview_dialog.exec():
-            self._set_import_status("Importacao: cancelada apos a revisao da planilha.", visible=True)
+            self._set_import_status("Importação: cancelada após a revisão da planilha.", visible=True)
             return
 
         try:
@@ -1630,33 +1641,33 @@ class TcraTab(QWidget):
 
     def export_excel_report(self):
         if not self.filtered_tcras:
-            QMessageBox.warning(self, "Aviso", "Nao ha TCRAs no recorte atual para exportar.")
+            QMessageBox.warning(self, "Aviso", "Não há TCRAs no recorte atual para exportar.")
             return
-        path = self._get_export_path("Salvar relatorio de TCRAs", "Planilha (*.xlsx)")
+        path = self._get_export_path("Salvar relatório de TCRAs", "Planilha (*.xlsx)")
         if not path:
             return
         try:
             self.module_operations.export_excel_report(path, self.filtered_tcras, filter_summary=self._build_filter_summary())
         except Exception as exc:
-            logger.exception("Falha ao exportar relatorio de TCRA em Excel: %s", path)
-            QMessageBox.critical(self, "Erro", f"Falha ao exportar o relatorio em Excel: {exc}")
+            logger.exception("Falha ao exportar relatório de TCRA em Excel: %s", path)
+            QMessageBox.critical(self, "Erro", f"Falha ao exportar o relatório em Excel: {exc}")
             return
-        QMessageBox.information(self, "Sucesso", "Relatorio de TCRAs exportado em Excel.")
+        QMessageBox.information(self, "Sucesso", "Relatório de TCRAs exportado em Excel.")
 
     def export_pdf_report(self):
         if not self.filtered_tcras:
-            QMessageBox.warning(self, "Aviso", "Nao ha TCRAs no recorte atual para exportar.")
+            QMessageBox.warning(self, "Aviso", "Não há TCRAs no recorte atual para exportar.")
             return
-        path = self._get_export_path("Salvar relatorio de TCRAs", "PDF (*.pdf)")
+        path = self._get_export_path("Salvar relatório de TCRAs", "PDF (*.pdf)")
         if not path:
             return
         try:
             self.module_operations.export_pdf_report(path, self.filtered_tcras, filter_summary=self._build_filter_summary())
         except Exception as exc:
-            logger.exception("Falha ao exportar relatorio de TCRA em PDF: %s", path)
-            QMessageBox.critical(self, "Erro", f"Falha ao exportar o relatorio em PDF: {exc}")
+            logger.exception("Falha ao exportar relatório de TCRA em PDF: %s", path)
+            QMessageBox.critical(self, "Erro", f"Falha ao exportar o relatório em PDF: {exc}")
             return
-        QMessageBox.information(self, "Sucesso", "Relatorio de TCRAs exportado em PDF.")
+        QMessageBox.information(self, "Sucesso", "Relatório de TCRAs exportado em PDF.")
 
     def _clear_table_selection(self) -> None:
         self._bulk_selected_uids = []
@@ -1701,7 +1712,7 @@ class TcraTab(QWidget):
     def apply_bulk_action(self) -> None:
         selected_records = self._selected_table_records()
         if not selected_records:
-            QMessageBox.warning(self, "Aviso", "Selecione ao menos um TCRA na grade para aplicar uma acao em lote.")
+            QMessageBox.warning(self, "Aviso", "Selecione ao menos um TCRA na grade para aplicar uma ação em lote.")
             return
 
         dialog = TcraBulkActionDialog(self, selected_count=len(selected_records), today=self.today)
@@ -1720,8 +1731,8 @@ class TcraTab(QWidget):
             QMessageBox.warning(self, "Aviso", str(exc))
             return
         except Exception as exc:
-            logger.exception("Falha ao aplicar acao em lote de TCRA")
-            QMessageBox.critical(self, "Erro", f"Falha ao aplicar a acao em lote: {exc}")
+            logger.exception("Falha ao aplicar ação em lote de TCRA")
+            QMessageBox.critical(self, "Erro", f"Falha ao aplicar a ação em lote: {exc}")
             return
         self.refresh_data(preferred_uid=result.updated_uids[0] if result.updated_uids else "")
 
@@ -1997,7 +2008,7 @@ class TcraTab(QWidget):
                 _format_date(record.prazo_final),
                 _format_date(record.data_proximo_relatorio),
                 record.orgao_acompanhamento,
-                "Sim" if tcra_is_mpsp_related(record) else "Nao",
+                "Sim" if tcra_is_mpsp_related(record) else "Não",
             ]
             row_hint = self._build_row_hint(record, operational_status)
             for column_index, value in enumerate(row_items):
@@ -2114,14 +2125,14 @@ class TcraTab(QWidget):
             f"Agenda: {self.AGENDA_SCOPE_LABELS.get(self.agenda_scope, 'Hoje')}",
         ]
         if not self.filter_orgao.is_all_selected():
-            parts.append("Orgaos: " + ", ".join(self.filter_orgao.checked_items()))
+            parts.append("Órgãos: " + ", ".join(self.filter_orgao.checked_items()))
         if not self.filter_bairro.is_all_selected():
             parts.append("Bairros: " + ", ".join(self.filter_bairro.checked_items()))
         flags = []
         if self.chk_only_mpsp.isChecked():
             flags.append("somente MPSP")
         if self.chk_only_relatorio_pendente.isChecked():
-            flags.append("relatorio pendente")
+            flags.append("relatório pendente")
         if self.chk_only_prazo_vencido.isChecked():
             flags.append("prazo vencido")
         if flags:
@@ -2248,7 +2259,7 @@ class TcraTab(QWidget):
         if not selected_rows:
             self._bulk_selected_uids = []
             self.btn_open_selected.setEnabled(False)
-            self.btn_bulk_action.setText("Acoes em lote")
+            self.btn_bulk_action.setText("Ações em lote")
             self.lbl_selection_summary.setText("Nenhum termo selecionado")
             self._set_selection_actions_visible(False)
             self.btn_record_edit.setEnabled(False)
@@ -2261,9 +2272,9 @@ class TcraTab(QWidget):
             return
         self._bulk_selected_uids = [record.uid for record in selected_records if record.uid]
         selected_count = len(selected_records)
-        self.btn_bulk_action.setText(f"Acoes em lote ({selected_count})" if selected_count > 1 else "Acoes em lote")
+        self.btn_bulk_action.setText(f"Ações em lote ({selected_count})" if selected_count > 1 else "Ações em lote")
         if selected_count > 1:
-            self.lbl_selection_summary.setText(f"{selected_count} termos selecionados para acao em lote")
+            self.lbl_selection_summary.setText(f"{selected_count} termos selecionados para ação em lote")
         else:
             self.lbl_selection_summary.setText("1 termo selecionado")
         self._set_selection_actions_visible(True)
@@ -2364,7 +2375,7 @@ class TcraTab(QWidget):
         endereco = self.in_endereco.text().strip()
 
         if not any([numero_processo, numero_tcra, local]):
-            raise ValueError("Informe ao menos numero de processo, numero do TCRA ou local para salvar o termo.")
+            raise ValueError("Informe ao menos número de processo, número do TCRA ou local para salvar o termo.")
 
         return Tcra(
             uid=self.current_form_uid,
@@ -2378,17 +2389,17 @@ class TcraTab(QWidget):
             data_assinatura=self._parse_optional_date(self.in_data_assinatura.text(), "Data de assinatura"),
             prazo_final=self._parse_optional_date(self.in_prazo_final.text(), "Prazo final"),
             periodicidade_relatorio_meses=self._parse_optional_int(self.in_periodicidade.text(), "Periodicidade"),
-            data_ultimo_relatorio=self._parse_optional_date(self.in_data_ultimo_relatorio.text(), "Ultimo relatorio"),
+            data_ultimo_relatorio=self._parse_optional_date(self.in_data_ultimo_relatorio.text(), "Último relatório"),
             data_proximo_relatorio=self._parse_optional_date(
                 self.in_data_proximo_relatorio.text(),
-                "Proximo relatorio",
+                "Próximo relatório",
             ),
             area_m2=self._parse_optional_float(self.in_area_m2.text(), "Area"),
-            numero_mudas_previsto=self._parse_optional_int(self.in_numero_mudas.text(), "Numero de mudas"),
+            numero_mudas_previsto=self._parse_optional_int(self.in_numero_mudas.text(), "Número de mudas"),
             servicos_exigidos=self.in_servicos.toPlainText().strip(),
             responsavel_execucao=self.in_responsavel.text().strip(),
             observacoes=self.in_observacoes.toPlainText().strip(),
-            mpsp_relacionado="Sim" if self.chk_mpsp.isChecked() else "Nao",
+            mpsp_relacionado="Sim" if self.chk_mpsp.isChecked() else "Não",
             inquerito_civil=self.in_inquerito.text().strip(),
             eventos=list(self.form_eventos),
         )
@@ -2411,7 +2422,7 @@ class TcraTab(QWidget):
         try:
             return int(clean)
         except ValueError as exc:
-            raise ValueError(f"{label}: informe um numero inteiro valido.") from exc
+            raise ValueError(f"{label}: informe um número inteiro válido.") from exc
 
     def _parse_optional_float(self, text: str, label: str) -> float | None:
         clean = text.strip()
@@ -2420,7 +2431,7 @@ class TcraTab(QWidget):
         try:
             return float(clean.replace(",", "."))
         except ValueError as exc:
-            raise ValueError(f"{label}: informe um numero valido.") from exc
+            raise ValueError(f"{label}: informe um número válido.") from exc
 
     def _build_event_from_editor(self, sequence: int, values: dict[str, str]) -> TcraEvento:
         tipo_evento = _stringify(values.get("tipo_evento"))

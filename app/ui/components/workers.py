@@ -92,7 +92,7 @@ class GeocodeWorker(QThread):
                 self.resultados[record.excel_row] = result
 
         if cancelled:
-            self.cancelled_process.emit("Geocodificacao em lote cancelada.")
+            self.cancelled_process.emit("Geocodificação em lote cancelada.")
             return
 
         self.finished_process.emit(self.resultados)
@@ -136,7 +136,7 @@ class UpdaterWorker(QThread):
 
     def run(self):
         if not self.update_url:
-            logger.info("[UPDATER] Nenhuma fonte de versao configurada; verificacao automatica ignorada.")
+            logger.info("[UPDATER] Nenhuma fonte de versão configurada; verificação automática ignorada.")
             return
 
         if self.isInterruptionRequested():
@@ -158,15 +158,15 @@ class UpdaterWorker(QThread):
         release_notes = details["notes"]
 
         if not latest_version:
-            logger.warning("[UPDATER] Resposta sem versao valida; verificacao ignorada.")
-            self.check_failed.emit("Resposta de atualizacao sem versao valida.")
+            logger.warning("[UPDATER] Resposta sem versão válida; verificação ignorada.")
+            self.check_failed.emit("Resposta de atualização sem versão válida.")
             return
 
         if self._is_newer_version(latest_version, self.current_version):
-            self.update_available.emit(latest_version, release_notes or "Sem notas de versao.")
+            self.update_available.emit(latest_version, release_notes or "Sem notas de versão.")
             self.update_ready.emit(details)
         else:
-            logger.info("[UPDATER] Aplicativo ja esta na versao mais recente configurada.")
+            logger.info("[UPDATER] Aplicativo já está na versão mais recente configurada.")
             self.no_update.emit(self.current_version)
 
     @staticmethod
@@ -268,10 +268,10 @@ class UpdaterWorker(QThread):
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise RuntimeError("resposta de atualizacao nao eh um JSON valido") from exc
+            raise RuntimeError("resposta de atualização não é um JSON válido") from exc
 
         if not isinstance(payload, dict):
-            raise RuntimeError("resposta de atualizacao deve ser um objeto JSON")
+            raise RuntimeError("resposta de atualização deve ser um objeto JSON")
 
         return payload
 
@@ -310,7 +310,7 @@ class UpdateInstallerWorker(QThread):
             self.cancelled.emit(str(exc))
             return
         except Exception as exc:
-            logger.warning(f"[UPDATER] Falha ao preparar atualizacao automatica: {exc}")
+            logger.warning(f"[UPDATER] Falha ao preparar atualização automática: {exc}")
             self.failed.emit(str(exc))
             return
 
@@ -320,9 +320,9 @@ class UpdateInstallerWorker(QThread):
     def _emit_progress(self, downloaded_bytes: int, total_bytes: Optional[int]):
         if total_bytes and total_bytes > 0:
             percent = int((downloaded_bytes / total_bytes) * 100)
-            message = f"Baixando atualizacao... {percent}%"
+            message = f"Baixando atualização... {percent}%"
         else:
             percent = 0
             downloaded_mb = downloaded_bytes / (1024 * 1024)
-            message = f"Baixando atualizacao... {downloaded_mb:.1f} MB"
+            message = f"Baixando atualização... {downloaded_mb:.1f} MB"
         self.progress.emit(percent, message)

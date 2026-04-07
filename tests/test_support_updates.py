@@ -88,7 +88,7 @@ def test_present_update_offer_opens_download_url_when_auto_update_is_not_support
     assert "SHA-256: abc123" in prompts[0]
     assert "Assinatura digital: ausente nesta release." in prompts[0]
     assert default_buttons == [16384]
-    assert window.statusBar().messages[-1] == "Link da atualizacao aberto no navegador."
+    assert window.statusBar().messages[-1] == "Link da atualização aberto no navegador."
 
 
 def test_present_update_offer_starts_automatic_update_when_supported(monkeypatch):
@@ -171,9 +171,9 @@ def test_check_for_updates_uses_default_manifest_url(monkeypatch):
 
     assert events[0] == ("start", DEFAULT_UPDATE_MANIFEST_URL, APP_VERSION)
     assert events[1][0] == "info"
-    assert "versao mais recente" in events[1][2]
+    assert "versão mais recente" in events[1][2]
     assert window.busy_events[0][0] == "begin"
-    assert window.busy_events[-1] == ("end", "Verificacao de atualizacoes concluida.")
+    assert window.busy_events[-1] == ("end", "Verificação de atualizações concluída.")
     assert window.released_workers == ["manual_update_check"]
 
 
@@ -255,7 +255,7 @@ def test_begin_automatic_update_wires_download_worker(monkeypatch):
     assert events[0][1] == "1.1.0"
     assert controller._update_progress_dialog is not None
     assert controller._update_progress_dialog.shown is True
-    assert window.busy_events[0] == ("begin", "Baixando atualizacao automatica...", 100, True, True)
+    assert window.busy_events[0] == ("begin", "Baixando atualização automática...", 100, True, True)
     assert window.tracked_workers and window.tracked_workers[0][0] == "automatic_update"
 
 
@@ -272,7 +272,7 @@ def test_on_auto_update_staged_launches_installer_and_closes_window(monkeypatch)
     controller._on_auto_update_staged({"launcher_path": "C:/tmp/install_update.ps1"})
 
     assert launched == ["C:/tmp/install_update.ps1"]
-    assert window.form_controller.calls == ["instalar a atualizacao"]
+    assert window.form_controller.calls == ["instalar a atualização"]
     assert window._skip_close_discard_confirmation is True
     assert window.closed is True
 
@@ -293,4 +293,4 @@ def test_on_auto_update_staged_respects_discard_prompt(monkeypatch):
     assert launched == []
     assert window.closed is False
     assert window._skip_close_discard_confirmation is False
-    assert window.statusBar().messages[-1] == "Atualizacao pronta, mas instalacao cancelada pelo usuario."
+    assert window.statusBar().messages[-1] == "Atualização pronta, mas instalação cancelada pelo usuário."

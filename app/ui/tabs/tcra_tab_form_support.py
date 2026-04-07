@@ -7,6 +7,8 @@ from typing import Callable, Mapping, Sequence
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.tcra_records_service import (
+    normalize_event_type_label,
+    remove_accents,
     normalize_orgao_label,
     normalize_status_label,
     resolve_operational_issues,
@@ -106,7 +108,7 @@ def restore_form_eventos_snapshot(
             TcraEvento(
                 sequence=int(row[0] or index),
                 data_evento=parse_date(data_evento, "Data do evento") if data_evento else None,
-                tipo_evento=stringify(row[2]),
+                tipo_evento=normalize_event_type_label(row[2]),
                 descricao=stringify(row[3]),
                 prazo_resultante=parse_date(prazo_resultante, "Prazo resultante") if prazo_resultante else None,
                 status_resultante=normalize_status_label(stringify(row[5])),
@@ -116,7 +118,7 @@ def restore_form_eventos_snapshot(
 
 
 def resolve_issue_focus_field(issue: str) -> str:
-    normalized_issue = stringify(issue).lower()
+    normalized_issue = remove_accents(issue).lower()
     if "numero tcra" in normalized_issue:
         return "numero_tcra"
     if "responsavel" in normalized_issue:
@@ -139,7 +141,7 @@ def resolve_issue_focus_field(issue: str) -> str:
 
 
 def resolve_safe_fix_updates(issue: str, snapshot: Mapping[str, object]) -> dict[str, object]:
-    normalized_issue = stringify(issue).lower()
+    normalized_issue = remove_accents(issue).lower()
     ultimo_relatorio = stringify(snapshot.get("data_ultimo_relatorio"))
     if "cumprido/arquivado" in normalized_issue and "proximo relatorio" in normalized_issue:
         return {"data_proximo_relatorio": ""}
@@ -154,7 +156,7 @@ def resolve_safe_fix_updates(issue: str, snapshot: Mapping[str, object]) -> dict
 
 def issue_supports_safe_fix(issue: str) -> bool:
     return bool(resolve_safe_fix_updates(issue, {})) or any(
-        marker in stringify(issue).lower()
+        marker in remove_accents(issue).lower()
         for marker in (
             "cumprido/arquivado",
             "proximo relatorio nao pode ser anterior",
@@ -183,57 +185,57 @@ def build_form_preview_data(
         if tcra_has_prazo_vencido(preview_record, today=today):
             alert_flags.append("Prazo vencido")
         if tcra_has_relatorio_pendente(preview_record, today=today):
-            alert_flags.append("Relatorio pendente")
+            alert_flags.append("Relatório pendente")
         if tcra_has_report_due_soon(preview_record, today=today):
-            alert_flags.append("Relatorio nos proximos 30 dias")
+            alert_flags.append("Relatório nos próximos 30 dias")
         if tcra_has_missing_identity(preview_record):
-            alert_flags.append("Sem numero TCRA")
+            alert_flags.append("Sem número TCRA")
         if tcra_has_missing_responsavel(preview_record):
-            alert_flags.append("Sem responsavel")
+            alert_flags.append("Sem responsável")
         if tcra_has_missing_orgao(preview_record):
-            alert_flags.append("Sem orgao")
+            alert_flags.append("Sem órgão")
 
     primary_issue = consistency_issues[0] if consistency_issues else (operational_issues[0] if operational_issues else "")
     if primary_issue:
-        guidance_text = f"Correcao assistida: {primary_issue} Sugestao: {suggest_issue_fix(primary_issue)}"
+        guidance_text = f"Correção assistida: {primary_issue} Sugestão: {suggest_issue_fix(primary_issue)}"
     else:
-        guidance_text = "Correcao assistida: cadastro coerente no recorte atual."
+        guidance_text = "Correção assistida: cadastro coerente no recorte atual."
 
     lines = [
         f"Processo: {stringify(snapshot.get('numero_processo')) or '--'}",
         f"TCRA: {stringify(snapshot.get('numero_tcra')) or '--'}",
         f"Local: {stringify(snapshot.get('local')) or '--'}",
-        f"Endereco: {stringify(snapshot.get('endereco')) or '--'}",
+        f"Endereço: {stringify(snapshot.get('endereco')) or '--'}",
         f"Bairro: {stringify(snapshot.get('bairro')) or '--'}",
-        f"Orgao de acompanhamento: {normalize_orgao_label(snapshot.get('orgao')) or '--'}",
+        f"Órgão de acompanhamento: {normalize_orgao_label(snapshot.get('orgao')) or '--'}",
         f"Status informado: {normalize_status_label(snapshot.get('status')) or '--'}",
         f"Status operacional: {operational_status}",
         f"Assinatura: {stringify(snapshot.get('data_assinatura')) or '--'}",
         f"Prazo final: {stringify(snapshot.get('prazo_final')) or '--'}",
-        f"Ultimo relatorio: {stringify(snapshot.get('data_ultimo_relatorio')) or '--'}",
-        f"Proximo relatorio: {stringify(snapshot.get('data_proximo_relatorio')) or '--'}",
+        f"Último relatório: {stringify(snapshot.get('data_ultimo_relatorio')) or '--'}",
+        f"Próximo relatório: {stringify(snapshot.get('data_proximo_relatorio')) or '--'}",
         f"Periodicidade (meses): {stringify(snapshot.get('periodicidade')) or '--'}",
         f"Area (m2): {stringify(snapshot.get('area_m2')) or '--'}",
-        f"Numero de mudas: {stringify(snapshot.get('numero_mudas')) or '--'}",
-        f"Responsavel: {stringify(snapshot.get('responsavel')) or '--'}",
-        f"MPSP relacionado: {'Sim' if snapshot.get('mpsp') else 'Nao'}",
-        f"Inquerito civil: {stringify(snapshot.get('inquerito')) or '--'}",
+        f"Número de mudas: {stringify(snapshot.get('numero_mudas')) or '--'}",
+        f"Responsável: {stringify(snapshot.get('responsavel')) or '--'}",
+        f"MPSP relacionado: {'Sim' if snapshot.get('mpsp') else 'Não'}",
+        f"Inquérito civil: {stringify(snapshot.get('inquerito')) or '--'}",
         f"Eventos cadastrados: {len(list(snapshot.get('eventos') or ())) }",
         f"Alertas: {', '.join(alert_flags) if alert_flags else '--'}",
         "",
-        "Pendencias operacionais:",
-        *list(operational_issues or ("Nenhuma pendencia prioritaria.",)),
+        "Pendências operacionais:",
+        *list(operational_issues or ("Nenhuma pendência prioritária.",)),
         "",
-        "Inconsistencias de cadastro:",
-        *list(consistency_issues or ("Nenhuma inconsistencia estrutural detectada.",)),
+        "Inconsistências de cadastro:",
+        *list(consistency_issues or ("Nenhuma inconsistência estrutural detectada.",)),
         "",
         "Timeline recente:",
         *list(recent_event_lines or ("Nenhum evento cadastrado.",)),
         "",
-        "Servicos exigidos:",
+        "Serviços exigidos:",
         stringify(snapshot.get("servicos")) or "--",
         "",
-        "Observacoes:",
+        "Observações:",
         stringify(snapshot.get("observacoes")) or "--",
     ]
     return TcraFormPreviewData(

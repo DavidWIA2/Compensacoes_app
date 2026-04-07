@@ -20,7 +20,7 @@ def test_build_operation_restore_request_content_uses_summary_and_metadata():
 
     assert content.label == "Registro alterado: AT-1"
     assert content.confirmation_title == "ATENCAO"
-    assert "restaurar a operacao 'Registro alterado: AT-1'" in content.confirmation_message
+    assert "restaurar a operação 'Registro alterado: AT-1'" in content.confirmation_message
     assert content.metadata == {
         "event_id": "evt-1",
         "action": "edit",
@@ -35,7 +35,7 @@ def test_build_rollback_restore_request_content_uses_timestamp_prefix():
     )
 
     assert content.label == "31/03/2026 12:00:00 - EDIT - Registro alterado"
-    assert "restaurar a versao de 31/03/2026 12:00:00" in content.confirmation_message
+    assert "restaurar a versão de 31/03/2026 12:00:00" in content.confirmation_message
     assert content.metadata == {"event_id": "evt-2"}
 
 

@@ -124,11 +124,11 @@ def compute_sha256(path: str | Path) -> str:
 def verify_sha256(path: str | Path, expected_sha256: str) -> str:
     expected = str(expected_sha256 or "").strip().lower()
     if not expected:
-        raise AutoUpdateError("Manifest de atualizacao sem checksum SHA-256.")
+        raise AutoUpdateError("Manifest de atualização sem checksum SHA-256.")
 
     actual = compute_sha256(path)
     if actual != expected:
-        raise AutoUpdateError("Checksum SHA-256 da atualizacao nao confere com o manifest.")
+        raise AutoUpdateError("Checksum SHA-256 da atualização não confere com o manifest.")
     return actual
 
 
@@ -160,7 +160,7 @@ def download_release_artifact(
             with temp_target.open("wb") as output:
                 while True:
                     if interruption_requested and interruption_requested():
-                        raise AutoUpdateCancelled("Download da atualizacao cancelado.")
+                        raise AutoUpdateCancelled("Download da atualização cancelado.")
 
                     chunk = response.read(1024 * 256)
                     if not chunk:
@@ -177,7 +177,7 @@ def download_release_artifact(
         raise
     except Exception as exc:
         temp_target.unlink(missing_ok=True)
-        raise AutoUpdateError(f"Nao foi possivel baixar a atualizacao: {exc}") from exc
+        raise AutoUpdateError(f"Não foi possível baixar a atualização: {exc}") from exc
 
     return target
 
@@ -299,7 +299,7 @@ def launch_update_installer(launcher_path: str | Path, *, powershell_executable:
                 stderr=subprocess.DEVNULL,
             )
     except OSError as exc:
-        raise AutoUpdateError(f"Nao foi possivel iniciar o instalador da atualizacao: {exc}") from exc
+        raise AutoUpdateError(f"Não foi possível iniciar o instalador da atualização: {exc}") from exc
 
 
 def prepare_staged_update(
@@ -318,13 +318,13 @@ def prepare_staged_update(
     sha256 = str(details.get("sha256") or "").strip().lower()
 
     if not version:
-        raise AutoUpdateError("Manifest de atualizacao sem versao valida.")
+        raise AutoUpdateError("Manifest de atualização sem versão válida.")
     if not download_url:
-        raise AutoUpdateError("Manifest de atualizacao sem link de download.")
+        raise AutoUpdateError("Manifest de atualização sem link de download.")
     if not filename.lower().endswith(".exe"):
-        raise AutoUpdateNotSupported("A atualizacao automatica requer um instalador .exe.")
+        raise AutoUpdateNotSupported("A atualização automática requer um instalador .exe.")
     if not sha256:
-        raise AutoUpdateNotSupported("A atualizacao automatica requer checksum SHA-256 no manifest.")
+        raise AutoUpdateNotSupported("A atualização automática requer checksum SHA-256 no manifest.")
 
     staging_dir = resolve_update_staging_dir(version, app_data_dir=app_data_dir)
     installer_path = staging_dir / filename

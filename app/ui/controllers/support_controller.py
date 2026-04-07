@@ -91,7 +91,7 @@ class SupportController:
 
     def check_for_updates(self):
         if self._manual_updater is not None and self._manual_updater.isRunning():
-            self.window.statusBar().showMessage("Ja existe uma verificacao de atualizacao em andamento.")
+            self.window.statusBar().showMessage("Já existe uma verificação de atualização em andamento.")
             return
 
         update_url = resolve_update_manifest_url()
@@ -124,7 +124,7 @@ class SupportController:
             if reply == QMessageBox.Yes:
                 self.begin_automatic_update(presentation.payload)
             else:
-                self.window.statusBar().showMessage("Atualizacao disponivel, mas instalacao adiada.")
+                self.window.statusBar().showMessage("Atualização disponível, mas instalação adiada.")
             return
 
         if presentation.action_kind == "open_download":
@@ -138,14 +138,14 @@ class SupportController:
             )
             if reply == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(presentation.download_url))
-                self.window.statusBar().showMessage("Link da atualizacao aberto no navegador.")
+                self.window.statusBar().showMessage("Link da atualização aberto no navegador.")
             else:
-                self.window.statusBar().showMessage("Atualizacao disponivel, mas download adiado.")
+                self.window.statusBar().showMessage("Atualização disponível, mas download adiado.")
             return
 
         self._mark_job_completed(MANUAL_UPDATE_JOB_NAME, runtime_message)
         QMessageBox.information(self.window, presentation.title, presentation.message)
-        self.window.statusBar().showMessage("Atualizacao encontrada sem link de download configurado.")
+        self.window.statusBar().showMessage("Atualização encontrada sem link de download configurado.")
 
     def begin_automatic_update(self, details):
         payload = dict(details or {})
@@ -154,7 +154,7 @@ class SupportController:
             return
 
         if self._auto_update_worker is not None and self._auto_update_worker.isRunning():
-            self.window.statusBar().showMessage("Ja existe uma atualizacao automatica em andamento.")
+            self.window.statusBar().showMessage("Já existe uma atualização automática em andamento.")
             return
 
         self._update_progress_dialog = self._create_update_progress_dialog()
@@ -201,7 +201,7 @@ class SupportController:
                 build_disconnect_callback(worker.finished, self._on_auto_update_worker_finished),
             ],
             wait_ms=5000,
-            busy_message="Baixando atualizacao automatica...",
+            busy_message="Baixando atualização automática...",
             total=100,
             cancellable=True,
             cancel_callback=self._cancel_automatic_update,
@@ -246,14 +246,14 @@ class SupportController:
         if not download_url:
             QMessageBox.information(
                 self.window,
-                "Atualizacao Disponivel",
-                "A atualizacao foi encontrada, mas o manifest nao informou um link valido.",
+            "Atualização Disponível",
+                "A atualização foi encontrada, mas o manifest não informou um link válido.",
             )
-            self.window.statusBar().showMessage("Atualizacao sem link de download configurado.")
+            self.window.statusBar().showMessage("Atualização sem link de download configurado.")
             return
 
         QDesktopServices.openUrl(QUrl(download_url))
-        self.window.statusBar().showMessage("Link da atualizacao aberto no navegador.")
+        self.window.statusBar().showMessage("Link da atualização aberto no navegador.")
 
     def _create_update_progress_dialog(self):
         return create_update_progress_dialog(self.window, self._cancel_automatic_update)
@@ -262,13 +262,13 @@ class SupportController:
         if self._manual_updater is None or not self._manual_updater.isRunning():
             return
         self._manual_update_cancel_requested = True
-        self.window.statusBar().showMessage("Cancelando verificacao de atualizacoes...")
+        self.window.statusBar().showMessage("Cancelando verificação de atualizações...")
         self._manual_updater.requestInterruption()
 
     def _cancel_automatic_update(self):
         if self._auto_update_worker is None or not self._auto_update_worker.isRunning():
             return
-        self.window.statusBar().showMessage("Cancelando download da atualizacao...")
+        self.window.statusBar().showMessage("Cancelando download da atualização...")
         self._auto_update_worker.requestInterruption()
 
     def _on_auto_update_progress(self, percent: int, message: str):
@@ -284,21 +284,21 @@ class SupportController:
         self._apply_job_outcome(AUTO_UPDATE_JOB_NAME, outcome)
         self._complete_auto_update_job(outcome.busy_message)
         self._close_update_progress_dialog()
-        if not self.window.form_controller.confirm_discard_changes("instalar a atualizacao"):
-            self.window.statusBar().showMessage("Atualizacao pronta, mas instalacao cancelada pelo usuario.")
+        if not self.window.form_controller.confirm_discard_changes("instalar a atualização"):
+            self.window.statusBar().showMessage("Atualização pronta, mas instalação cancelada pelo usuário.")
             return
 
         try:
             launch_update_installer(payload["launcher_path"])
         except Exception as exc:
-            logger.error(f"Falha ao iniciar instalador da atualizacao: {exc}", exc_info=True)
-            title, message = friendly_error_message(exc, "iniciar a instalacao da atualizacao")
+            logger.error(f"Falha ao iniciar instalador da atualização: {exc}", exc_info=True)
+            title, message = friendly_error_message(exc, "iniciar a instalação da atualização")
             QMessageBox.critical(self.window, title, message)
-            self.window.statusBar().showMessage("Falha ao iniciar a atualizacao automatica.")
+            self.window.statusBar().showMessage("Falha ao iniciar a atualização automática.")
             return
 
         self.window._skip_close_discard_confirmation = True
-        self.window.statusBar().showMessage("Atualizacao pronta. Fechando o aplicativo para instalar...")
+        self.window.statusBar().showMessage("Atualização pronta. Fechando o aplicativo para instalar...")
         self.window.close()
 
     def _on_auto_update_failed(self, message: str):
@@ -306,7 +306,7 @@ class SupportController:
         self._apply_job_outcome(AUTO_UPDATE_JOB_NAME, outcome, dialog_kind="warning")
         self._complete_auto_update_job(outcome.busy_message)
         self._close_update_progress_dialog()
-        logger.warning(f"Falha na atualizacao automatica: {message}")
+        logger.warning(f"Falha na atualização automática: {message}")
 
     def _on_auto_update_cancelled(self, message: str):
         outcome = self.support_use_cases.build_auto_update_cancelled_outcome(message)
@@ -345,7 +345,7 @@ class SupportController:
 
     def _on_auto_update_worker_finished(self):
         if self._auto_update_active:
-            self.window.end_busy_operation("Atualizacao automatica encerrada.")
+            self.window.end_busy_operation("Atualização automática encerrada.")
         self.window.release_background_worker(AUTO_UPDATE_JOB_NAME)
         self._clear_auto_update_worker()
 

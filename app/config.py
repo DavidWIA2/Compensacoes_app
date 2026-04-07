@@ -25,9 +25,38 @@ SUPABASE_DEMO_URL_ENV_VAR = "COMPENSACOES_SUPABASE_DEMO_URL"
 SUPABASE_DEMO_KEY_ENV_VAR = "COMPENSACOES_SUPABASE_DEMO_PUBLISHABLE_KEY"
 DEFAULT_SUPABASE_PRODUCTION_URL = "https://yonvcnnkewzoqwnnmcdx.supabase.co"
 DEFAULT_SUPABASE_PRODUCTION_PUBLISHABLE_KEY = "sb_publishable_89kyRD3GfnaLBZmwnlkA_g_4a_k5_5R"
+DEFAULT_CORPORATE_EMAIL_DOMAIN = "saocarlos.sp.gov.br"
+DEFAULT_CORPORATE_EMAIL_SUFFIX = f"@{DEFAULT_CORPORATE_EMAIL_DOMAIN}"
 
 SEARCH_FILTER_DEBOUNCE_MS = 180
 
 
 def resolve_update_manifest_url(explicit_url: str = "") -> str:
     return str(explicit_url or os.getenv(UPDATE_URL_ENV_VAR, "") or DEFAULT_UPDATE_MANIFEST_URL).strip()
+
+
+def normalize_corporate_email(
+    email: str,
+    *,
+    default_domain: str = DEFAULT_CORPORATE_EMAIL_DOMAIN,
+) -> str:
+    normalized = str(email or "").strip()
+    if not normalized:
+        return ""
+    if "@" not in normalized:
+        normalized = f"{normalized}@{default_domain}"
+    return normalized.lower()
+
+
+def display_corporate_email_local_part(
+    email: str,
+    *,
+    default_domain: str = DEFAULT_CORPORATE_EMAIL_DOMAIN,
+) -> str:
+    normalized = str(email or "").strip()
+    if not normalized:
+        return ""
+    suffix = f"@{default_domain}".lower()
+    if normalized.lower().endswith(suffix):
+        return normalized[: -len(suffix)]
+    return normalized

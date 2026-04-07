@@ -145,8 +145,8 @@ class TcraExcelService:
         "numero_processo": ("Processo", "No Processo", "Numero Processo"),
         "local": ("Local",),
         "endereco": ("Endereco",),
-        "data_proximo_relatorio": ("Relat. Periodico", "Relatorio Periodico", "Prox. Relatorio"),
-        "data_ultimo_relatorio": ("Ultimo Rel.", "Ultimo Relatorio"),
+        "data_proximo_relatorio": ("Relat. Periodico", "Relatório Periódico", "Próx. Relatório"),
+        "data_ultimo_relatorio": ("Último Rel.", "Último Relatório"),
         "prazo_final": ("Prazo", "Prazo Final"),
         "servicos_exigidos": ("Servicos a realizar", "Servicos"),
         "area_m2": ("Tamanho", "Area", "Area m2"),
@@ -658,7 +658,7 @@ class TcraExcelService:
         if prazo_final is not None and prazo_final < self.today:
             return "Prazo vencido"
         if data_proximo_relatorio is not None and data_proximo_relatorio < self.today:
-            return "Relatorio pendente"
+            return "Relatório pendente"
         if acompanhamento.strip():
             return "Em acompanhamento"
         return ""
@@ -705,8 +705,8 @@ class TcraExcelService:
                 TcraEvento(
                     sequence=1,
                     data_evento=data_ultimo_relatorio,
-                    tipo_evento="Relatorio",
-                    descricao="Ultimo relatorio importado da planilha legada.",
+                    tipo_evento="Relatório",
+                    descricao="Último relatório importado da planilha legada.",
                     prazo_resultante=data_proximo_relatorio,
                     status_resultante=status,
                 )

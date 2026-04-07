@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from app.application.use_cases.tcra_module_operations import TcraModuleOperations
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
+from app.services.access_service import AccessEnvironment, AppAccessSession
 from app.services.tcra_excel_service import TCRA_SHEET_NAME
 from app.services.tcra_sqlite_service import TcraSqliteService
 
@@ -104,7 +105,81 @@ def build_legacy_tcra_workbook(path: Path) -> None:
     workbook.save(path)
 
 
-def make_operations(service: TcraSqliteService, audit_calls: list[dict] | None = None) -> TcraModuleOperations:
+class FakeRemoteTcraRpcService:
+    def __init__(self, *, save_uid: str = "remote-tcra-1"):
+        self.save_uid = save_uid
+        self.save_calls = []
+        self.delete_calls = []
+        self.save_records_calls = []
+
+    def save_record(self, client, **kwargs):
+        self.save_calls.append({"client": client, **kwargs})
+        return SimpleNamespace(uid=self.save_uid or getattr(kwargs["record"], "uid", ""), tcra_count=1)
+
+    def delete_record(self, client, **kwargs):
+        self.delete_calls.append({"client": client, **kwargs})
+        return SimpleNamespace(uid=kwargs["uid"], tcra_count=0)
+
+    def save_records(self, client, **kwargs):
+        self.save_records_calls.append({"client": client, **kwargs})
+        return SimpleNamespace(uid="", tcra_count=len(kwargs["records"]), imported_count=len(kwargs["records"]))
+
+
+class FakeRemoteTcraSyncService:
+    def __init__(self, *, synced_tcras=None, fail: bool = False):
+        self.synced_tcras = list(synced_tcras or [])
+        self.fail = fail
+        self.calls = []
+
+    def sync_authenticated_client(self, client, *, local_db_path=None, session_path=None):
+        self.calls.append({"client": client, "local_db_path": str(local_db_path or ""), "session_path": session_path})
+        if self.fail:
+            raise RuntimeError("remote tcra cache offline")
+        TcraSqliteService(db_path=local_db_path).replace_all(self.synced_tcras)
+        return SimpleNamespace(
+            local_db_path=str(local_db_path or ""),
+            session_path=session_path,
+            tcra_count=len(self.synced_tcras),
+        )
+
+
+class FakeAccessService:
+    def __init__(self, *, client=None, sync_service=None):
+        self.client = client or object()
+        self.production_sync_service = sync_service
+        self.calls = []
+
+    def create_authenticated_client(self, access_session):
+        self.calls.append(access_session)
+        return self.client
+
+
+def make_production_session(**overrides) -> AppAccessSession:
+    base = {
+        "environment": AccessEnvironment.PRODUCTION,
+        "label": "Producao",
+        "auth_mode": "password",
+        "user_id": "user-123",
+        "user_email": "analista@prefeitura.sp.gov.br",
+        "supabase_url": "https://yonvcnnkewzoqwnnmcdx.supabase.co",
+        "local_db_path": "C:/tmp/producao.db",
+        "local_session_path": "session://banco-local",
+        "app_role": "editor",
+        "access_token": "token",
+        "refresh_token": "refresh-token",
+    }
+    base.update(overrides)
+    return AppAccessSession(**base)
+
+
+def make_operations(
+    service: TcraSqliteService,
+    audit_calls: list[dict] | None = None,
+    *,
+    access_session=None,
+    access_service=None,
+    remote_tcra_service=None,
+) -> TcraModuleOperations:
     audit_calls = audit_calls if audit_calls is not None else []
     audit_service = SimpleNamespace(append_session_event=lambda **kwargs: audit_calls.append(kwargs))
     return TcraModuleOperations(
@@ -112,6 +187,9 @@ def make_operations(service: TcraSqliteService, audit_calls: list[dict] | None =
         today=date(2026, 4, 3),
         audit_service_provider=lambda: audit_service,
         session_path_provider=lambda: "session://banco-local",
+        access_session_provider=lambda: access_session,
+        access_service=access_service,
+        remote_tcra_service=remote_tcra_service,
     )
 
 
@@ -172,7 +250,7 @@ def test_tcra_module_operations_returns_duplicate_and_invalid_results(tmp_path):
         )
     )
     assert invalid_result.status == "invalid"
-    assert "Proximo relatorio nao pode ser anterior ao ultimo relatorio." in invalid_result.consistency_issues
+    assert "Próximo relatório não pode ser anterior ao último relatório." in invalid_result.consistency_issues
 
 
 def test_tcra_module_operations_applies_bulk_event_action(tmp_path):
@@ -238,3 +316,139 @@ def test_tcra_module_operations_imports_and_exports_reports(tmp_path):
     assert workbook.sheetnames == ["Resumo", "TCRAs"]
     assert pdf_path.exists() is True
     assert pdf_path.stat().st_size > 0
+
+
+def test_tcra_module_operations_uses_remote_save_in_production(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    remote_record = make_tcra(uid="remote-tcra-1", numero_tcra="TCRA-REMOTE")
+    remote_sync = FakeRemoteTcraSyncService(synced_tcras=[remote_record])
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteTcraRpcService(save_uid="remote-tcra-1")
+    audit_calls: list[dict] = []
+    operations = make_operations(
+        service,
+        audit_calls,
+        access_session=make_production_session(),
+        access_service=access_service,
+        remote_tcra_service=remote_rpc,
+    )
+
+    result = operations.save_record(make_tcra(uid="", numero_tcra="TCRA-REMOTE"))
+
+    assert result.status == "saved"
+    assert result.authority_source == "remote"
+    assert result.saved_uid == "remote-tcra-1"
+    assert result.sync_issues == ()
+    assert len(remote_rpc.save_calls) == 1
+    assert remote_rpc.save_calls[0]["action"] == "TCRA_CREATE"
+    assert len(remote_sync.calls) == 1
+    assert service.get_tcra("remote-tcra-1") is not None
+    assert audit_calls == []
+
+
+def test_tcra_module_operations_refreshes_remote_snapshot_on_demand_in_production(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="stale-tcra", numero_tcra="TCRA-STALE")])
+    remote_record = make_tcra(uid="remote-tcra", numero_tcra="TCRA-REMOTE")
+    remote_sync = FakeRemoteTcraSyncService(synced_tcras=[remote_record])
+    access_service = FakeAccessService(sync_service=remote_sync)
+    operations = make_operations(
+        service,
+        access_session=make_production_session(),
+        access_service=access_service,
+        remote_tcra_service=FakeRemoteTcraRpcService(),
+    )
+
+    result = operations.load_records(refresh_remote=True)
+
+    assert len(remote_sync.calls) == 1
+    assert remote_sync.calls[0]["session_path"] == "session://banco-local"
+    assert [record.uid for record in result.records] == ["remote-tcra"]
+    assert result.sync_issues == ()
+
+
+def test_tcra_module_operations_keeps_local_cache_when_remote_refresh_fails(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="cached-tcra", numero_tcra="TCRA-CACHE")])
+    remote_sync = FakeRemoteTcraSyncService(synced_tcras=[make_tcra(uid="remote-tcra")], fail=True)
+    operations = make_operations(
+        service,
+        access_session=make_production_session(),
+        access_service=FakeAccessService(sync_service=remote_sync),
+        remote_tcra_service=FakeRemoteTcraRpcService(),
+    )
+
+    result = operations.load_records(refresh_remote=True)
+
+    assert len(remote_sync.calls) == 1
+    assert [record.uid for record in result.records] == ["cached-tcra"]
+    assert "snapshot remoto de TCRA" in " | ".join(result.sync_issues)
+
+
+def test_tcra_module_operations_does_not_refresh_remote_snapshot_in_local_mode(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="local-tcra", numero_tcra="TCRA-LOCAL")])
+    remote_sync = FakeRemoteTcraSyncService(synced_tcras=[make_tcra(uid="remote-tcra")])
+    operations = make_operations(
+        service,
+        access_service=FakeAccessService(sync_service=remote_sync),
+        remote_tcra_service=FakeRemoteTcraRpcService(),
+    )
+
+    result = operations.load_records(refresh_remote=True)
+
+    assert remote_sync.calls == []
+    assert [record.uid for record in result.records] == ["local-tcra"]
+
+
+def test_tcra_module_operations_remote_save_falls_back_to_local_cache_when_refresh_fails(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    remote_sync = FakeRemoteTcraSyncService(fail=True)
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteTcraRpcService(save_uid="remote-tcra-1")
+    operations = make_operations(
+        service,
+        access_session=make_production_session(),
+        access_service=access_service,
+        remote_tcra_service=remote_rpc,
+    )
+
+    result = operations.save_record(make_tcra(uid="", numero_tcra="TCRA-FALLBACK"))
+
+    assert result.authority_source == "remote"
+    assert "cache local de TCRA" in " | ".join(result.sync_issues)
+    assert service.get_tcra("remote-tcra-1") is not None
+
+
+def test_tcra_module_operations_uses_remote_bulk_and_import_in_production(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    existing = make_tcra(uid="tcra-1", numero_tcra="TCRA-1", numero_processo="26207/2019")
+    service.replace_all([existing])
+    remote_sync = FakeRemoteTcraSyncService(synced_tcras=[make_tcra(uid="tcra-1", status="Cumprido")])
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteTcraRpcService(save_uid="tcra-1")
+    operations = make_operations(
+        service,
+        access_session=make_production_session(),
+        access_service=access_service,
+        remote_tcra_service=remote_rpc,
+    )
+
+    bulk_result = operations.apply_bulk_action(
+        service.list_tcras(),
+        {"action": "status", "status": "Cumprido"},
+        parse_date=lambda _text, _label: None,
+        event_presets=(),
+    )
+
+    workbook_path = tmp_path / "tcras.xlsx"
+    build_legacy_tcra_workbook(workbook_path)
+    analysis = operations.analyze_import_workbook(workbook_path)
+    import_result = operations.execute_import_merge(analysis)
+
+    assert bulk_result.authority_source == "remote"
+    assert bulk_result.updated_uids == ("tcra-1",)
+    assert import_result.authority_source == "remote"
+    assert len(remote_rpc.save_records_calls) == 2
+    assert remote_rpc.save_records_calls[0]["action"] == "TCRA_BULK_UPDATE"
+    assert remote_rpc.save_records_calls[1]["action"] == "TCRA_IMPORT"

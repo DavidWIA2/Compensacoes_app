@@ -33,6 +33,7 @@ from app.application.use_cases.local_write_authority import (
 from app.application.use_cases.authoritative_persistence_support import (
     AuthoritativeMonitoringSnapshot,
     AuthoritativeWorkbookLoadResult,
+    RemoteSnapshotRefreshResult,
     SessionAvailability,
     WorkbookServiceStateSnapshot,
     bind_workbook_runtime_path,
@@ -388,6 +389,68 @@ class AuthoritativePersistenceUseCases:
     def _create_remote_compensacoes_client(self):
         return self.access_service.create_authenticated_client(self._current_access_session())
 
+    def _can_use_remote_snapshot_refresh(self, session_path: str) -> bool:
+        access_session = self._current_access_session()
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            return False
+
+        normalized_path = str(session_path or "").strip()
+        expected_session_path = str(getattr(access_session, "local_session_path", "") or "").strip()
+        if expected_session_path and normalized_path != expected_session_path:
+            return False
+
+        return bool(
+            normalized_path
+            and str(getattr(access_session, "access_token", "") or "").strip()
+            and str(getattr(access_session, "refresh_token", "") or "").strip()
+        )
+
+    def refresh_remote_snapshot_if_production(self, session_path: str | None = None) -> RemoteSnapshotRefreshResult:
+        access_session = self._current_access_session()
+        expected_session_path = str(getattr(access_session, "local_session_path", "") or "").strip()
+        normalized_path = str(session_path or expected_session_path or self.current_session_path() or "").strip()
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            return RemoteSnapshotRefreshResult(status="skipped", session_path=normalized_path)
+        if not self._can_use_remote_snapshot_refresh(normalized_path):
+            return RemoteSnapshotRefreshResult(status="skipped", session_path=normalized_path)
+
+        sync_service = getattr(self.access_service, "production_sync_service", None)
+        if sync_service is None:
+            issue = "Servico de sincronizacao da producao indisponivel para leitura remote-first."
+            logger.warning(issue)
+            return RemoteSnapshotRefreshResult(
+                status="unavailable",
+                session_path=normalized_path,
+                issues=(issue,),
+            )
+
+        try:
+            client = self._create_remote_compensacoes_client()
+            sync_result = sync_service.sync_authenticated_client(
+                client,
+                local_db_path=getattr(self.persistence_service, "db_path", None)
+                or str(getattr(access_session, "local_db_path", "") or "").strip()
+                or None,
+                session_path=normalized_path,
+            )
+        except Exception as exc:
+            issue = f"Falha ao sincronizar snapshot remoto antes da leitura: {exc}"
+            logger.warning(issue, exc_info=True)
+            return RemoteSnapshotRefreshResult(
+                status="failed",
+                session_path=normalized_path,
+                issues=(issue,),
+            )
+
+        refreshed_session_path = str(getattr(sync_result, "session_path", "") or normalized_path).strip()
+        return RemoteSnapshotRefreshResult(
+            status="refreshed",
+            session_path=refreshed_session_path,
+            local_db_path=str(getattr(sync_result, "local_db_path", "") or "").strip(),
+            record_count=int(getattr(sync_result, "record_count", 0) or 0),
+            tcra_count=int(getattr(sync_result, "tcra_count", 0) or 0),
+        )
+
     @staticmethod
     def _with_local_sync_issues(
         status: LocalMutationSyncStatus,
@@ -735,6 +798,8 @@ class AuthoritativePersistenceUseCases:
             raise ValueError("Informe o caminho da sessao para carregar os registros.")
 
         self._bind_workbook_runtime_path(normalized_path, clear_loaded_workbook=True)
+        remote_refresh = self.refresh_remote_snapshot_if_production(normalized_path)
+        remote_issues = remote_refresh.issues if remote_refresh.failed else ()
 
         sqlite_issues: tuple[str, ...] = ()
         try:
@@ -742,8 +807,13 @@ class AuthoritativePersistenceUseCases:
         except Exception as exc:
             sqlite_records = ()
             snapshot_status = None
-            sqlite_issues = (f"Falha ao carregar a sessao local no SQLite: {exc}",)
+            sqlite_issues = self._normalized_issues(
+                remote_issues,
+                (f"Falha ao carregar a sessao local no SQLite: {exc}",),
+            )
             logger.warning(sqlite_issues[0], exc_info=True)
+        else:
+            sqlite_issues = self._normalized_issues(remote_issues)
 
         sqlite_has_session = bool(sqlite_records or has_snapshot_data(snapshot_status))
 
@@ -1349,7 +1419,7 @@ class AuthoritativePersistenceUseCases:
         updated_count = len(updated_records)
         audit_issues = self._append_audit_event_safely(
             action="batch_geocode",
-            summary=f"Geocodificacao em lote aplicada a {updated_count} registro(s)",
+            summary=f"Geocodificação em lote aplicada a {updated_count} registro(s)",
             backup_path=backup_path,
             metadata=build_batch_geocode_audit_metadata(updated_records),
             after=build_batch_geocode_audit_after_payload(updated_records),

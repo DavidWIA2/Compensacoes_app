@@ -297,13 +297,13 @@ def test_tcra_operational_agenda_and_consistency_rules():
     assert isinstance(agenda[0], TcraAgendaItem)
     assert [item.uid for item in agenda] == ["tcra-1", "tcra-2", "tcra-3"]
     assert agenda[0].prioridade_label == "Prazo vencido"
-    assert "Relatorio nos proximos" in agenda[1].detalhe
+    assert "Relatório nos próximos" in agenda[1].detalhe
 
     issues = resolve_operational_issues(records[1], today=today)
-    assert issues == ("Relatorio nos proximos 30 dias", "Sem numero TCRA", "Sem responsavel")
+    assert issues == ("Relatório nos próximos 30 dias", "Sem número TCRA", "Sem responsável")
 
     consistency = resolve_record_consistency_issues(records[2], today=today)
-    assert consistency == ("TCRA cumprido/arquivado nao deve manter proximo relatorio em aberto.",)
+    assert consistency == ("TCRA cumprido/arquivado não deve manter próximo relatório em aberto.",)
 
 
 def test_tcra_work_agenda_scopes_and_issue_suggestions():
@@ -329,8 +329,8 @@ def test_tcra_work_agenda_scopes_and_issue_suggestions():
     assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_30D, today=today, limit=10)] == ["tcra-1", "tcra-2", "tcra-3"]
     assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_PENDENTES, today=today, limit=10)] == ["tcra-3"]
 
-    assert "numero oficial" in suggest_issue_fix("Sem numero TCRA").lower()
-    assert "sequencia cronologica" in suggest_issue_fix("Proximo relatorio nao pode ser anterior ao ultimo relatorio.").lower()
+    assert "número oficial" in suggest_issue_fix("Sem numero TCRA").lower()
+    assert "sequência cronológica" in suggest_issue_fix("Proximo relatorio nao pode ser anterior ao ultimo relatorio.").lower()
 
 
 def test_tcra_quality_queue_prioritizes_critical_and_cadastro_items():
@@ -363,6 +363,6 @@ def test_tcra_quality_queue_prioritizes_critical_and_cadastro_items():
     assert isinstance(queue[0], TcraQualityQueueItem)
     assert [item.uid for item in queue] == ["tcra-1", "tcra-2"]
     assert queue[0].severity_label == "Critico"
-    assert "proximo relatorio" in queue[0].detalhe.lower()
+    assert "próximo relatório" in queue[0].detalhe.lower()
     assert queue[1].severity_label == "Cadastro"
-    assert set(queue[1].issues) == {"Sem numero TCRA", "Sem responsavel", "Sem orgao"}
+    assert set(queue[1].issues) == {"Sem número TCRA", "Sem responsável", "Sem órgão"}

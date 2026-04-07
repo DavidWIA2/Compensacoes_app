@@ -37,9 +37,9 @@ logger = get_logger("UI.Form")
 
 
 class FormController:
-    _MISSING_PLANTIO_ERROR = "Preencha Endereco Plantio para salvar um registro compensado."
-    _LOCKED_COMPENSADO_ERROR = "Limpe Endereco Plantio antes de desmarcar Compensado."
-    _STALE_SELECTION_ERROR = "Nao foi possivel localizar o registro atual. Recarregue a planilha e tente novamente."
+    _MISSING_PLANTIO_ERROR = "Preencha Endereço Plantio para salvar um registro compensado."
+    _LOCKED_COMPENSADO_ERROR = "Limpe Endereço Plantio antes de desmarcar Compensado."
+    _STALE_SELECTION_ERROR = "Não foi possível localizar o registro atual. Recarregue a planilha e tente novamente."
     _DIRTY_GROUP_TITLE = "Cadastro / Edição *"
     _CLEAN_GROUP_TITLE = "Cadastro / Edição"
 

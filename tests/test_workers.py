@@ -88,4 +88,4 @@ def test_updater_worker_emits_failure_for_invalid_payload():
 
     worker.run()
 
-    assert failures == ["Resposta de atualizacao sem versao valida."]
+    assert failures == ["Resposta de atualização sem versão válida."]

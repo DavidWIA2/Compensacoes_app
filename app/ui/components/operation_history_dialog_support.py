@@ -13,7 +13,7 @@ from app.services.audit_service import AuditEvent
 
 
 BACKUP_FILTER_OPTIONS = ("Todos", "Com backup", "Sem backup")
-PERIOD_FILTER_OPTIONS = ("Todos", "Hoje", "Ultimos 7 dias", "Ultimos 30 dias", "Personalizado")
+PERIOD_FILTER_OPTIONS = ("Todos", "Hoje", "Últimos 7 dias", "Últimos 30 dias", "Personalizado")
 
 
 @dataclass(frozen=True)

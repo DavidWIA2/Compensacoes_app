@@ -8,6 +8,10 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.local_record_queries import LocalRecordReadResult
+from app.application.use_cases.authoritative_persistence_write_support import (
+    generate_unique_uid,
+    next_excel_row,
+)
 from app.application.use_cases.session_startup_use_cases import build_singleton_session_startup_plan
 from app.application.use_cases.authoritative_persistence_support import build_remote_snapshot_refresh_result
 from app.config import SEARCH_FILTER_DEBOUNCE_MS
@@ -257,11 +261,11 @@ class DataController:
 
     @staticmethod
     def _next_excel_row(records: List[Compensacao]) -> int:
-        return AuthoritativePersistenceUseCases._next_excel_row(records)
+        return next_excel_row(records)
 
     @staticmethod
     def _generate_unique_uid(used_uids: set[str]) -> str:
-        return AuthoritativePersistenceUseCases._generate_unique_uid(used_uids)
+        return generate_unique_uid(used_uids)
 
     def _assign_provisional_import_identities(
         self,

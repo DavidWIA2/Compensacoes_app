@@ -6,6 +6,10 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMessageBox
 
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
+from app.application.use_cases.authoritative_persistence_write_support import (
+    generate_unique_uid,
+    next_excel_row,
+)
 from app.models.compensacao import Compensacao
 from app.services.audit_service import serialize_record
 from app.services.error_service import friendly_error_message
@@ -427,11 +431,11 @@ class FormController:
 
     @staticmethod
     def _next_excel_row(records: Iterable[Compensacao]) -> int:
-        return AuthoritativePersistenceUseCases._next_excel_row(list(records))
+        return next_excel_row(list(records))
 
     @staticmethod
     def _generate_unique_uid(used_uids: set[str]) -> str:
-        return AuthoritativePersistenceUseCases._generate_unique_uid(used_uids)
+        return generate_unique_uid(used_uids)
 
     def _assign_provisional_add_identity(
         self,

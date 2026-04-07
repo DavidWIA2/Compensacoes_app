@@ -52,6 +52,17 @@ FONT_BOLD = Font(bold=True)
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
 
 
+def _resolve_report_logo_path() -> str:
+    candidate_paths = [
+        resource_path("assets", "icons", "pga_icon_clean_512.png"),
+        resource_path("assets", "Logo_512.png"),
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+    return candidate_paths[-1]
+
+
 def _selected_headers(selected_cols: List[str]) -> List[str]:
     return build_selected_headers(selected_cols)
 
@@ -65,7 +76,7 @@ def _build_individual_pdf_rows(record: Compensacao, observation: str = "") -> Li
 
 
 def _build_individual_pdf_header(styles):
-    logo_path = resource_path("assets", "Logo_512.png")
+    logo_path = _resolve_report_logo_path()
     logo = Spacer(1, 1)
     if os.path.exists(logo_path):
         logo = Image(logo_path, width=1.15 * inch, height=0.95 * inch)

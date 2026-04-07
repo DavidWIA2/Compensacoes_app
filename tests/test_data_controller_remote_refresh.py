@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from app.application.use_cases.local_record_queries import LocalRecordReadResult
 from app.services.access_service import AccessEnvironment, AppAccessSession
@@ -123,6 +123,7 @@ def test_data_controller_refreshes_remote_snapshot_in_production():
     assert persistence.refresh_calls == ["session://banco-local"]
     assert persistence.resolve_calls == [("session://banco-local", ("cached-record",))]
     assert applied == [(["remote-a", "remote-b"], False)]
+    assert getattr(window, "_remote_snapshot_refresh_status", None).refreshed is True
 
 
 def test_data_controller_skips_remote_refresh_outside_production():
@@ -135,6 +136,7 @@ def test_data_controller_skips_remote_refresh_outside_production():
 
     assert refreshed is False
     assert persistence.refresh_calls == []
+    assert getattr(window, "_remote_snapshot_refresh_status", None) is None
 
 
 def test_data_controller_reuses_loaded_singleton_and_forces_remote_refresh():
@@ -151,3 +153,28 @@ def test_data_controller_reuses_loaded_singleton_and_forces_remote_refresh():
 
     assert loaded is True
     assert calls == [True]
+
+
+def test_data_controller_manual_refresh_reports_pending_changes():
+    get_app()
+    persistence = FakePersistence()
+    window = FakeWindow(persistence=persistence, access_session=make_production_session())
+    window.form_controller = SimpleNamespace(has_pending_changes=lambda: True)
+    chrome = []
+    overview = []
+    window._refresh_window_chrome = lambda: chrome.append("chrome")
+    window.refresh_operations_overview = lambda: overview.append("overview")
+    controller = DataController(window)
+    original_information = QMessageBox.information
+    QMessageBox.information = lambda *args, **kwargs: QMessageBox.Ok
+
+    try:
+        refreshed = controller.refresh_production_snapshot()
+    finally:
+        QMessageBox.information = original_information
+
+    assert refreshed is False
+    assert "alterações pendentes" in window.statusBar().messages[-1].lower()
+    assert getattr(window, "_remote_snapshot_refresh_status", None).status == "deferred"
+    assert chrome == ["chrome"]
+    assert overview == ["overview"]

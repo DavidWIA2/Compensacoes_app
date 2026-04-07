@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app import __version__ as APP_VERSION
+from app.services.release_metadata import build_release_version_label, is_prerelease_version, release_channel_for_version
 
 
 def build_release_guide_filename(version: str = APP_VERSION, arch_suffix: str = "win64") -> str:
@@ -23,11 +24,14 @@ def build_release_guide(
     checksum_name = Path(hash_filename).name
     signature_mode_text = str(signature_mode or "").strip() or "nao informado"
     homepage = str(homepage_url or "").strip()
+    version_label = build_release_version_label(version)
+    release_channel = release_channel_for_version(version)
 
     lines = [
-        f"Compensacoes {version}",
+        f"Compensacoes {version_label}",
         "",
         "Guia rapido para distribuicao e validacao da release.",
+        f"Canal de distribuicao: {release_channel}.",
         "",
         "Arquivos esperados:",
         f"- Artefato principal: {artifact_name}",
@@ -40,6 +44,16 @@ def build_release_guide(
         "3. Confirme que o hash calculado bate com o arquivo .sha256 publicado.",
         "",
     ]
+
+    if is_prerelease_version(version):
+        lines.extend(
+            [
+                "Atencao:",
+                "- Esta distribuicao e uma versao beta/prerelease.",
+                "- Utilize para validacao controlada antes de distribuicao ampla.",
+                "",
+            ]
+        )
 
     if signed:
         lines.extend(

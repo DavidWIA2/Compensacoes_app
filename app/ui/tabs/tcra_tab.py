@@ -3,10 +3,9 @@ from __future__ import annotations
 from calendar import monthrange
 import os
 from datetime import date, datetime
-from typing import Optional
 
-from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import QItemSelectionModel, QRegularExpression, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIntValidator, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -38,7 +37,6 @@ from PySide6.QtWidgets import (
 from app.application.use_cases.tcra_module_operations import TcraModuleOperations
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
-from app.services.tcra_excel_service import TcraExcelService
 from app.services.tcra_records_service import (
     AGENDA_SCOPE_30D,
     AGENDA_SCOPE_7D,
@@ -71,6 +69,7 @@ from app.services.tcra_records_service import (
     tcra_is_mpsp_related,
 )
 from app.services.tcra_sqlite_service import TcraSqliteService
+from app.ui.components.date_input import DatePickerLineEdit
 from app.ui.components.dialogs import TCRA_EVENT_PRESETS, TcraBulkActionDialog, TcraEventoEditorDialog, TcraImportPreviewDialog
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
@@ -108,6 +107,15 @@ from app.utils.logger import get_logger
 
 logger = get_logger("UI.TCRA")
 
+SUPPORTED_AGENDA_SCOPES = (
+    AGENDA_SCOPE_HOJE,
+    AGENDA_SCOPE_7D,
+    AGENDA_SCOPE_30D,
+    AGENDA_SCOPE_VENCIDOS,
+    AGENDA_SCOPE_PENDENTES,
+)
+EXPORTED_AGENDA_SCOPE_TODOS = AGENDA_SCOPE_TODOS
+
 
 class TcraTab(QWidget):
     FORM_CLEAN_TEXT = "Sem alterações"
@@ -119,7 +127,38 @@ class TcraTab(QWidget):
     OVERVIEW_DETAIL_HEIGHT = 232
     OVERVIEW_PREVIEW_LIMIT = 3
     FORM_DRAFT_AUTOSAVE_MS = 700
-    AGENDA_SCOPE_LABELS = dict(WORKSPACE_AGENDA_SCOPE_LABELS)
+    AGENDA_SCOPE_LABELS = {
+        scope: WORKSPACE_AGENDA_SCOPE_LABELS[scope]
+        for scope in SUPPORTED_AGENDA_SCOPES
+    }
+
+    def _configure_line_edit(
+        self,
+        widget: QLineEdit,
+        *,
+        placeholder: str = "",
+        tooltip: str = "",
+        validator=None,
+    ) -> None:
+        widget.setClearButtonEnabled(True)
+        if placeholder:
+            widget.setPlaceholderText(placeholder)
+        if tooltip:
+            widget.setToolTip(tooltip)
+        if validator is not None:
+            widget.setValidator(validator)
+
+    def _configure_plain_text_edit(
+        self,
+        widget: QPlainTextEdit,
+        *,
+        placeholder: str = "",
+        tooltip: str = "",
+    ) -> None:
+        if placeholder:
+            widget.setPlaceholderText(placeholder)
+        if tooltip:
+            widget.setToolTip(tooltip)
 
     def __init__(self, parent=None, *, sqlite_service: TcraSqliteService | None = None, today: date | None = None):
         super().__init__(parent)
@@ -398,32 +437,46 @@ class TcraTab(QWidget):
         self.search_input = QLineEdit(self)
         self.search_input.setPlaceholderText("Buscar TCRA por processo, local, endereço, órgão ou observação...")
         self.search_input.setClearButtonEnabled(True)
+        self.search_input.setToolTip("Busca em processo, TCRA, local, endereço, órgão, responsável, observações e inquérito.")
 
         self.filter_status = QComboBox(self)
         self.filter_status.addItem(STATUS_TODOS)
+        self.filter_status.setToolTip("Filtra os termos pelo status operacional atual.")
         self.filter_orgao = CheckableComboBox("Todos os Órgãos")
+        self.filter_orgao.setToolTip("Refina a lista por órgão responsável pelo acompanhamento.")
         self.filter_bairro = CheckableComboBox("Todos os Bairros")
+        self.filter_bairro.setToolTip("Refina a lista pelos bairros cadastrados.")
         self.filter_year = QComboBox(self)
         self.filter_year.addItem(STATUS_TODOS)
+        self.filter_year.setToolTip("Mostra apenas TCRAs do ano selecionado.")
 
         self.chk_only_mpsp = QCheckBox("Somente MPSP")
+        self.chk_only_mpsp.setToolTip("Exibe somente termos relacionados ao Ministério Público.")
         self.chk_only_relatorio_pendente = QCheckBox("Relatório pendente")
+        self.chk_only_relatorio_pendente.setToolTip("Mantém na lista apenas termos com relatório pendente.")
         self.chk_only_prazo_vencido = QCheckBox("Prazo vencido")
+        self.chk_only_prazo_vencido.setToolTip("Mantém na lista apenas termos com prazo final vencido.")
 
         self.btn_clear_filters = QPushButton("Limpar Filtros")
         self.btn_clear_filters.setProperty("kind", "secondary")
+        self.btn_clear_filters.setToolTip("Remove busca, filtros avançados e atalhos de seleção.")
         self.btn_refresh = QPushButton("Atualizar")
         self.btn_refresh.setProperty("kind", "secondary")
+        self.btn_refresh.setToolTip("Recarrega os TCRAs e recompõe o radar operacional.")
         self.btn_export_excel = QPushButton("Excel")
         self.btn_export_excel.setProperty("kind", "secondary")
+        self.btn_export_excel.setToolTip("Exporta a base de TCRAs para uma planilha Excel.")
         self.btn_export_pdf = QPushButton("PDF")
         self.btn_export_pdf.setProperty("kind", "secondary")
+        self.btn_export_pdf.setToolTip("Gera um relatório PDF com o panorama operacional atual.")
         self.btn_import_legacy = QPushButton("Importar")
         self.btn_import_legacy.setProperty("kind", "secondary")
+        self.btn_import_legacy.setToolTip("Importa uma planilha legada para a base local do módulo TCRA.")
         self.btn_more_actions = QToolButton(self)
         self.btn_more_actions.setText("Mais acoes")
         self.btn_more_actions.setPopupMode(QToolButton.InstantPopup)
         self.btn_more_actions.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.btn_more_actions.setToolTip("Abre ações extras de atualização, exportação e importação.")
         self.more_actions_menu = QMenu(self.btn_more_actions)
         self.action_refresh = self.more_actions_menu.addAction("Atualizar TCRAs")
         self.action_select_alerts = self.more_actions_menu.addAction("Selecionar alertas")
@@ -458,6 +511,11 @@ class TcraTab(QWidget):
             self.quick_filter_group.addButton(button)
             self.quick_filter_buttons[mode] = button
             quick_filters_layout.addWidget(button)
+        self.quick_filter_buttons[QUICK_FILTER_ALL].setToolTip("Mostra todos os TCRAs sem filtrar por situação operacional.")
+        self.quick_filter_buttons[QUICK_FILTER_ALERTAS].setToolTip("Exibe rapidamente os termos com inconsistências ou pendências críticas.")
+        self.quick_filter_buttons[QUICK_FILTER_PROXIMOS].setToolTip("Mostra os termos com relatório próximo do vencimento.")
+        self.quick_filter_buttons[QUICK_FILTER_SEM_NUMERO].setToolTip("Lista apenas termos ainda sem número de TCRA preenchido.")
+        self.quick_filter_buttons[QUICK_FILTER_SEM_RESPONSAVEL].setToolTip("Lista os termos sem responsável definido.")
         self.quick_filter_buttons[QUICK_FILTER_ALL].setChecked(True)
         quick_filters_layout.addStretch(1)
         filters_layout.addLayout(quick_filters_layout, 0, 0, 1, 7)
@@ -470,6 +528,7 @@ class TcraTab(QWidget):
         self.btn_toggle_advanced_filters = QPushButton("Mais filtros")
         self.btn_toggle_advanced_filters.setProperty("kind", "secondary")
         self.btn_toggle_advanced_filters.setCheckable(True)
+        self.btn_toggle_advanced_filters.setToolTip("Expande filtros por órgão, bairro, ano e sinalizadores operacionais.")
         filters_layout.addWidget(self.btn_toggle_advanced_filters, 1, 6)
 
         self.advanced_filters_frame = QFrame(self)
@@ -495,14 +554,18 @@ class TcraTab(QWidget):
         self.btn_open_selected = QPushButton("Editar selecionado")
         self.btn_open_selected.setProperty("kind", "primary")
         self.btn_open_selected.setEnabled(False)
+        self.btn_open_selected.setToolTip("Abre o termo selecionado diretamente no cadastro.")
         self.btn_bulk_alerts = QPushButton("Selecionar alertas")
         self.btn_bulk_alerts.setProperty("kind", "secondary")
+        self.btn_bulk_alerts.setToolTip("Seleciona em lote os TCRAs marcados como alerta.")
         self.btn_clear_selection = QPushButton("Limpar Seleção")
         self.btn_clear_selection.setProperty("kind", "secondary")
         self.btn_clear_selection.setEnabled(False)
+        self.btn_clear_selection.setToolTip("Remove a seleção atual da tabela.")
         self.btn_bulk_action = QPushButton("Ações em lote")
         self.btn_bulk_action.setProperty("kind", "secondary")
         self.btn_bulk_action.setEnabled(False)
+        self.btn_bulk_action.setToolTip("Aplica uma ação em lote aos TCRAs selecionados.")
         primary_actions_layout.addWidget(self.lbl_selection_summary)
         primary_actions_layout.addWidget(self.btn_open_selected)
         primary_actions_layout.addWidget(self.btn_bulk_action)
@@ -517,6 +580,7 @@ class TcraTab(QWidget):
         secondary_actions_layout.setSpacing(int(8 * self.sf))
         self.btn_new_list = QPushButton("Novo TCRA")
         self.btn_new_list.setProperty("kind", "primary")
+        self.btn_new_list.setToolTip("Abre um cadastro em branco para um novo TCRA.")
         secondary_actions_layout.addWidget(self.btn_new_list)
         secondary_actions_layout.addWidget(self.btn_more_actions)
         secondary_actions_layout.addStretch(1)
@@ -562,16 +626,20 @@ class TcraTab(QWidget):
         editor_header.setSpacing(int(8 * self.sf))
         self.btn_back_to_list = QPushButton("Voltar para Lista")
         self.btn_back_to_list.setProperty("kind", "secondary")
+        self.btn_back_to_list.setToolTip("Volta para a lista sem sair do módulo TCRA.")
         self.lbl_editor_context = QLabel("Cadastro: novo termo")
         self.lbl_editor_context.setObjectName("FormStateLabel")
         self.lbl_form_state = QLabel(self.FORM_CLEAN_TEXT)
         self.lbl_form_state.setObjectName("FormStateLabel")
         self.btn_new = QPushButton("Novo TCRA")
         self.btn_new.setProperty("kind", "secondary")
+        self.btn_new.setToolTip("Limpa o formulário e inicia um novo cadastro.")
         self.btn_save = QPushButton("Salvar TCRA")
         self.btn_save.setProperty("kind", "primary")
+        self.btn_save.setToolTip("Salva o cadastro atual do termo.")
         self.btn_delete = QPushButton("Excluir TCRA")
         self.btn_delete.setProperty("kind", "danger")
+        self.btn_delete.setToolTip("Exclui o TCRA atual após confirmação.")
         editor_header.addWidget(self.lbl_editor_context)
         editor_header.addWidget(self.lbl_form_state)
         editor_header.addStretch(1)
@@ -595,12 +663,16 @@ class TcraTab(QWidget):
         form_nav_layout.addWidget(QLabel("Ir para:"))
         self.btn_section_identificacao = QPushButton("Identificação")
         self.btn_section_identificacao.setProperty("kind", "secondary")
+        self.btn_section_identificacao.setToolTip("Vai direto para os campos de processo, número, local e bairro.")
         self.btn_section_prazos = QPushButton("Prazos")
         self.btn_section_prazos.setProperty("kind", "secondary")
+        self.btn_section_prazos.setToolTip("Vai direto para status, datas e periodicidade.")
         self.btn_section_acompanhamento = QPushButton("Acompanhamento")
         self.btn_section_acompanhamento.setProperty("kind", "secondary")
+        self.btn_section_acompanhamento.setToolTip("Vai direto para órgão, responsável, área e número de mudas.")
         self.btn_section_observacoes = QPushButton("Observações")
         self.btn_section_observacoes.setProperty("kind", "secondary")
+        self.btn_section_observacoes.setToolTip("Vai direto para serviços exigidos e observações.")
         for button in [
             self.btn_section_identificacao,
             self.btn_section_prazos,
@@ -619,8 +691,10 @@ class TcraTab(QWidget):
         fix_actions_layout.setSpacing(int(6 * self.sf))
         self.btn_apply_fix = QPushButton("Aplicar ajuste seguro")
         self.btn_apply_fix.setProperty("kind", "secondary")
+        self.btn_apply_fix.setToolTip("Aplica automaticamente uma correção segura sugerida pela análise do formulário.")
         self.btn_focus_fix = QPushButton("Ir para o campo")
         self.btn_focus_fix.setProperty("kind", "secondary")
+        self.btn_focus_fix.setToolTip("Foca no campo relacionado ao problema apontado.")
         self.btn_apply_fix.setVisible(False)
         self.btn_focus_fix.setVisible(False)
         fix_actions_layout.addWidget(self.btn_apply_fix)
@@ -636,14 +710,14 @@ class TcraTab(QWidget):
         self.in_orgao = QLineEdit(self)
         self.in_status = QComboBox(self)
         self.in_status.setEditable(True)
-        self.in_data_assinatura = QLineEdit(self)
+        self.in_data_assinatura = DatePickerLineEdit(self)
         self.in_data_assinatura.setPlaceholderText("dd/mm/aaaa")
-        self.in_prazo_final = QLineEdit(self)
+        self.in_prazo_final = DatePickerLineEdit(self)
         self.in_prazo_final.setPlaceholderText("dd/mm/aaaa")
         self.in_periodicidade = QLineEdit(self)
-        self.in_data_ultimo_relatorio = QLineEdit(self)
+        self.in_data_ultimo_relatorio = DatePickerLineEdit(self)
         self.in_data_ultimo_relatorio.setPlaceholderText("dd/mm/aaaa")
-        self.in_data_proximo_relatorio = QLineEdit(self)
+        self.in_data_proximo_relatorio = DatePickerLineEdit(self)
         self.in_data_proximo_relatorio.setPlaceholderText("dd/mm/aaaa")
         self.in_area_m2 = QLineEdit(self)
         self.in_numero_mudas = QLineEdit(self)
@@ -656,6 +730,100 @@ class TcraTab(QWidget):
         self.in_observacoes = QPlainTextEdit(self)
         self.in_observacoes.setTabChangesFocus(True)
         self.in_observacoes.setMinimumHeight(int(58 * self.sf))
+        area_validator = QRegularExpressionValidator(QRegularExpression(r"^\d{0,7}([,.]\d{0,2})?$"), self.in_area_m2)
+        periodicidade_validator = QIntValidator(0, 1200, self.in_periodicidade)
+        numero_mudas_validator = QIntValidator(0, 9999999, self.in_numero_mudas)
+
+        self._configure_line_edit(
+            self.in_numero_processo,
+            placeholder="Ex.: 26207/2019",
+            tooltip="Número do processo administrativo ou judicial do termo.",
+        )
+        self._configure_line_edit(
+            self.in_numero_tcra,
+            placeholder="Ex.: TCRA-2026-001",
+            tooltip="Número formal do TCRA quando já estiver definido.",
+        )
+        self._configure_line_edit(
+            self.in_local,
+            placeholder="Ex.: Sistema de Lazer - Residencial Itamarati",
+            tooltip="Nome resumido do local ou empreendimento relacionado ao termo.",
+        )
+        self._configure_line_edit(
+            self.in_endereco,
+            placeholder="Ex.: Rua Ireneu Couto",
+            tooltip="Endereço principal associado ao TCRA.",
+        )
+        self._configure_line_edit(
+            self.in_bairro,
+            placeholder="Ex.: Residencial Itamarati",
+            tooltip="Bairro do endereço principal.",
+        )
+        self._configure_line_edit(
+            self.in_orgao,
+            placeholder="Ex.: CETESB",
+            tooltip="Órgão responsável pelo acompanhamento do termo.",
+        )
+        self.in_status.setToolTip("Situação operacional atual do TCRA. Você pode escolher ou digitar um status personalizado.")
+        self._configure_line_edit(
+            self.in_data_assinatura,
+            placeholder="dd/mm/aaaa",
+            tooltip="Data de assinatura do termo. Clique para abrir o calendário.",
+        )
+        self._configure_line_edit(
+            self.in_prazo_final,
+            placeholder="dd/mm/aaaa",
+            tooltip="Prazo final de cumprimento do termo. Clique para abrir o calendário.",
+        )
+        self._configure_line_edit(
+            self.in_periodicidade,
+            placeholder="Ex.: 6",
+            tooltip="Periodicidade dos relatórios em meses.",
+            validator=periodicidade_validator,
+        )
+        self._configure_line_edit(
+            self.in_data_ultimo_relatorio,
+            placeholder="dd/mm/aaaa",
+            tooltip="Data do último relatório protocolado. Clique para abrir o calendário.",
+        )
+        self._configure_line_edit(
+            self.in_data_proximo_relatorio,
+            placeholder="dd/mm/aaaa",
+            tooltip="Próxima data prevista para relatório. Clique para abrir o calendário.",
+        )
+        self._configure_line_edit(
+            self.in_area_m2,
+            placeholder="Ex.: 2920,00",
+            tooltip="Área total em metros quadrados.",
+            validator=area_validator,
+        )
+        self._configure_line_edit(
+            self.in_numero_mudas,
+            placeholder="Ex.: 486",
+            tooltip="Quantidade prevista de mudas do termo.",
+            validator=numero_mudas_validator,
+        )
+        self._configure_line_edit(
+            self.in_responsavel,
+            placeholder="Ex.: Secretaria Municipal",
+            tooltip="Responsável atual pela execução ou acompanhamento.",
+        )
+        self.chk_mpsp.setToolTip("Marque quando o termo estiver relacionado ao Ministério Público.")
+        self._configure_line_edit(
+            self.in_inquerito,
+            placeholder="Ex.: 14.0001.000123/2024-1",
+            tooltip="Número do inquérito civil, quando houver.",
+        )
+        self._configure_plain_text_edit(
+            self.in_servicos,
+            placeholder="Descreva aqui os serviços, tratos culturais e obrigações exigidas.",
+            tooltip="Lista de serviços exigidos pelo termo.",
+        )
+        self._configure_plain_text_edit(
+            self.in_observacoes,
+            placeholder="Use este campo para anotações complementares, histórico ou contexto.",
+            tooltip="Observações livres sobre o termo.",
+        )
         self._form_field_widgets = {
             "numero_processo": self.in_numero_processo,
             "numero_tcra": self.in_numero_tcra,
@@ -752,10 +920,13 @@ class TcraTab(QWidget):
         events_header.addStretch(1)
         self.btn_add_event = QPushButton("Adicionar Evento")
         self.btn_add_event.setProperty("kind", "secondary")
+        self.btn_add_event.setToolTip("Inclui um novo evento manual na linha do tempo do termo.")
         self.btn_edit_event = QPushButton("Editar Evento")
         self.btn_edit_event.setProperty("kind", "secondary")
+        self.btn_edit_event.setToolTip("Edita o evento atualmente selecionado.")
         self.btn_delete_event = QPushButton("Excluir Evento")
         self.btn_delete_event.setProperty("kind", "secondary")
+        self.btn_delete_event.setToolTip("Exclui o evento selecionado após confirmação.")
         events_header.addWidget(self.btn_add_event)
         events_header.addWidget(self.btn_edit_event)
         events_header.addWidget(self.btn_delete_event)
@@ -779,12 +950,16 @@ class TcraTab(QWidget):
         quick_event_layout.addWidget(QLabel("Atalhos de evento:"))
         self.btn_quick_report = QPushButton("Relatório")
         self.btn_quick_report.setProperty("kind", "secondary")
+        self.btn_quick_report.setToolTip("Atalho para registrar um relatório entregue.")
         self.btn_quick_vistoria = QPushButton("Vistoria")
         self.btn_quick_vistoria.setProperty("kind", "secondary")
+        self.btn_quick_vistoria.setToolTip("Atalho para registrar uma vistoria.")
         self.btn_quick_despacho = QPushButton("Despacho")
         self.btn_quick_despacho.setProperty("kind", "secondary")
+        self.btn_quick_despacho.setToolTip("Atalho para registrar um despacho.")
         self.btn_quick_done = QPushButton("Cumprimento")
         self.btn_quick_done.setProperty("kind", "secondary")
+        self.btn_quick_done.setToolTip("Atalho para registrar cumprimento e possível encerramento do termo.")
         for button in [
             self.btn_quick_report,
             self.btn_quick_vistoria,

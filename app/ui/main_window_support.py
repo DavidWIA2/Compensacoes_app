@@ -64,10 +64,14 @@ def apply_window_scaling(window, app: QApplication | None = None) -> float:
     return scale_factor
 
 
-def apply_window_icon(window, icon_path: str) -> str:
-    if icon_path and os.path.exists(icon_path):
-        window.setWindowIcon(QIcon(icon_path))
-    return icon_path
+def apply_window_icon(window, icon_source: str | QIcon) -> str | QIcon:
+    if isinstance(icon_source, QIcon):
+        if not icon_source.isNull():
+            window.setWindowIcon(icon_source)
+        return icon_source
+    if icon_source and os.path.exists(icon_source):
+        window.setWindowIcon(QIcon(icon_source))
+    return icon_source
 
 
 def configure_window_class_registry(

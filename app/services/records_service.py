@@ -28,6 +28,10 @@ def normalize_tipo_key(value: object) -> str:
     return remove_accents(str(value or "").strip()).upper()
 
 
+def normalize_microbacia_key(value: object) -> str:
+    return remove_accents(str(value or "").strip()).upper()
+
+
 def display_tipo_value(value: object) -> str:
     normalized = normalize_tipo_key(value)
     if normalized in {"", "NULO"}:
@@ -171,7 +175,7 @@ def filter_records(
     # Normaliza o texto de busca: remove acentos e deixa em minúsculo
     search_query = remove_accents(text or "").lower()
     
-    selected_micros_set = {m.strip().upper() for m in (selected_micros or [])}
+    selected_micros_set = {normalize_microbacia_key(m) for m in (selected_micros or [])}
     selected_ele_set = {normalize_tipo_key(e) for e in (selected_eletronicos or [])}
 
     filtered = []
@@ -197,7 +201,7 @@ def filter_records(
 
         # Só filtra se "Todos" não estiver marcado
         if not micro_all_selected:
-            row_micro = (r.microbacia or "").strip().upper()
+            row_micro = normalize_microbacia_key(r.microbacia)
             if row_micro not in selected_micros_set:
                 continue
 

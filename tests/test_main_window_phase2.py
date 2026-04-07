@@ -132,10 +132,11 @@ def test_window_chrome_summarizes_loaded_session():
 
     window._refresh_window_chrome()
 
-    assert "Banco local" in window.windowTitle()
+    assert "Base local" in window.windowTitle()
     assert "(1/2)" in window.windowTitle()
-    assert window.session_file_label.text() == "Banco: Banco local"
+    assert window.session_file_label.text() == "Fonte: Banco local"
     assert window.session_records_label.text() == "Registros: 1 de 2"
+    assert window.session_sync_label.text() == "Sincronia: local"
     assert window.session_write_label.text() == "Escrita: aguardando"
     assert window.session_selection_label.text() == "Selecionado: AT-1"
     assert window.session_records_label.toolTip() == "Busca atual: PROC-1"
@@ -151,14 +152,14 @@ def test_window_chrome_marks_snapshot_only_sessions(monkeypatch):
         lambda _path: SimpleNamespace(
             path="session://banco-local",
             display_label="Banco local",
-            detail_message="Banco SQLite local disponível em Banco local.",
+            detail_message="Cache local sincronizado disponível em Banco local.",
         ),
     )
 
     window._refresh_window_chrome()
 
-    assert window.session_file_label.text() == "Banco: Banco local"
-    assert "Banco SQLite local" in window.session_file_label.toolTip()
+    assert window.session_file_label.text() == "Fonte: Banco local"
+    assert "Cache local sincronizado" in window.session_file_label.toolTip()
     window.close()
 
 
@@ -244,7 +245,7 @@ def test_dirty_form_refreshes_window_chrome(monkeypatch):
     window.data_tab.in_comp.setText("99")
 
     assert window.isWindowModified() is True
-    assert "Banco local" in window.windowTitle()
+    assert "Base local" in window.windowTitle()
     assert "(1/1)" in window.windowTitle()
     assert window.form_state_label.text() == "Alterações pendentes"
     assert window.session_selection_label.text() == "Selecionado: AT-9"
@@ -267,6 +268,7 @@ def test_window_chrome_shows_authoritative_write_status():
 
     window._refresh_window_chrome()
 
+    assert window.session_sync_label.text() == "Sincronia: local"
     assert window.session_write_label.text() == "Escrita: SQLite -> espelho"
     assert "Última mutação: import" in window.session_write_label.toolTip()
     assert "Identidade final reconciliada após gravação." in window.session_write_label.toolTip()

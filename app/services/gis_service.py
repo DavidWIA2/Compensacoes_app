@@ -170,6 +170,20 @@ class GisService:
 
         return self._known_names.get(self._lookup_key(nome_limpo))
 
+    def list_microbacias(self) -> list[str]:
+        if not hasattr(self, "_known_names"):
+            self._build_name_lookup_cache()
+        return sorted(
+            (str(nome).strip() for nome in self._known_names.values() if str(nome).strip()),
+            key=self._lookup_key,
+        )
+
+    def normalize_microbacia_name(self, nome: str) -> str:
+        nome_resolvido = self._resolve_name_field_value(nome)
+        if nome_resolvido:
+            return nome_resolvido
+        return (nome or "").strip()
+
     def get_microbacia_centroid(self, nome: str) -> tuple:
         nome_resolvido = self._resolve_name_field_value(nome)
         if not nome_resolvido:

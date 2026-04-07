@@ -102,5 +102,5 @@ def test_export_reporting_builds_dashboard_payload_with_persistence_summary():
     assert payload.chart_images == ("pie.png", "bar.png")
     assert any("Espelho local: 8 registro(s)" in line for line in payload.kpi_lines)
     assert any("Top microbacias no espelho: Gregorio: 5 | Medeiros: 3" in line for line in payload.kpi_lines)
-    assert any("Leitura operacional: espelho local (SQLite)" in line for line in payload.kpi_lines)
+    assert any("Leitura operacional: cache local sincronizado" in line for line in payload.kpi_lines)
     assert any("Última sincronização válida:" in line for line in payload.kpi_lines)

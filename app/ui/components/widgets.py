@@ -1,11 +1,18 @@
 from typing import List, Dict
-from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot, Signal, QTimer, QEvent
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot, Signal, QEvent
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QVBoxLayout, QLabel, QLineEdit, QCheckBox,
     QHBoxLayout, QPushButton, QDialog, QDialogButtonBox
 )
 from PySide6.QtWebEngineCore import QWebEnginePage
+
+from app.services.records_service import remove_accents
+
+
+def _selection_key(value: object) -> str:
+    return remove_accents(str(value or "").strip()).upper()
+
 
 class MapBridge(QObject):
     def __init__(self, on_clicked_callback, on_layer_changed_callback=None):
@@ -125,7 +132,13 @@ class CheckableComboBox(QComboBox):
         self._block = False
         self.selectionChanged.emit()
 
-    def set_checked_items(self, items: List[str], *, all_selected: bool = False):
+    def set_checked_items(
+        self,
+        items: List[str],
+        *,
+        all_selected: bool = False,
+        emit_selection_changed: bool = True,
+    ):
         m = self.model()
         if not m or m.rowCount() == 0: return
         self._block = True
@@ -134,14 +147,15 @@ class CheckableComboBox(QComboBox):
             for i in range(1, m.rowCount()):
                 m.item(i).setData(Qt.Unchecked, Qt.CheckStateRole)
         else:
-            selected = {str(item).strip().upper() for item in items if str(item).strip()}
+            selected = {_selection_key(item) for item in items if str(item).strip()}
             m.item(0).setData(Qt.Unchecked, Qt.CheckStateRole)
             for i in range(1, m.rowCount()):
-                st = Qt.Checked if m.item(i).text().strip().upper() in selected else Qt.Unchecked
+                st = Qt.Checked if _selection_key(m.item(i).text()) in selected else Qt.Unchecked
                 m.item(i).setData(st, Qt.CheckStateRole)
         self._refresh_ui()
         self._block = False
-        self.selectionChanged.emit()
+        if emit_selection_changed:
+            self.selectionChanged.emit()
 
     def _refresh_ui(self):
         checked = self.checked_items()

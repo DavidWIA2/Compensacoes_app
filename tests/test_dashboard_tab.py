@@ -76,10 +76,10 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     )
 
     text = tab.lbl_local_overview.text()
-    assert "Espelho local (SQLite): 12 registro(s)" in text
+    assert "Cache local sincronizado: 12 registro(s)" in text
     assert "Qualidade dos dados: 2 sem microbacia | 5 sem coordenadas" in text
     assert "Top microbacias: Gregorio: 7 | Medeiros: 5" in text
-    assert "espelho local (SQLite)" in tab.lbl_read_source.text()
+    assert "cache local sincronizado" in tab.lbl_read_source.text()
     assert "6 registro(s) no recorte" in tab.lbl_read_source.text()
 
     tab.close()

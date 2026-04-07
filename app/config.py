@@ -1,14 +1,13 @@
 import os
 
-from app import __version__ as APP_VERSION
 
-
-APP_NAME = "Compensações"
-APP_WINDOW_TITLE = "Compensações - Cadastro e Consulta"
+APP_NAME = "Plataforma de Gestão Ambiental"
+APP_WINDOW_TITLE = APP_NAME
+APP_BRAND_TAGLINE = "Gestão territorial e monitoramento ambiental"
 APP_SETTINGS_ORG = "CompensacoesApp"
 APP_SETTINGS_NAME = "CompensacoesDesktop"
 APP_COMPANY_NAME = "CompensacoesApp"
-APP_PRODUCT_DESCRIPTION = "Gestao de compensacoes ambientais"
+APP_PRODUCT_DESCRIPTION = "Gestão territorial e monitoramento ambiental"
 APP_EXECUTABLE_NAME = "Compensacoes.exe"
 APP_INSTALLER_ID = "CompensacoesApp.CompensacoesDesktop"
 APP_INSTALLER_BASENAME = "Compensacoes-Setup"

@@ -13,8 +13,9 @@ from PySide6.QtWidgets import QApplication
 import app.ui.tabs.tcra_tab as tcra_tab_module
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
-from app.services.tcra_excel_service import TCRA_SHEET_NAME
+from app.services.tcra_excel_service import TCRA_SHEET_NAME, TcraExcelService
 from app.services.tcra_sqlite_service import TcraSqliteService
+from app.ui.components.date_input import DatePickerLineEdit
 from app.ui.components.dialogs import TcraEventoEditorDialog, TcraImportPreviewDialog
 from app.ui.tabs.tcra_tab import TcraTab
 
@@ -190,7 +191,7 @@ def test_tcra_import_preview_dialog_filters_visible_issues(tmp_path):
     workbook.save(workbook_path)
 
     service = TcraSqliteService(db_path=tmp_path / "local.db")
-    analysis = tcra_tab_module.TcraExcelService(sqlite_service=service, today=date(2026, 4, 3)).analyze_workbook(workbook_path)
+    analysis = TcraExcelService(sqlite_service=service, today=date(2026, 4, 3)).analyze_workbook(workbook_path)
     dialog = TcraImportPreviewDialog(None, analysis)
 
     dialog.filter_severity.setCurrentText("warning")
@@ -227,6 +228,32 @@ def test_tcra_tab_new_tcra_switches_to_cadastro_workspace(tmp_path):
     get_app().processEvents()
 
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
+
+
+def test_tcra_tab_uses_calendar_date_inputs_in_form(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    assert isinstance(tab.in_data_assinatura, DatePickerLineEdit)
+    assert isinstance(tab.in_prazo_final, DatePickerLineEdit)
+    assert isinstance(tab.in_data_ultimo_relatorio, DatePickerLineEdit)
+    assert isinstance(tab.in_data_proximo_relatorio, DatePickerLineEdit)
+
+
+def test_tcra_tab_exposes_clearable_inputs_placeholders_and_tooltips(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    assert tab.search_input.isClearButtonEnabled() is True
+    assert tab.search_input.toolTip() != ""
+    assert tab.in_numero_processo.isClearButtonEnabled() is True
+    assert "26207/2019" in tab.in_numero_processo.placeholderText()
+    assert tab.in_periodicidade.validator() is not None
+    assert tab.in_area_m2.validator() is not None
+    assert tab.in_numero_mudas.validator() is not None
+    assert tab.btn_save.toolTip() != ""
+    assert tab.btn_quick_report.toolTip() != ""
+    assert tab.in_servicos.placeholderText() != ""
 
 
 def test_tcra_tab_summary_actions_navigate_to_operational_views(tmp_path):

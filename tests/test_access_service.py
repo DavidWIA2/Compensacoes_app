@@ -161,6 +161,7 @@ def test_sign_in_production_builds_remote_session_from_supabase_response():
         session_path=DEFAULT_SINGLETON_SESSION_PATH,
         workbook_name="Base oficial",
         workbook_path="session://banco-local",
+        synced_at="2026-04-07T12:00:00+00:00",
         record_count=329,
         plantio_count=4,
         audit_event_count=0,
@@ -217,6 +218,7 @@ def test_sign_in_production_accepts_only_corporate_local_part():
         session_path=DEFAULT_SINGLETON_SESSION_PATH,
         workbook_name="Base oficial",
         workbook_path="session://banco-local",
+        synced_at="2026-04-07T12:00:00+00:00",
         record_count=329,
         plantio_count=4,
         audit_event_count=0,
@@ -347,6 +349,7 @@ def test_sign_in_production_preserves_authorized_profile_role():
         session_path=DEFAULT_SINGLETON_SESSION_PATH,
         workbook_name="Base oficial",
         workbook_path="session://banco-local",
+        synced_at="2026-04-07T12:00:00+00:00",
         record_count=329,
         plantio_count=4,
         audit_event_count=0,
@@ -458,6 +461,56 @@ def test_create_authenticated_client_restores_session_tokens():
     )
 
     assert client is fake_client
+
+
+def test_refresh_production_cache_reuses_authenticated_session_tokens():
+    sync_result = SupabaseWorkspaceSyncResult(
+        local_db_path="C:/tmp/producao.db",
+        session_path=DEFAULT_SINGLETON_SESSION_PATH,
+        workbook_name="Base oficial",
+        workbook_path="session://banco-local",
+        synced_at="2026-04-07T12:00:00+00:00",
+        record_count=329,
+        plantio_count=4,
+        audit_event_count=0,
+        tcra_count=18,
+        tcra_event_count=17,
+    )
+    sync_calls = []
+    service = SupabaseAccessService(
+        production_sync_service=SimpleNamespace(
+            sync_authenticated_client=lambda client, **kwargs: (
+                sync_calls.append({"client": client, **kwargs}) or sync_result
+            )
+        )
+    )
+    restored = {}
+    fake_client = SimpleNamespace(
+        auth=SimpleNamespace(
+            set_session=lambda access_token, refresh_token: restored.update(
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                }
+            )
+        )
+    )
+    service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
+    access_session = service._build_remote_session(
+        service.production_profile,
+        SimpleNamespace(
+            user=SimpleNamespace(id="user-123", email="analista@prefeitura.sp.gov.br", is_anonymous=False),
+            session=SimpleNamespace(access_token="token", refresh_token="refresh-token"),
+        ),
+        auth_mode="password",
+    )
+
+    result = service.refresh_production_cache(access_session)
+
+    assert result is sync_result
+    assert restored == {"access_token": "token", "refresh_token": "refresh-token"}
+    assert len(sync_calls) == 1
+    assert sync_calls[0]["session_path"] == DEFAULT_SINGLETON_SESSION_PATH
     assert restored == {
         "access_token": "token",
         "refresh_token": "refresh-token",

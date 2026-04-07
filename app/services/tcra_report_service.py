@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Sequence
+from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -116,6 +117,82 @@ def _agenda_section_rows(records: Sequence[Tcra], *, scope: str, today: date | N
         )
         for item in build_work_agenda(records, scope=scope, today=today, limit=limit)
     )
+
+
+def _resolve_pdf_col_widths(total_width: float, weights: Sequence[float]) -> list[float]:
+    normalized = [max(float(weight), 0.0) for weight in weights]
+    total_weight = sum(normalized) or float(len(normalized) or 1)
+    return [total_width * (weight / total_weight) for weight in normalized]
+
+
+def _pdf_text(value: object, *, empty_placeholder: str = "--") -> str:
+    text = _stringify(value)
+    if not text:
+        text = empty_placeholder
+    return escape(text).replace("\n", "<br/>")
+
+
+def _pdf_row(
+    values: Sequence[object],
+    *,
+    style: ParagraphStyle,
+    centered_columns: set[int] | None = None,
+) -> list[Paragraph]:
+    centered_columns = centered_columns or set()
+    row: list[Paragraph] = []
+    for index, value in enumerate(values):
+        if index in centered_columns:
+            centered_style = ParagraphStyle(
+                f"{style.name}_center_{index}",
+                parent=style,
+                alignment=1,
+            )
+            row.append(Paragraph(_pdf_text(value), centered_style))
+        else:
+            row.append(Paragraph(_pdf_text(value), style))
+    return row
+
+
+def _build_pdf_table(
+    *,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[object]],
+    total_width: float,
+    column_weights: Sequence[float],
+    header_style: ParagraphStyle,
+    cell_style: ParagraphStyle,
+    header_background: colors.Color,
+    centered_columns: Sequence[int] = (),
+) -> Table:
+    centered = set(centered_columns)
+    table_rows = [
+        [Paragraph(_pdf_text(header, empty_placeholder=""), header_style) for header in headers]
+    ]
+    table_rows.extend(
+        _pdf_row(row, style=cell_style, centered_columns=centered)
+        for row in rows
+    )
+    table = Table(
+        table_rows,
+        repeatRows=1,
+        colWidths=_resolve_pdf_col_widths(total_width, column_weights),
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), header_background),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
+            ]
+        )
+    )
+    return table
 
 
 def _append_labeled_section(
@@ -298,7 +375,7 @@ def export_tcra_excel_report(
     workbook.save(path)
 
 
-def export_tcra_pdf_report(
+def _export_tcra_pdf_report_legacy(
     path: str,
     records: Sequence[Tcra],
     *,
@@ -550,4 +627,169 @@ def export_tcra_pdf_report(
     )
     elements.append(Paragraph("<b>Recorte atual de TCRAs</b>", normal_style))
     elements.append(records_table)
+    document.build(elements)
+
+
+def export_tcra_pdf_report(
+    path: str,
+    records: Sequence[Tcra],
+    *,
+    filter_summary: str,
+    today: date | None = None,
+) -> None:
+    document = SimpleDocTemplate(
+        path,
+        pagesize=landscape(A4),
+        leftMargin=20,
+        rightMargin=20,
+        topMargin=20,
+        bottomMargin=18,
+    )
+    content_width = document.width
+    styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    title_style.fontSize = 14
+    normal_style = styles["Normal"]
+    normal_style.fontSize = 8
+    table_header_style = ParagraphStyle(
+        "TcraPdfHeaderResponsive",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        textColor=colors.whitesmoke,
+        alignment=1,
+        leading=8,
+    )
+    table_cell_style = ParagraphStyle(
+        "TcraPdfCellResponsive",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=9,
+        alignment=0,
+    )
+
+    elements = [
+        Paragraph("Relatório Operacional de TCRAs", title_style),
+        Spacer(1, 8),
+        Paragraph(f"<b>Filtros:</b> {_pdf_text(filter_summary, empty_placeholder='Nenhum')}", normal_style),
+        Spacer(1, 8),
+        _build_pdf_table(
+            headers=["Indicador", "Valor"],
+            rows=[[label, str(value)] for label, value in _build_summary_rows(records, today=today)],
+            total_width=min(content_width * 0.50, 360),
+            column_weights=[0.68, 0.32],
+            header_style=table_header_style,
+            cell_style=table_cell_style,
+            header_background=colors.HexColor("#1F4E78"),
+            centered_columns=[1],
+        ),
+        Spacer(1, 10),
+    ]
+
+    overview = build_record_overview(records, today=today)
+    if overview.upcoming_reports:
+        elements.extend(
+            [
+                Paragraph("<b>Próximos relatórios</b>", normal_style),
+                _build_pdf_table(
+                    headers=["Termo", "Data"],
+                    rows=[
+                        [
+                            _stringify(sample.numero_tcra or sample.numero_processo or sample.local),
+                            _format_date(sample.data_proximo_relatorio),
+                        ]
+                        for sample in overview.upcoming_reports
+                    ],
+                    total_width=min(content_width * 0.48, 360),
+                    column_weights=[0.72, 0.28],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#4F81BD"),
+                    centered_columns=[1],
+                ),
+                Spacer(1, 10),
+            ]
+        )
+
+    quality_queue = build_quality_queue(records, today=today, limit=6)
+    if quality_queue:
+        elements.extend(
+            [
+                Paragraph("<b>Qualidade cadastral</b>", normal_style),
+                _build_pdf_table(
+                    headers=["Severidade", "Termo", "Local", "Revisão", "Sugestão"],
+                    rows=[
+                        [
+                            item.severity_label,
+                            item.termo_label,
+                            item.local,
+                            item.detalhe,
+                            suggest_issue_fix(item.issues[0]) if item.issues else "",
+                        ]
+                        for item in quality_queue
+                    ],
+                    total_width=content_width,
+                    column_weights=[0.12, 0.14, 0.20, 0.27, 0.27],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#8B3D3D"),
+                ),
+                Spacer(1, 10),
+            ]
+        )
+
+    agenda_sections = [
+        ("<b>Pendências críticas</b>", AGENDA_SCOPE_VENCIDOS, colors.HexColor("#4F81BD")),
+        ("<b>Agenda de trabalho - 7 dias</b>", AGENDA_SCOPE_7D, colors.HexColor("#6C8EAD")),
+        ("<b>Agenda de trabalho - 30 dias</b>", AGENDA_SCOPE_30D, colors.HexColor("#4F81BD")),
+        ("<b>Inbox operacional</b>", AGENDA_SCOPE_PENDENTES, colors.HexColor("#3E6488")),
+    ]
+    for title, scope, header_color in agenda_sections:
+        rows = _agenda_section_rows(records, scope=scope, today=today, limit=6)
+        if not rows:
+            continue
+        elements.extend(
+            [
+                Paragraph(title, normal_style),
+                _build_pdf_table(
+                    headers=["Prioridade", "Termo", "Local", "Ação"],
+                    rows=[list(row) for row in rows],
+                    total_width=content_width,
+                    column_weights=[0.12, 0.15, 0.23, 0.50],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=header_color,
+                ),
+                Spacer(1, 10),
+            ]
+        )
+
+    record_rows = [
+        [
+            _stringify(record.numero_processo),
+            _stringify(record.numero_tcra),
+            _stringify(record.local),
+            resolve_operational_status(record, today=today),
+            _format_date(record.prazo_final),
+            _format_date(record.data_proximo_relatorio),
+            _stringify(record.orgao_acompanhamento),
+            _stringify(record.responsavel_execucao),
+        ]
+        for record in records
+    ]
+    elements.extend(
+        [
+            Paragraph("<b>Recorte atual de TCRAs</b>", normal_style),
+            _build_pdf_table(
+                headers=["Processo", "TCRA", "Local", "Status", "Prazo", "Próx. rel.", "Órgão", "Resp."],
+                rows=record_rows,
+                total_width=content_width,
+                column_weights=[0.14, 0.13, 0.26, 0.14, 0.10, 0.11, 0.12, 0.15],
+                header_style=table_header_style,
+                cell_style=table_cell_style,
+                header_background=colors.HexColor("#1F4E78"),
+                centered_columns=[4, 5],
+            ),
+        ]
+    )
     document.build(elements)

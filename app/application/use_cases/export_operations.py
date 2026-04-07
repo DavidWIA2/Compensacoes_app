@@ -135,12 +135,12 @@ class ExportReportingUseCases:
         if status.uses_sqlite:
             lines = [
                 (
-                    f"Leitura operacional: espelho local (SQLite) | "
+                    f"Leitura operacional: cache local sincronizado | "
                     f"{status.filtered_records} registro(s) no recorte atual"
                 )
             ]
             if status.strategy == "sqlite_query":
-                lines.append("Modo de leitura local: consulta indexada.")
+                lines.append("Modo de leitura: consulta indexada no cache.")
             if status.synced_at:
                 lines.append(
                     f"Última sincronização válida: {format_audit_timestamp(status.synced_at)}"

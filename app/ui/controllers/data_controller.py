@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.local_record_queries import LocalRecordReadResult
 from app.application.use_cases.session_startup_use_cases import build_singleton_session_startup_plan
+from app.application.use_cases.authoritative_persistence_support import build_remote_snapshot_refresh_result
 from app.config import SEARCH_FILTER_DEBOUNCE_MS
 from app.models.compensacao import Compensacao
 from app.services.access_service import AccessEnvironment
@@ -181,6 +182,9 @@ class DataController:
             if hasattr(workbook_result, "local_session_source_status"):
                 self.window.records = list(getattr(workbook_result, "records", ()))
                 self.window._local_session_source_status = getattr(workbook_result, "local_session_source_status", None)
+                self._store_remote_snapshot_refresh_status(
+                    getattr(workbook_result, "remote_refresh_status", None)
+                )
                 if getattr(workbook_result, "issues", ()):
                     logger.warning(
                         "Sessao carregada com observacoes apos carga inicial: %s",
@@ -275,6 +279,15 @@ class DataController:
 
     def _store_authoritative_write_status(self, status) -> None:
         self.persistence.store_authoritative_write_status(self.window, status)
+
+    def _store_remote_snapshot_refresh_status(self, status) -> None:
+        self.window._remote_snapshot_refresh_status = status
+
+    def _refresh_operational_surface(self) -> None:
+        if hasattr(self.window, "_refresh_window_chrome"):
+            self.window._refresh_window_chrome()
+        if hasattr(self.window, "refresh_operations_overview"):
+            self.window.refresh_operations_overview()
 
     def update_ui_after_load(self):
         self._apply_loaded_runtime_state(self.window.records, sync_snapshot=True)
@@ -401,6 +414,8 @@ class DataController:
             self.window.gis = GisService(self.window.MICROB_DIR, self.window.MICROB_NAME_FIELD)
             self.window.data_tab.set_map_notice("")
             self.window._load_microbacias_layer()
+            self.window._update_filters_from_records()
+            self.window._setup_dynamic_form_options_from_records()
             return True
         except Exception as exc:
             self.window.gis = None
@@ -637,9 +652,18 @@ class DataController:
             or getattr(access_session, "environment", None) != AccessEnvironment.PRODUCTION
             or not session_path
         ):
+            self._store_remote_snapshot_refresh_status(None)
             return False
 
         if self.window.form_controller.has_pending_changes():
+            self._store_remote_snapshot_refresh_status(
+                build_remote_snapshot_refresh_result(
+                    status="deferred",
+                    session_path=session_path,
+                    issues=("Sincronização pausada: existem alterações pendentes no formulário.",),
+                )
+            )
+            self._refresh_operational_surface()
             return False
 
         now = time.monotonic()
@@ -660,6 +684,7 @@ class DataController:
                 failure_message="Falha ao sincronizar a base oficial.",
             )
         )
+        self._store_remote_snapshot_refresh_status(refresh_result)
         self._last_remote_operational_refresh_monotonic = now
 
         if getattr(refresh_result, "refreshed", False):
@@ -683,7 +708,56 @@ class DataController:
             self.window.statusBar().showMessage(
                 " | ".join(str(issue) for issue in issues if str(issue).strip())
             )
+        self._refresh_operational_surface()
         return False
+
+    def refresh_production_snapshot(self) -> bool:
+        access_session = getattr(self.window, "access_session", None)
+        if getattr(access_session, "environment", None) != AccessEnvironment.PRODUCTION:
+            QMessageBox.information(
+                self.window,
+                "Sincronização",
+                "A sincronização manual da base oficial só está disponível no ambiente de produção.",
+            )
+            return False
+
+        if self.window.form_controller.has_pending_changes():
+            message = (
+                "Salve ou descarte as alterações pendentes antes de sincronizar a base oficial. "
+                "Isso evita sobrescrever o formulário com dados mais novos da produção."
+            )
+            self.window.statusBar().showMessage(message)
+            QMessageBox.information(self.window, "Sincronização pausada", message)
+            self._store_remote_snapshot_refresh_status(
+                build_remote_snapshot_refresh_result(
+                    status="deferred",
+                    session_path=self._current_session_path(),
+                    issues=(message,),
+                )
+            )
+            self._refresh_operational_surface()
+            return False
+
+        refreshed = self.refresh_production_snapshot_if_stale(force=True)
+        remote_status = getattr(self.window, "_remote_snapshot_refresh_status", None)
+        if refreshed:
+            synced_at = str(getattr(remote_status, "synced_at", "") or "").strip()
+            message = "Base oficial sincronizada com sucesso."
+            if synced_at:
+                message = f"{message} Última sincronização válida: {synced_at}."
+            self.window.statusBar().showMessage(message)
+        else:
+            issues = tuple(getattr(remote_status, "issues", ()) or ())
+            message = (
+                " | ".join(str(issue) for issue in issues if str(issue).strip())
+                if issues
+                else "A sincronização da base oficial não trouxe mudanças novas nesta tentativa."
+            )
+            self.window.statusBar().showMessage(message)
+            QMessageBox.information(self.window, "Sincronização", message)
+
+        self._refresh_operational_surface()
+        return refreshed
 
     def open_session(self):
         return self._load_singleton_database(confirm_discard=True, show_feedback=True)

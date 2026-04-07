@@ -2,8 +2,21 @@ import os
 import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QLibraryInfo, QTranslator
+from PySide6.QtGui import QIcon, QPixmap
 from app.utils.app_paths import resolve_resource_path
 from app.utils.logger import logger
+
+
+APP_ICON_SIZE_FILES = (
+    "pga_icon_clean_16.png",
+    "pga_icon_clean_32.png",
+    "pga_icon_clean_48.png",
+    "pga_icon_clean_64.png",
+    "pga_icon_clean_128.png",
+    "pga_icon_clean_256.png",
+    "pga_icon_clean_512.png",
+    "pga_icon_clean_1024.png",
+)
 
 def _ajustar_ambiente_pyinstaller():
     """Garante que no executável as DLLs e dados possam ser encontrados."""
@@ -20,6 +33,30 @@ def _ajustar_ambiente_pyinstaller():
 def resource_path(*partes: str) -> str:
     """Resolve caminhos em desenvolvimento e no executavel PyInstaller."""
     return resolve_resource_path(*partes)
+
+
+def resolve_app_icon_paths() -> list[str]:
+    candidates = [
+        resource_path("assets", "icons", filename)
+        for filename in APP_ICON_SIZE_FILES
+    ]
+    candidates.append(resource_path("assets", "app.ico"))
+    return [path for path in candidates if path and os.path.exists(path)]
+
+
+def build_app_icon() -> QIcon:
+    icon = QIcon()
+    for path in resolve_app_icon_paths():
+        lower_path = path.lower()
+        if lower_path.endswith(".ico"):
+            icon.addFile(path)
+            continue
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            continue
+        icon.addPixmap(pixmap)
+        icon.addFile(path)
+    return icon
 
 def _setup_i18n():
     """Configura a tradução global para Português nos diálogos do sistema."""

@@ -126,3 +126,14 @@ def test_admin_users_tab_resets_password(monkeypatch):
     tab._handle_reset_password()
 
     assert fake_service.reset_calls == [("editor-1", "senha-nova-segura")]
+
+
+def test_admin_users_tab_inputs_enable_clear_buttons_and_sorting():
+    _app()
+    tab = AdminUsersTab(_FakeWindow(), admin_service=_FakeAdminUsersService())
+
+    assert tab.email_input.isClearButtonEnabled() is True
+    assert tab.display_name_input.isClearButtonEnabled() is True
+    assert tab.password_input.isClearButtonEnabled() is True
+    assert tab.btn_create.toolTip() != ""
+    assert tab.btn_reset_password.toolTip() != ""

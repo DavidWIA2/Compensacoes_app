@@ -17,11 +17,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.persistence_monitoring import (
     PersistenceRecordOverviewReport,
     PersistenceStatusReport,
 )
-from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.runtime_monitoring import RuntimeJobOverviewReport
 from app.services.audit_service import (
     AuditEvent,
@@ -40,8 +40,10 @@ from app.ui.tabs.operations_tab_support import (
     build_persistence_status_text,
     build_read_source_text,
     build_record_overview_text,
+    build_remote_sync_text,
     build_runtime_overview_texts,
     build_session_source_text,
+    build_status_highlights_text,
     build_visible_counter_text,
     build_visible_summary_text,
 )
@@ -81,48 +83,78 @@ class OperationsTab(QWidget):
         self.lbl_summary.setObjectName("FormStateLabel")
         layout.addWidget(self.lbl_summary)
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(int(8 * self.sf))
+        self.lbl_highlights = QLabel("Panorama técnico: aguardando sessão.")
+        self.lbl_highlights.setWordWrap(True)
+        self.lbl_highlights.setObjectName("FormStateLabel")
+        self.btn_toggle_details = QPushButton("Ver Detalhes Técnicos")
+        self.btn_toggle_details.setProperty("kind", "secondary")
+        self.btn_toggle_details.setCheckable(True)
+        self.btn_toggle_details.clicked.connect(self._toggle_technical_details)
+        status_row.addWidget(self.lbl_highlights, 1)
+        status_row.addWidget(self.btn_toggle_details)
+        layout.addLayout(status_row)
+
+        self.technical_details_frame = QFrame(self)
+        technical_layout = QVBoxLayout(self.technical_details_frame)
+        technical_layout.setContentsMargins(0, 0, 0, 0)
+        technical_layout.setSpacing(int(6 * self.sf))
+
+        self.lbl_remote_sync = QLabel("Sincronia remota: aguardando sessão.")
+        self.lbl_remote_sync.setWordWrap(True)
+        self.lbl_remote_sync.setObjectName("FormStateLabel")
+        technical_layout.addWidget(self.lbl_remote_sync)
+
         self.lbl_persistence = QLabel("Espelho local (SQLite): aguardando sincronização.")
         self.lbl_persistence.setWordWrap(True)
         self.lbl_persistence.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_persistence)
+        technical_layout.addWidget(self.lbl_persistence)
 
         self.lbl_records_overview = QLabel(
             "Resumo local (SQLite): aguardando dados dos registros espelhados."
         )
         self.lbl_records_overview.setWordWrap(True)
         self.lbl_records_overview.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_records_overview)
+        technical_layout.addWidget(self.lbl_records_overview)
+
         self.lbl_session_source = QLabel("Sessão carregada: aguardando leitura inicial da sessão.")
         self.lbl_session_source.setWordWrap(True)
         self.lbl_session_source.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_session_source)
+        technical_layout.addWidget(self.lbl_session_source)
+
         self.lbl_authoritative_write = QLabel("Escrita autoritativa: aguardando mutações da sessão.")
         self.lbl_authoritative_write.setWordWrap(True)
         self.lbl_authoritative_write.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_authoritative_write)
+        technical_layout.addWidget(self.lbl_authoritative_write)
+
         self.lbl_mutation_sync = QLabel("Escrita local (SQLite): aguardando mutações da sessão.")
         self.lbl_mutation_sync.setWordWrap(True)
         self.lbl_mutation_sync.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_mutation_sync)
+        technical_layout.addWidget(self.lbl_mutation_sync)
+
         self.lbl_read_source = QLabel("Leitura operacional atual: aguardando aplicação dos filtros.")
         self.lbl_read_source.setWordWrap(True)
         self.lbl_read_source.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_read_source)
+        technical_layout.addWidget(self.lbl_read_source)
 
         self.lbl_runtime_summary = QLabel("Jobs da sessão: nenhuma operação executada ainda.")
         self.lbl_runtime_summary.setWordWrap(True)
         self.lbl_runtime_summary.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_runtime_summary)
+        technical_layout.addWidget(self.lbl_runtime_summary)
 
         self.lbl_runtime_active = QLabel("Jobs ativos: nenhum.")
         self.lbl_runtime_active.setWordWrap(True)
         self.lbl_runtime_active.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_runtime_active)
+        technical_layout.addWidget(self.lbl_runtime_active)
 
         self.lbl_runtime_recent = QLabel("Jobs recentes: nenhum.")
         self.lbl_runtime_recent.setWordWrap(True)
         self.lbl_runtime_recent.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_runtime_recent)
+        technical_layout.addWidget(self.lbl_runtime_recent)
+
+        layout.addWidget(self.technical_details_frame)
+        self._set_technical_details_visible(False)
 
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(int(8 * self.sf))
@@ -150,12 +182,14 @@ class OperationsTab(QWidget):
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(int(8 * self.sf))
         self.btn_refresh = QPushButton("Atualizar")
+        self.btn_sync_production = QPushButton("Sincronizar Produção")
         self.btn_history = QPushButton("Histórico Completo")
         self.btn_rollback = QPushButton("Máquina do Tempo")
         self.btn_open_backup = QPushButton("Abrir Backup")
         self.btn_cancel_runtime = QPushButton("Cancelar Operação Ativa")
         for button in [
             self.btn_refresh,
+            self.btn_sync_production,
             self.btn_history,
             self.btn_rollback,
             self.btn_open_backup,
@@ -204,8 +238,19 @@ class OperationsTab(QWidget):
         self.search_input.textChanged.connect(self._apply_filters)
         self.btn_clear_filters.clicked.connect(self._clear_filters)
         self.btn_open_backup.setEnabled(False)
+        self.btn_sync_production.setEnabled(False)
         self.btn_cancel_runtime.setEnabled(False)
         self.btn_cancel_runtime.clicked.connect(self.main_window.cancel_active_operation)
+
+    def _set_technical_details_visible(self, visible: bool) -> None:
+        self.technical_details_frame.setVisible(visible)
+        self.btn_toggle_details.setChecked(visible)
+        self.btn_toggle_details.setText(
+            "Ocultar Detalhes Técnicos" if visible else "Ver Detalhes Técnicos"
+        )
+
+    def _toggle_technical_details(self, checked: bool) -> None:
+        self._set_technical_details_visible(bool(checked))
 
     def apply_theme(self, theme: dict):
         for card in [self.card_total, self.card_today, self.card_backups, self.card_latest]:
@@ -221,6 +266,8 @@ class OperationsTab(QWidget):
         self.card_latest.update_value("--")
         self.lbl_context.setText(message)
         self.lbl_summary.setText("Sem dados operacionais no momento.")
+        self.lbl_highlights.setText("Panorama técnico: nenhuma sessão ativa.")
+        self.lbl_remote_sync.setText("Sincronia remota: nenhuma sessão ativa.")
         self.lbl_persistence.setText("Espelho local (SQLite): nenhuma sessão ativa.")
         self.lbl_records_overview.setText("Resumo local (SQLite): nenhuma sessão ativa.")
         self.lbl_session_source.setText("Sessão carregada: nenhuma sessão ativa.")
@@ -238,14 +285,17 @@ class OperationsTab(QWidget):
         self.table.setRowCount(0)
         self.details.clear()
         self.btn_open_backup.setEnabled(False)
+        self.btn_sync_production.setEnabled(False)
 
     def update_overview(
         self,
         workbook_path: str,
         events: Sequence[AuditEvent],
         overview: AuditOverview,
+        access_session: object | None = None,
         persistence_report: Optional[PersistenceStatusReport] = None,
         record_overview_report: Optional[PersistenceRecordOverviewReport] = None,
+        remote_sync_status: object | None = None,
         session_source_status: object | None = None,
         authoritative_write_status: object | None = None,
         mutation_sync_status: object | None = None,
@@ -256,12 +306,32 @@ class OperationsTab(QWidget):
         self.selected_event = None
         self._sync_action_filter()
         self.lbl_context.setText(build_context_text(workbook_path, overview))
+        self.lbl_summary.setText(build_visible_summary_text(overview))
+        self.lbl_highlights.setText(
+            build_status_highlights_text(
+                access_session=access_session,
+                remote_sync_status=remote_sync_status,
+                persistence_report=persistence_report,
+                session_source_status=session_source_status,
+                authoritative_write_status=authoritative_write_status,
+                record_read_status=record_read_status,
+            )
+        )
+        self.lbl_remote_sync.setText(
+            build_remote_sync_text(
+                remote_sync_status,
+                access_session=access_session,
+                persistence_report=persistence_report,
+            )
+        )
         self.lbl_persistence.setText(build_persistence_status_text(persistence_report))
         self.lbl_records_overview.setText(build_record_overview_text(record_overview_report))
         self.lbl_session_source.setText(build_session_source_text(session_source_status))
         self.lbl_authoritative_write.setText(build_authoritative_write_text(authoritative_write_status))
         self.lbl_mutation_sync.setText(build_mutation_sync_text(mutation_sync_status))
         self.lbl_read_source.setText(build_read_source_text(record_read_status))
+        is_production = str(getattr(access_session, "environment", "") or "").strip().lower() == "production"
+        self.btn_sync_production.setEnabled(bool(workbook_path) and is_production)
         self._apply_filters()
 
     def update_runtime_overview(self, report: RuntimeJobOverviewReport):

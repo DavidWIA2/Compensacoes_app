@@ -132,6 +132,7 @@ def reset_authoritative_runtime_state(window) -> None:
     window._local_filter_facets_status = None
     window._local_mutation_sync_status = None
     window._authoritative_write_status = None
+    window._remote_snapshot_refresh_status = None
     window._filtered_metrics = None
     window._persistence_status_report = None
 
@@ -145,6 +146,7 @@ def clear_loaded_data_view(window, empty_metrics: Dict[str, object]) -> None:
     window._local_filter_facets_status = None
     window._local_mutation_sync_status = None
     window._authoritative_write_status = None
+    window._remote_snapshot_refresh_status = None
     window._filtered_metrics = None
     window._persistence_status_report = None
 

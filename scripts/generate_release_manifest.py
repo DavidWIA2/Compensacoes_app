@@ -38,7 +38,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--notes", default="")
     parser.add_argument("--notes-file", default="")
     parser.add_argument("--published-at", default="")
-    parser.add_argument("--channel", default="stable")
+    parser.add_argument("--channel", default="")
     parser.add_argument("--signed", default="")
     parser.add_argument("--signature-mode", default="")
     return parser.parse_args()

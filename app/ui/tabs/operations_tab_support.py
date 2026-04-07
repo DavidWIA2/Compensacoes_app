@@ -21,6 +21,155 @@ class RuntimeOverviewTextPayload:
     cancel_enabled: bool
 
 
+def build_status_highlights_text(
+    *,
+    access_session: object | None = None,
+    remote_sync_status: object | None = None,
+    persistence_report: Optional[PersistenceStatusReport] = None,
+    session_source_status: object | None = None,
+    authoritative_write_status: object | None = None,
+    record_read_status: Optional[LocalRecordReadStatus] = None,
+) -> str:
+    chips: list[str] = []
+    environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+
+    if environment == "production":
+        remote_status = str(getattr(remote_sync_status, "status", "") or "").strip()
+        if remote_status == "refreshed":
+            chips.append("Sincronia: Supabase ok")
+        elif remote_status in {"failed", "unavailable"}:
+            chips.append("Sincronia: offline")
+        elif remote_status == "deferred":
+            chips.append("Sincronia: pausada")
+        elif persistence_report is not None and str(getattr(persistence_report, "synced_at", "") or "").strip():
+            chips.append("Sincronia: cache válido")
+        else:
+            chips.append("Sincronia: aguardando")
+
+    if persistence_report is not None:
+        persistence_status = str(getattr(persistence_report, "status", "") or "").strip()
+        persistence_map = {
+            "sincronizado": "Cache: sincronizado",
+            "atencao": "Cache: em atenção",
+            "ausente": "Cache: não sincronizado",
+            "indisponivel": "Cache: indisponível",
+        }
+        chips.append(persistence_map.get(persistence_status, f"Cache: {persistence_status or 'aguardando'}"))
+
+    if session_source_status is not None:
+        source = str(getattr(session_source_status, "source", "") or "").strip()
+        strategy = str(getattr(session_source_status, "strategy", "") or "").strip()
+        if source == "sqlite":
+            if strategy == "sqlite_snapshot":
+                chips.append("Sessão: snapshot local")
+            else:
+                chips.append("Sessão: cache local")
+        elif source:
+            chips.append("Sessão: memória")
+
+    if record_read_status is not None:
+        chips.append("Leitura: cache local" if record_read_status.uses_sqlite else "Leitura: memória")
+
+    if authoritative_write_status is not None:
+        write_status = str(getattr(authoritative_write_status, "status", "") or "").strip()
+        write_map = {
+            "remote_authoritative": "Escrita oficial: Supabase",
+            "sqlite_primary": "Escrita oficial: SQLite",
+            "sqlite_authoritative": "Escrita oficial: SQLite",
+            "session_authoritative": "Escrita oficial: memória",
+            "session_fallback": "Escrita: fallback local",
+            "rolled_back_after_excel_failure": "Escrita: rollback",
+            "excel_failure": "Escrita: atenção",
+        }
+        chips.append(write_map.get(write_status, "Escrita: aguardando"))
+
+    issues: list[str] = []
+    if remote_sync_status is not None:
+        issues.extend(str(item) for item in getattr(remote_sync_status, "issues", ()) or ())
+    if persistence_report is not None:
+        issues.extend(str(item) for item in getattr(persistence_report, "issues", ()) or ())
+    if authoritative_write_status is not None:
+        issues.extend(str(item) for item in getattr(authoritative_write_status, "issues", ()) or ())
+    if record_read_status is not None:
+        issues.extend(str(item) for item in getattr(record_read_status, "issues", ()) or ())
+    if issues:
+        chips.append("Atenção: ver detalhes")
+
+    if not chips:
+        return "Panorama técnico: aguardando sessão."
+    return "Panorama técnico: " + " | ".join(chips)
+
+
+def build_remote_sync_text(
+    remote_status: object | None,
+    *,
+    access_session: object | None = None,
+    persistence_report: Optional[PersistenceStatusReport] = None,
+) -> str:
+    environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+    if environment != "production":
+        if environment == "demo":
+            return "Sincronia remota: não se aplica no ambiente de demonstração."
+        return "Sincronia remota: não se aplica fora da produção."
+
+    if remote_status is None:
+        last_synced_at = str(getattr(persistence_report, "synced_at", "") or "").strip()
+        if last_synced_at:
+            return (
+                "Sincronia remota: usando cache local sincronizado da produção.\n"
+                f"Última sincronização válida no cache: {format_audit_timestamp(last_synced_at)}"
+            )
+        return "Sincronia remota: aguardando a primeira checagem com o Supabase nesta sessão."
+
+    status = str(getattr(remote_status, "status", "") or "").strip()
+    synced_at = str(getattr(remote_status, "synced_at", "") or "").strip()
+    checked_at = str(getattr(remote_status, "checked_at", "") or "").strip()
+    workbook_name = str(getattr(remote_status, "workbook_name", "") or "").strip() or "Base oficial"
+    record_count = int(getattr(remote_status, "record_count", 0) or 0)
+    tcra_count = int(getattr(remote_status, "tcra_count", 0) or 0)
+    issues = tuple(str(item) for item in getattr(remote_status, "issues", ()) or () if str(item).strip())
+
+    if status == "refreshed":
+        lines = [
+            f"Sincronia remota: Supabase confirmado para {workbook_name}.",
+            f"Cache local atualizado com {record_count} compensação(ões) e {tcra_count} TCRA(s).",
+        ]
+        if synced_at:
+            lines.append(f"Última sincronização válida: {format_audit_timestamp(synced_at)}")
+        if checked_at:
+            lines.append(f"Última checagem remota: {format_audit_timestamp(checked_at)}")
+        return "\n".join(lines)
+
+    if status == "deferred":
+        lines = ["Sincronia remota: pausada temporariamente para proteger alterações pendentes no formulário."]
+        if issues:
+            lines.append("Motivo: " + " | ".join(issues))
+        return "\n".join(lines)
+
+    if status in {"failed", "unavailable"}:
+        lines = ["Sincronia remota: falha na última tentativa com o Supabase; o app segue usando o cache local."]
+        if checked_at:
+            lines.append(f"Última checagem remota: {format_audit_timestamp(checked_at)}")
+        if synced_at:
+            lines.append(f"Última sincronização válida no cache: {format_audit_timestamp(synced_at)}")
+        elif persistence_report is not None and str(getattr(persistence_report, "synced_at", "") or "").strip():
+            lines.append(
+                "Última sincronização válida no cache: "
+                + format_audit_timestamp(str(getattr(persistence_report, "synced_at", "") or "").strip())
+            )
+        if issues:
+            lines.append("Detalhes: " + " | ".join(issues))
+        return "\n".join(lines)
+
+    if synced_at:
+        return (
+            "Sincronia remota: cache local sincronizado e pronto para uso.\n"
+            f"Última sincronização válida: {format_audit_timestamp(synced_at)}"
+        )
+
+    return "Sincronia remota: aguardando nova sincronização com o Supabase."
+
+
 def build_context_text(session_path: str, overview: AuditOverview) -> str:
     session_label = session_path or "nenhuma"
     return "\n".join(

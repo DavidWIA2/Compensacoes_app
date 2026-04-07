@@ -41,12 +41,12 @@ def test_dashboard_tab_support_builds_local_overview_and_read_source_texts():
     overview_text = build_local_overview_text(report)
     read_text = build_read_source_text(read_status)
 
-    assert "Espelho local (SQLite): 12 registro(s)" in overview_text
+    assert "Cache local sincronizado: 12 registro(s)" in overview_text
     assert "Qualidade dos dados: 2 sem microbacia | 5 sem coordenadas" in overview_text
     assert "Top microbacias: Gregorio: 7 | Medeiros: 5" in overview_text
-    assert "espelho local (SQLite)" in read_text
+    assert "cache local sincronizado" in read_text
     assert "6 registro(s) no recorte" in read_text
-    assert "consulta indexada" in read_text
+    assert "consulta indexada no cache" in read_text
 
 
 def test_dashboard_tab_support_builds_tcra_agenda_summary_and_palette_keys():

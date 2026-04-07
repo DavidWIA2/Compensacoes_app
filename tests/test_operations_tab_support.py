@@ -13,8 +13,10 @@ from app.ui.tabs.operations_tab_support import (
     build_mutation_sync_text,
     build_persistence_status_text,
     build_record_overview_text,
+    build_remote_sync_text,
     build_runtime_overview_texts,
     build_session_source_text,
+    build_status_highlights_text,
     build_visible_summary_text,
 )
 
@@ -86,6 +88,37 @@ def test_operations_tab_support_builds_overview_and_persistence_texts():
     session_text = build_session_source_text(session_status)
     assert "Sessão carregada: espelho local (SQLite) com 8 registro(s)." in session_text
     assert "snapshot local validado" in session_text
+    highlights = build_status_highlights_text(
+        access_session=type("AccessSession", (), {"environment": "production"})(),
+        remote_sync_status=type("RemoteStatus", (), {"status": "refreshed"})(),
+        persistence_report=persistence_report,
+        session_source_status=session_status,
+        record_read_status=type("ReadStatus", (), {"uses_sqlite": True, "issues": ()})(),
+        authoritative_write_status=type("WriteStatus", (), {"status": "remote_authoritative", "issues": ()})(),
+    )
+    remote_sync = build_remote_sync_text(
+        type(
+            "RemoteStatus",
+            (),
+            {
+                "status": "refreshed",
+                "synced_at": now,
+                "checked_at": now,
+                "workbook_name": "Base oficial",
+                "record_count": 8,
+                "tcra_count": 18,
+                "issues": (),
+            },
+        )(),
+        access_session=type("AccessSession", (), {"environment": "production"})(),
+        persistence_report=persistence_report,
+    )
+    assert "Supabase confirmado" in remote_sync
+    assert "Cache: sincronizado" in highlights
+    assert "Sincronia: Supabase ok" in highlights
+    assert "Sessão: snapshot local" in highlights
+    assert "Leitura: cache local" in highlights
+    assert "Escrita oficial: Supabase" in highlights
 
 
 def test_operations_tab_support_builds_write_and_runtime_texts():
@@ -190,3 +223,36 @@ def test_operations_tab_support_describes_remote_authoritative_writes():
 
     assert "Escrita autoritativa: Supabase | delete persistida na base oficial." in text
     assert "sincronização completa do cache local" in text.lower()
+
+
+def test_operations_tab_support_describes_remote_sync_failures():
+    now = datetime.now(timezone.utc).isoformat()
+    persistence_report = PersistenceStatusReport(
+        status="sincronizado",
+        workbook_path="dummy.xlsx",
+        synced_at=now,
+        mirrored_records=8,
+        mirrored_plantios=2,
+        mirrored_audit_events=2,
+        expected_records=8,
+        expected_audit_events=2,
+    )
+
+    text = build_remote_sync_text(
+        type(
+            "RemoteStatus",
+            (),
+            {
+                "status": "failed",
+                "synced_at": now,
+                "checked_at": now,
+                "issues": ("timeout",),
+            },
+        )(),
+        access_session=type("AccessSession", (), {"environment": "production"})(),
+        persistence_report=persistence_report,
+    )
+
+    assert "falha na última tentativa" in text.lower()
+    assert "cache local" in text.lower()
+    assert "timeout" in text

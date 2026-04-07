@@ -20,9 +20,10 @@ from app.ui.components.ui_utils import resource_path
 
 def _resolve_ficha_logo_path() -> str:
     candidate_paths = [
+        resource_path("assets", "icons", "pga_icon_clean_512.png"),
+        resource_path("assets", "Logo_512.png"),
         resource_path("assets", "logo_prefeitura.png"),
         os.path.join(os.path.expanduser("~"), "Downloads", "logo prefeitura.png"),
-        resource_path("assets", "Logo_512.png"),
     ]
     for path in candidate_paths:
         if os.path.exists(path):

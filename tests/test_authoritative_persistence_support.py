@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.application.use_cases.authoritative_persistence_support import (
+    build_remote_snapshot_refresh_result,
     build_authoritative_workbook_load_result,
     build_monitoring_snapshot,
     build_runtime_record_result,
@@ -177,12 +178,31 @@ def test_build_runtime_record_and_load_results_keep_snapshot_context():
         load_result=load_result,
         issues=("ok",),
         snapshot_status=snapshot,
+        remote_refresh_status=build_remote_snapshot_refresh_result(
+            status="refreshed",
+            session_path="session://banco-local",
+            synced_at="2026-04-05T10:05:00+00:00",
+            record_count=4,
+        ),
     )
 
     assert record_source.mirrored_records == 4
     assert result.records[0].uid == "uid-1"
     assert result.load_result.path == "session://banco-local"
     assert result.session_path == "session://banco-local"
+    assert result.remote_refresh_status.refreshed is True
+
+
+def test_build_remote_snapshot_refresh_result_tracks_checked_at():
+    result = build_remote_snapshot_refresh_result(
+        status="failed",
+        session_path="session://banco-local",
+        issues=("offline",),
+    )
+
+    assert result.status == "failed"
+    assert result.checked_at
+    assert result.failed is True
 
 
 def test_build_monitoring_snapshot_wraps_reports():

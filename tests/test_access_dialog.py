@@ -179,6 +179,24 @@ def test_complete_password_reset_dialog_payload_appends_default_corporate_domain
     }
 
 
+def test_access_dialog_inputs_expose_clear_buttons_and_environment_tooltips():
+    _app()
+    dialog = AccessDialog(
+        settings=_MemorySettings(),
+        access_service=_FakeAccessService(),
+        admin_users_service=_FakeAdminUsersService(),
+    )
+
+    assert dialog.email_input.isClearButtonEnabled() is True
+    assert dialog.password_input.isClearButtonEnabled() is True
+    assert dialog.production_button.toolTip() != ""
+    assert dialog.demo_button.toolTip() != ""
+
+    reset_dialog = CompletePasswordResetDialog()
+    assert reset_dialog.recovery_input.isClearButtonEnabled() is True
+    assert reset_dialog.password_input.isClearButtonEnabled() is True
+
+
 def test_access_dialog_requests_and_completes_password_reset(monkeypatch):
     _app()
 

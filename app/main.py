@@ -17,11 +17,11 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QMovie, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QSplashScreen
 
-from app.config import APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
+from app.config import APP_BRAND_TAGLINE, APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.services.access_service import SupabaseAccessService
 from app.services.app_settings import AppSettings
 from app.services.tile_scheme_handler import install_tile_scheme, register_tile_scheme
-from app.ui.components.ui_utils import resource_path
+from app.ui.components.ui_utils import build_app_icon, resource_path
 from app.ui.components.access_dialog import AccessDialog
 from app.ui.main_window import MainWindow
 
@@ -36,21 +36,24 @@ class AnimatedSplashScreen(QSplashScreen):
 
         self.label_gif = QLabel(self)
         self.movie = QMovie(gif_path)
-        gif_size = QSize(60, 60)
+        gif_size = QSize(92, 92)
         self.movie.setScaledSize(gif_size)
         self.label_gif.setMovie(self.movie)
 
-        x_gif = ((pixmap.width() - gif_size.width()) // 2) + 80
-        y_gif = (pixmap.height() // 2) + 80
+        x_gif = (pixmap.width() - gif_size.width()) // 2
+        y_gif = int(pixmap.height() * 0.69)
         self.label_gif.setGeometry(x_gif, y_gif, gif_size.width(), gif_size.height())
 
-        self.label_status = QLabel("Iniciando sistema...", self)
+        self.label_status = QLabel(APP_BRAND_TAGLINE, self)
         self.label_status.setStyleSheet(
-            "color: #FFD700; font-weight: bold; background-color: rgba(0, 0, 0, 80); border-radius: 5px;"
+            "color: rgba(255, 255, 255, 0.96); font-weight: 600; background-color: transparent;"
         )
         self.label_status.setFont(QFont("Segoe UI", 10))
         self.label_status.setAlignment(Qt.AlignCenter)
-        self.label_status.setGeometry(0, pixmap.height() - 45, pixmap.width(), 30)
+        status_width = min(int(pixmap.width() * 0.72), 900)
+        status_x = (pixmap.width() - status_width) // 2
+        status_y = y_gif + gif_size.height() + 14
+        self.label_status.setGeometry(status_x, status_y, status_width, 26)
 
         self.movie.start()
 
@@ -96,6 +99,10 @@ def main() -> int:
     app.setOrganizationName(APP_SETTINGS_ORG)
     app.setApplicationName(APP_SETTINGS_NAME)
     app.setApplicationDisplayName(APP_NAME)
+    if hasattr(app, "setWindowIcon"):
+        app_icon = build_app_icon()
+        if not app_icon.isNull():
+            app.setWindowIcon(app_icon)
 
     access_session = request_app_access()
     if access_session is None:

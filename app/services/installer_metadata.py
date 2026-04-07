@@ -9,6 +9,7 @@ from app.config import (
     APP_NAME,
     APP_PRODUCT_DESCRIPTION,
 )
+from app.services.release_metadata import build_release_version_label
 
 
 def _win_path(path: str) -> str:
@@ -35,6 +36,7 @@ def build_inno_setup_script(
     main_executable: str = APP_EXECUTABLE_NAME,
     app_id: str = APP_INSTALLER_ID,
     base_filename: str = "",
+    app_version_label: str = "",
     setup_icon_file: str = "",
     publisher_url: str = "",
     support_url: str = "",
@@ -44,10 +46,12 @@ def build_inno_setup_script(
     output_dir_text = _escape_inno(_win_path(output_dir))
     icon_path_text = _escape_inno(_win_path(setup_icon_file)) if setup_icon_file else ""
     output_base = _escape_inno(base_filename or build_installer_base_filename(version))
+    version_label = _escape_inno(app_version_label or build_release_version_label(version))
 
     return r"""; Script gerado automaticamente. Ajuste somente por geracao controlada.
 #define MyAppName "%(app_name)s"
 #define MyAppVersion "%(version)s"
+#define MyAppVersionLabel "%(version_label)s"
 #define MyAppPublisher "%(app_publisher)s"
 #define MyAppExeName "%(main_executable)s"
 #define MyAppDescription "%(app_description)s"
@@ -64,7 +68,7 @@ def build_inno_setup_script(
 AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} {#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersionLabel}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppPublisherURL}
 AppSupportURL={#MyAppSupportURL}
@@ -103,6 +107,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Executar {#MyAppName}"; Flags: 
 """ % {
         "app_name": _escape_inno(app_name),
         "version": _escape_inno(version),
+        "version_label": version_label,
         "app_publisher": _escape_inno(app_publisher),
         "main_executable": _escape_inno(main_executable),
         "app_description": _escape_inno(app_description),

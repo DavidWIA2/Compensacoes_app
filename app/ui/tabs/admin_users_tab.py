@@ -41,6 +41,22 @@ def _format_role(role: str) -> str:
     return "Editor"
 
 
+def _configure_text_input(
+    input_field: QLineEdit,
+    *,
+    placeholder: str = "",
+    tooltip: str = "",
+    password: bool = False,
+) -> None:
+    if placeholder:
+        input_field.setPlaceholderText(placeholder)
+    if tooltip:
+        input_field.setToolTip(tooltip)
+    input_field.setClearButtonEnabled(True)
+    if password:
+        input_field.setEchoMode(QLineEdit.Password)
+
+
 class ResetUserPasswordDialog(QDialog):
     def __init__(self, email: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -68,11 +84,19 @@ class ResetUserPasswordDialog(QDialog):
         form.setVerticalSpacing(10)
 
         self.password_input = QLineEdit(self)
-        self.password_input.setPlaceholderText("Senha provisória com 8+ caracteres")
-        self.password_input.setEchoMode(QLineEdit.Password)
+        _configure_text_input(
+            self.password_input,
+            placeholder="Senha provisória com 8+ caracteres",
+            tooltip="Informe uma senha provisória segura para o usuário selecionado.",
+            password=True,
+        )
         self.confirm_password_input = QLineEdit(self)
-        self.confirm_password_input.setPlaceholderText("Repita a senha")
-        self.confirm_password_input.setEchoMode(QLineEdit.Password)
+        _configure_text_input(
+            self.confirm_password_input,
+            placeholder="Repita a senha",
+            tooltip="Repita a senha provisória para confirmar a alteração.",
+            password=True,
+        )
         self.confirm_password_input.returnPressed.connect(self._submit)
 
         form.addRow("Senha:", self.password_input)
@@ -150,6 +174,7 @@ class AdminUsersTab(QWidget):
         self.status_label.setObjectName("FormStateLabel")
         self.btn_refresh = QPushButton("Atualizar")
         self.btn_refresh.setProperty("kind", "secondary")
+        self.btn_refresh.setToolTip("Recarrega a lista de usuários e o estado de cada perfil.")
         top_actions.addWidget(self.status_label, 1)
         top_actions.addWidget(self.btn_refresh)
         layout.addLayout(top_actions)
@@ -171,12 +196,16 @@ class AdminUsersTab(QWidget):
         action_row = QHBoxLayout()
         self.btn_activate = QPushButton("Reativar")
         self.btn_activate.setProperty("kind", "secondary")
+        self.btn_activate.setToolTip("Reativa o acesso do usuário selecionado.")
         self.btn_deactivate = QPushButton("Desativar")
         self.btn_deactivate.setProperty("kind", "secondary")
+        self.btn_deactivate.setToolTip("Bloqueia temporariamente o acesso do usuário selecionado.")
         self.btn_reset_password = QPushButton("Redefinir senha")
         self.btn_reset_password.setProperty("kind", "secondary")
+        self.btn_reset_password.setToolTip("Define uma senha provisória para o usuário selecionado.")
         self.btn_delete = QPushButton("Excluir")
         self.btn_delete.setProperty("kind", "danger")
+        self.btn_delete.setToolTip("Remove definitivamente o usuário selecionado.")
         self.selection_hint = QLabel("Selecione um usuário para gerenciar.")
         self.selection_hint.setObjectName("FormStateLabel")
         action_row.addWidget(self.btn_activate)
@@ -193,21 +222,36 @@ class AdminUsersTab(QWidget):
         create_layout.setVerticalSpacing(int(10 * self.sf))
 
         self.email_input = QLineEdit(self)
-        self.email_input.setPlaceholderText("nome.sobrenome")
+        _configure_text_input(
+            self.email_input,
+            placeholder="nome.sobrenome",
+            tooltip="Informe apenas o identificador do email corporativo; o domínio é preenchido ao lado.",
+        )
         self.email_input.editingFinished.connect(self._normalize_email_field)
         self.display_name_input = QLineEdit(self)
-        self.display_name_input.setPlaceholderText("Nome para exibição")
+        _configure_text_input(
+            self.display_name_input,
+            placeholder="Nome para exibição",
+            tooltip="Nome exibido no app para o usuário cadastrado.",
+        )
         self.password_input = QLineEdit(self)
-        self.password_input.setPlaceholderText("Senha provisória")
-        self.password_input.setEchoMode(QLineEdit.Password)
+        _configure_text_input(
+            self.password_input,
+            placeholder="Senha provisória",
+            tooltip="Senha inicial entregue ao usuário para o primeiro acesso.",
+            password=True,
+        )
         self.role_combo = QComboBox(self)
         self.role_combo.addItem("Editor", "editor")
         self.role_combo.addItem("Leitor", "viewer")
         self.role_combo.addItem("Administrador", "admin")
+        self.role_combo.setToolTip("Define o nível de permissão do usuário.")
         self.is_active_combo = QComboBox(self)
         self.is_active_combo.addItem("Ativo", True)
         self.is_active_combo.addItem("Inativo", False)
+        self.is_active_combo.setToolTip("Escolhe se o usuário já entra liberado ou bloqueado.")
         self.btn_create = QPushButton("Cadastrar usuário")
+        self.btn_create.setToolTip("Cria um novo usuário de produção com o perfil informado.")
 
         email_row = QWidget(self)
         email_layout = QHBoxLayout(email_row)

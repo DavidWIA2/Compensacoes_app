@@ -77,10 +77,12 @@ jobs:
         id: metadata
         shell: pwsh
         run: |
-          $version = python -c "from app import __version__; print(__version__)"
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "release_name=Compensacoes v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "notes_md=release/Compensacoes-v$version-win64-notes.md" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $metadataJson = python -c "import json; from app import __version__ as version; from app.services.release_metadata import build_release_display_name, is_prerelease_version; print(json.dumps({'version': version, 'release_name': build_release_display_name(version), 'prerelease': 'true' if is_prerelease_version(version) else 'false', 'notes_md': f'release/Compensacoes-v{version}-win64-notes.md'}, ensure_ascii=False))"
+          $metadata = $metadataJson | ConvertFrom-Json
+          "version=$($metadata.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_name=$($metadata.release_name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "prerelease=$($metadata.prerelease)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "notes_md=$($metadata.notes_md)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore signing certificate
         if: ${{ env.WINDOWS_SIGN_CERT_PFX_B64 != '' }}
@@ -116,6 +118,7 @@ jobs:
         with:
           name: ${{ steps.metadata.outputs.release_name }}
           tag_name: ${{ env.RELEASE_TAG }}
+          prerelease: ${{ steps.metadata.outputs.prerelease }}
           body_path: ${{ steps.metadata.outputs.notes_md }}
           fail_on_unmatched_files: true
           files: |

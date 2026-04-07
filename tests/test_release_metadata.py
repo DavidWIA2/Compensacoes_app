@@ -2,7 +2,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app.services.release_metadata import build_windows_version_info, normalize_version_tuple
+from app.services.release_metadata import (
+    build_release_display_name,
+    build_release_version_label,
+    build_windows_version_info,
+    is_prerelease_version,
+    normalize_version_tuple,
+    release_channel_for_version,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,11 +24,19 @@ def test_normalize_version_tuple_discards_suffix_noise():
     assert normalize_version_tuple("v1.2.3-beta4") == (1, 2, 3, 4)
 
 
+def test_prerelease_helpers_flag_beta_versions():
+    assert is_prerelease_version("1.2.3-beta.1") is True
+    assert release_channel_for_version("1.2.3-beta.1") == "beta"
+    assert build_release_version_label("1.2.3-beta.1") == "1.2.3-beta.1 (BETA)"
+    assert build_release_display_name("1.2.3-beta.1", app_name="PGA") == "PGA v1.2.3-beta.1 (BETA)"
+
+
 def test_build_windows_version_info_includes_core_metadata():
-    payload = build_windows_version_info("1.2.3", product_name="Compensacoes")
+    payload = build_windows_version_info("1.2.3-beta.1", product_name="Compensacoes")
 
     assert "FileVersion', '1.2.3.0'" in payload
     assert "ProductName', 'Compensacoes'" in payload
+    assert "ProductVersion', '1.2.3-beta.1'" in payload
     assert "VSVersionInfo(" in payload
 
 

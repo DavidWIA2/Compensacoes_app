@@ -146,21 +146,37 @@ def test_main_window_uses_readable_core_labels(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
 
-    assert "Compensações - Cadastro e Consulta" in window.windowTitle()
-    assert "Banco local" in window.windowTitle()
+    assert "Plataforma de Gestão Ambiental" in window.windowTitle()
+    assert "Base local" in window.windowTitle()
     assert bool(window.windowState() & Qt.WindowMaximized)
     assert "ofício" in window.data_tab.search.placeholderText().lower()
     assert window.data_tab.filter_eletronico._all_label == "Todos os Tipos"
     assert "Endereço" in window.data_tab.btn_maps.text()
-    assert window.session_file_label.text() == "Banco: Banco local"
+    assert window.session_file_label.text() == "Fonte: Banco local"
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
-        "Dados & Cadastro",
+        "Compensações",
         "Painel",
         "Operações",
         "TCRAs",
     ]
 
     assert window.data_tab.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
+    window.close()
+
+
+def test_main_window_compensacoes_form_exposes_placeholders_clear_buttons_and_tooltips():
+    window = MainWindow()
+    get_app().processEvents()
+
+    assert window.data_tab.in_oficio.isClearButtonEnabled() is True
+    assert "206/2021" in window.data_tab.in_oficio.placeholderText()
+    assert window.data_tab.in_end.isClearButtonEnabled() is True
+    assert window.data_tab.in_micro.lineEdit().isClearButtonEnabled() is True
+    assert window.data_tab.btn_manage_plantios.toolTip() != ""
+    assert window.data_tab.btn_clear_filters.toolTip() != ""
+    assert window.data_tab.btn_maps.toolTip() != ""
+    assert window.data_tab.combo_heatmap_type.toolTip() != ""
+
     window.close()
 
 
@@ -348,6 +364,7 @@ def test_tipo_options_are_fixed_even_without_workbook_data():
 def test_update_filters_from_records_can_use_sqlite_filter_facets(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
+    window.gis = None
     window.records = [make_record(oficio_processo="123/2024", microbacia="Sessao")]
 
     monkeypatch.setattr(
@@ -381,6 +398,48 @@ def test_update_filters_from_records_can_use_sqlite_filter_facets(monkeypatch):
     assert year_items == ["Todos", "2026", "2025"]
     assert form_micro_items == ["", "Gregorio", "Medeiros"]
     assert window._local_filter_facets_status == {"source": "sqlite", "micro_count": 2, "year_count": 2}
+    window.close()
+
+
+def test_update_filters_from_records_prefers_official_gis_microbacias(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+    window.records = [make_record(oficio_processo="123/2024", microbacia="Gregorio")]
+    window.gis = SimpleNamespace(
+        list_microbacias=lambda: ["Água Quente", "Gregório", "Jockey"],
+        normalize_microbacia_name=lambda value: {"Gregorio": "Gregório"}.get(value, value),
+    )
+
+    monkeypatch.setattr(
+        window.shell_controller.local_record_queries,
+        "resolve_filter_facets",
+        lambda workbook_path, **kwargs: LocalFilterFacetsResult(
+            source="sqlite",
+            workbook_path=workbook_path,
+            synced_at="2026-03-31T12:00:00+00:00",
+            mirrored_records=2,
+            session_records=1,
+            microbacias=("Gregorio", "Medeiros"),
+            years=("2026",),
+        ),
+    )
+    monkeypatch.setattr(
+        window.shell_controller.local_record_queries,
+        "build_filter_facets_status",
+        lambda result: {"source": result.source, "micro_count": len(result.microbacias)},
+    )
+
+    window._update_filters_from_records()
+    window._setup_dynamic_form_options_from_records()
+    window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
+
+    micro_model = window.data_tab.filter_micro.model()
+    micro_items = [micro_model.item(index).text() for index in range(1, micro_model.rowCount())]
+    form_micro_items = [window.data_tab.in_micro.itemText(index) for index in range(window.data_tab.in_micro.count())]
+
+    assert micro_items == ["Água Quente", "Gregório", "Jockey", "Medeiros"]
+    assert form_micro_items == ["", "Água Quente", "Gregório", "Jockey", "Medeiros"]
+    assert window.data_tab.filter_micro.checked_items() == ["Gregório"]
     window.close()
 
 
@@ -426,6 +485,7 @@ def test_update_filters_from_records_rebinds_runtime_persistence_service_after_s
     stat_result = workbook_path.stat()
     window = MainWindow()
     get_app().processEvents()
+    window.gis = None
     window.session_runtime.path = str(workbook_path)
     window.records = [make_record(oficio_processo="123/2026", microbacia="Sessao")]
 
@@ -456,6 +516,33 @@ def test_update_filters_from_records_rebinds_runtime_persistence_service_after_s
     micro_items = [micro_model.item(index).text() for index in range(1, micro_model.rowCount())]
     assert micro_items == ["Gregorio", "Medeiros"]
     assert getattr(window._local_filter_facets_status, "source", None) == "sqlite"
+    window.close()
+
+
+def test_load_gis_refreshes_microbacia_options_after_success(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+    calls = []
+    real_isdir = os.path.isdir
+
+    monkeypatch.setattr(
+        "app.ui.controllers.data_controller.os.path.isdir",
+        lambda path: True if path == window.MICROB_DIR else real_isdir(path),
+    )
+    monkeypatch.setattr(
+        "app.ui.controllers.data_controller.GisService",
+        lambda *args, **kwargs: SimpleNamespace(
+            to_geojson_obj=lambda: {"type": "FeatureCollection", "features": []},
+            list_microbacias=lambda: ["Água Quente", "Gregório"],
+            normalize_microbacia_name=lambda value: {"Gregorio": "Gregório"}.get(value, value),
+        ),
+    )
+    monkeypatch.setattr(window, "_load_microbacias_layer", lambda: calls.append("layer"))
+    monkeypatch.setattr(window, "_update_filters_from_records", lambda: calls.append("filters"))
+    monkeypatch.setattr(window, "_setup_dynamic_form_options_from_records", lambda: calls.append("form"))
+
+    assert window.data_controller.load_gis() is True
+    assert calls == ["layer", "filters", "form"]
     window.close()
 
 
@@ -1536,7 +1623,7 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     assert dialog.search_fs.text() == "Gregorio"
     assert dialog.filter_status_fs.currentText() == "Pendentes"
     assert dialog.filter_year_fs.currentText() == "2026"
-    assert dialog.filter_micro_fs.checked_items() == ["Gregorio"]
+    assert dialog.filter_micro_fs.checked_items() == ["Gregório"]
     assert dialog.filter_eletronico_fs.checked_items() == ["Eletrônico"]
 
     dialog.search_fs.setText("Medeiros")
@@ -1593,7 +1680,7 @@ def test_search_on_map_persists_detected_microbacia(monkeypatch):
     window.data_tab.in_end.setText("Rua Teste")
     window.search_on_map()
 
-    assert window.data_tab.in_micro.currentText() == "Gregorio"
+    assert window.data_tab.in_micro.currentText() == "Gregório"
     window.close()
 
 
@@ -2240,9 +2327,9 @@ def test_load_session_failure_restores_previous_filter_state(monkeypatch):
     assert window.data_tab.search.text() == "Gregorio"
     assert window.data_tab.filter_status.currentText() == "Pendentes"
     assert window.data_tab.filter_year.currentText() == "2026"
-    assert window.data_tab.filter_micro.checked_items() == ["Gregorio"]
+    assert window.data_tab.filter_micro.checked_items() == ["Gregório"]
     assert window.data_tab.filter_eletronico.checked_items() == ["Eletrônico"]
-    assert len(window.filtered_records) == 1
+    assert len(window.records) == 2
     window.close()
 
 

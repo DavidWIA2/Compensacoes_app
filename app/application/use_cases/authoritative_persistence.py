@@ -46,6 +46,7 @@ from app.application.use_cases.authoritative_persistence_support import (
     get_session_snapshot_summary,
     has_snapshot_data,
     list_session_records,
+    build_remote_snapshot_refresh_result,
     restore_workbook_service_state,
     snapshot_workbook_service_state,
     sync_session_snapshot,
@@ -410,24 +411,23 @@ class AuthoritativePersistenceUseCases:
         expected_session_path = str(getattr(access_session, "local_session_path", "") or "").strip()
         normalized_path = str(session_path or expected_session_path or self.current_session_path() or "").strip()
         if access_session.environment != AccessEnvironment.PRODUCTION:
-            return RemoteSnapshotRefreshResult(status="skipped", session_path=normalized_path)
+            return build_remote_snapshot_refresh_result(status="skipped", session_path=normalized_path)
         if not self._can_use_remote_snapshot_refresh(normalized_path):
-            return RemoteSnapshotRefreshResult(status="skipped", session_path=normalized_path)
+            return build_remote_snapshot_refresh_result(status="skipped", session_path=normalized_path)
 
         sync_service = getattr(self.access_service, "production_sync_service", None)
         if sync_service is None:
             issue = "Servico de sincronizacao da producao indisponivel para leitura remote-first."
             logger.warning(issue)
-            return RemoteSnapshotRefreshResult(
+            return build_remote_snapshot_refresh_result(
                 status="unavailable",
                 session_path=normalized_path,
                 issues=(issue,),
             )
 
         try:
-            client = self._create_remote_compensacoes_client()
-            sync_result = sync_service.sync_authenticated_client(
-                client,
+            sync_result = self.access_service.refresh_production_cache(
+                access_session,
                 local_db_path=getattr(self.persistence_service, "db_path", None)
                 or str(getattr(access_session, "local_db_path", "") or "").strip()
                 or None,
@@ -436,17 +436,20 @@ class AuthoritativePersistenceUseCases:
         except Exception as exc:
             issue = f"Falha ao sincronizar snapshot remoto antes da leitura: {exc}"
             logger.warning(issue, exc_info=True)
-            return RemoteSnapshotRefreshResult(
+            return build_remote_snapshot_refresh_result(
                 status="failed",
                 session_path=normalized_path,
                 issues=(issue,),
             )
 
         refreshed_session_path = str(getattr(sync_result, "session_path", "") or normalized_path).strip()
-        return RemoteSnapshotRefreshResult(
+        return build_remote_snapshot_refresh_result(
             status="refreshed",
             session_path=refreshed_session_path,
             local_db_path=str(getattr(sync_result, "local_db_path", "") or "").strip(),
+            workbook_name=str(getattr(sync_result, "workbook_name", "") or "").strip(),
+            workbook_path=str(getattr(sync_result, "workbook_path", "") or "").strip(),
+            synced_at=str(getattr(sync_result, "synced_at", "") or "").strip(),
             record_count=int(getattr(sync_result, "record_count", 0) or 0),
             tcra_count=int(getattr(sync_result, "tcra_count", 0) or 0),
         )
@@ -849,6 +852,7 @@ class AuthoritativePersistenceUseCases:
                 load_result=load_result,
                 issues=record_source.issues,
                 snapshot_status=snapshot_status,
+                remote_refresh_status=remote_refresh,
             )
 
         if self.workbook_use_cases is None:
@@ -907,6 +911,7 @@ class AuthoritativePersistenceUseCases:
             load_result=load_result,
             issues=issues,
             snapshot_status=snapshot_status,
+            remote_refresh_status=remote_refresh,
         )
 
     def analyze_import(

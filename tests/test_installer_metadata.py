@@ -38,6 +38,22 @@ def test_build_inno_setup_script_contains_core_sections(tmp_path):
     assert 'AppPublisherURL={#MyAppPublisherURL}' in payload
 
 
+def test_build_inno_setup_script_marks_beta_in_display_version(tmp_path):
+    source_dir = tmp_path / "dist" / "Compensacoes"
+    output_dir = tmp_path / "release"
+    source_dir.mkdir(parents=True)
+
+    payload = build_inno_setup_script(
+        source_dir=str(source_dir),
+        output_dir=str(output_dir),
+        version="1.2.0-beta.1",
+    )
+
+    assert '#define MyAppVersion "1.2.0-beta.1"' in payload
+    assert '#define MyAppVersionLabel "1.2.0-beta.1 (BETA)"' in payload
+    assert "AppVerName={#MyAppName} {#MyAppVersionLabel}" in payload
+
+
 def test_generate_installer_script_supports_direct_execution(tmp_path):
     source_dir = tmp_path / "dist" / "Compensacoes"
     output_dir = tmp_path / "release"

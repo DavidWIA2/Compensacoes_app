@@ -18,6 +18,8 @@ class OperationsOverviewSnapshot:
     overview: AuditOverview
     persistence_report: PersistenceStatusReport | None
     record_overview_report: PersistenceRecordOverviewReport | None
+    access_session: object | None = None
+    remote_sync_status: object | None = None
     session_source_status: object | None = None
     authoritative_write_status: object | None = None
     mutation_sync_status: object | None = None
@@ -103,6 +105,8 @@ class OperationsOverviewUseCases:
         shell_controller: object | None = None,
         persistence: object | None = None,
         runtime_window: object | None = None,
+        access_session: object | None = None,
+        remote_sync_status: object | None = None,
         session_source_status: object | None = None,
         authoritative_write_status: object | None = None,
         mutation_sync_status: object | None = None,
@@ -133,6 +137,8 @@ class OperationsOverviewUseCases:
             overview=overview,
             persistence_report=persistence_report,
             record_overview_report=record_overview_report,
+            access_session=access_session,
+            remote_sync_status=remote_sync_status,
             session_source_status=session_source_status,
             authoritative_write_status=authoritative_write_status,
             mutation_sync_status=mutation_sync_status,

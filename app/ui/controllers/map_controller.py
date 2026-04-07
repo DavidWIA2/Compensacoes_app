@@ -190,10 +190,11 @@ class MapController:
         if self.window.gis:
             micro = self.window.gis.find_microbacia(lat, lon)
             if micro:
-                self.window.data_tab.in_micro.setCurrentText(micro)
-                self.highlight_microbacia(micro)
-                self.set_map_status(f"Ponto dentro de: {micro}")
-                self.window.statusBar().showMessage(f"Ponto capturado. Microbacia: {micro}")
+                resolved_micro = self.window.shell_controller.resolve_microbacia_display_name(micro)
+                self.window.shell_controller.select_form_microbacia(resolved_micro)
+                self.highlight_microbacia(resolved_micro)
+                self.set_map_status(f"Ponto dentro de: {resolved_micro}")
+                self.window.statusBar().showMessage(f"Ponto capturado. Microbacia: {resolved_micro}")
             else:
                 self.set_map_status("Fora de microbacia conhecida.")
                 self.window.statusBar().showMessage(f"Ponto capturado: {lat:.5f}, {lon:.5f}")
@@ -265,8 +266,9 @@ class MapController:
                 microbacia=str(micro or ""),
             )
             if presentation.microbacia:
-                self.window.data_tab.in_micro.setCurrentText(presentation.microbacia)
-                self.highlight_microbacia(presentation.microbacia)
+                resolved_micro = self.window.shell_controller.resolve_microbacia_display_name(presentation.microbacia)
+                self.window.shell_controller.select_form_microbacia(resolved_micro)
+                self.highlight_microbacia(resolved_micro)
             self.window.statusBar().showMessage(presentation.status_message)
             self.window._update_form_action_buttons()
             return

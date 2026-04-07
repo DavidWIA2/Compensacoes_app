@@ -20,6 +20,7 @@ from app.config import (
 )
 from app.services.supabase_workspace_sync_service import (
     PRODUCTION_CACHE_SESSION_PATH,
+    SupabaseWorkspaceSyncResult,
     SupabaseWorkspaceSyncService,
 )
 from app.utils.app_paths import resolve_data_path
@@ -433,6 +434,35 @@ class SupabaseAccessService:
         except Exception as exc:
             raise AccessAuthError(f"Não foi possível restaurar a sessão autenticada do Supabase: {exc}") from exc
         return client
+
+    def refresh_production_cache(
+        self,
+        access_session: AppAccessSession,
+        *,
+        local_db_path: str | Path | None = None,
+        session_path: str | None = None,
+    ) -> SupabaseWorkspaceSyncResult:
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            raise AccessAuthError("A sincronização remota só está disponível no ambiente de produção.")
+
+        client = self.create_authenticated_client(access_session)
+        resolved_local_db_path = (
+            Path(local_db_path)
+            if local_db_path is not None
+            else (Path(access_session.local_db_path) if str(access_session.local_db_path or "").strip() else None)
+        )
+        resolved_session_path = str(session_path or access_session.local_session_path or "").strip()
+        if not resolved_session_path:
+            resolved_session_path = PRODUCTION_CACHE_SESSION_PATH
+
+        try:
+            return self.production_sync_service.sync_authenticated_client(
+                client,
+                local_db_path=resolved_local_db_path,
+                session_path=resolved_session_path,
+            )
+        except Exception as exc:
+            raise AccessAuthError(f"Não foi possível sincronizar o cache local de produção: {exc}") from exc
 
     def _reset_demo_database(self) -> Path:
         factory = self._demo_dataset_factory

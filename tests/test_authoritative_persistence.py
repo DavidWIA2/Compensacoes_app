@@ -251,7 +251,11 @@ class FakeRemoteSyncService:
         return SimpleNamespace(
             local_db_path=str(local_db_path or ""),
             session_path=session_path,
+            workbook_name="Base oficial",
+            workbook_path=session_path,
+            synced_at="2026-04-07T12:00:00+00:00",
             record_count=len(self.synced_records),
+            tcra_count=0,
         )
 
 
@@ -264,6 +268,14 @@ class FakeAccessService:
     def create_authenticated_client(self, access_session):
         self.calls.append(access_session)
         return self.client
+
+    def refresh_production_cache(self, access_session, *, local_db_path=None, session_path=None):
+        self.calls.append(access_session)
+        return self.production_sync_service.sync_authenticated_client(
+            self.client,
+            local_db_path=local_db_path,
+            session_path=session_path,
+        )
 
 
 def make_production_session(**overrides) -> AppAccessSession:

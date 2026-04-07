@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from datetime import datetime, timezone
+from typing import Callable, Sequence
 
 from app.application.use_cases.local_record_queries import (
     LocalRecordReadResult,
@@ -42,6 +43,7 @@ class AuthoritativeWorkbookLoadResult:
     load_result: LoadSessionResult
     issues: tuple[str, ...] = ()
     snapshot_status: object | None = None
+    remote_refresh_status: object | None = None
 
     @property
     def session_path(self) -> str:
@@ -64,6 +66,10 @@ class RemoteSnapshotRefreshResult:
     status: str
     session_path: str = ""
     local_db_path: str = ""
+    workbook_name: str = ""
+    workbook_path: str = ""
+    synced_at: str = ""
+    checked_at: str = ""
     record_count: int = 0
     tcra_count: int = 0
     issues: tuple[str, ...] = ()
@@ -75,6 +81,43 @@ class RemoteSnapshotRefreshResult:
     @property
     def failed(self) -> bool:
         return self.status in {"failed", "unavailable"}
+
+    @property
+    def deferred(self) -> bool:
+        return self.status == "deferred"
+
+    @property
+    def has_synced_cache(self) -> bool:
+        return bool(str(self.synced_at or "").strip())
+
+
+def build_remote_snapshot_refresh_result(
+    *,
+    status: str,
+    session_path: str = "",
+    local_db_path: str = "",
+    workbook_name: str = "",
+    workbook_path: str = "",
+    synced_at: str = "",
+    checked_at: str = "",
+    record_count: int = 0,
+    tcra_count: int = 0,
+    issues: Sequence[str] = (),
+) -> RemoteSnapshotRefreshResult:
+    normalized_checked_at = str(checked_at or "").strip() or datetime.now(timezone.utc).isoformat()
+    normalized_issues = tuple(str(issue or "").strip() for issue in issues if str(issue or "").strip())
+    return RemoteSnapshotRefreshResult(
+        status=str(status or "").strip() or "skipped",
+        session_path=str(session_path or "").strip(),
+        local_db_path=str(local_db_path or "").strip(),
+        workbook_name=str(workbook_name or "").strip(),
+        workbook_path=str(workbook_path or "").strip(),
+        synced_at=str(synced_at or "").strip(),
+        checked_at=normalized_checked_at,
+        record_count=int(record_count or 0),
+        tcra_count=int(tcra_count or 0),
+        issues=normalized_issues,
+    )
 
 
 @dataclass(frozen=True)
@@ -305,6 +348,7 @@ def build_authoritative_workbook_load_result(
     load_result: LoadSessionResult,
     issues: Sequence[str] = (),
     snapshot_status: object | None = None,
+    remote_refresh_status: object | None = None,
 ) -> AuthoritativeWorkbookLoadResult:
     normalized_issues = tuple(str(issue or "").strip() for issue in issues if str(issue or "").strip())
     return AuthoritativeWorkbookLoadResult(
@@ -315,6 +359,7 @@ def build_authoritative_workbook_load_result(
         load_result=load_result,
         issues=normalized_issues,
         snapshot_status=snapshot_status,
+        remote_refresh_status=remote_refresh_status,
     )
 
 

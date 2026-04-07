@@ -127,3 +127,13 @@ def test_table_fullscreen_dialog_support_blocks_and_restores_signals():
 
     assert a.calls == [True, False]
     assert b.calls == [True, False]
+
+
+def test_checkable_combo_box_restores_checked_items_without_accent_sensitivity():
+    get_app()
+    combo = CheckableComboBox("Todas")
+    combo.set_items(["Gregório", "Medeiros"])
+
+    combo.set_checked_items(["Gregorio"], all_selected=False)
+
+    assert combo.checked_items() == ["Gregório"]

@@ -71,14 +71,14 @@ class SupportOperationsUseCases:
         lines = [
             f"{self.app_name} {self.app_version}",
             "",
-            "Gestão de compensações ambientais com cadastro, filtros, mapa e exportações.",
+            "Plataforma de gestão territorial e monitoramento ambiental, com módulos de compensações, TCRAs, mapa e exportações.",
             f"Python {self.python_version_resolver()}",
             f"Logs: {self.log_dir}",
             f"Manifest de atualização: {update_source}",
             f"Variavel de override: {self.update_url_env_var}",
         ]
         return AboutDialogData(
-            title=f"Sobre o {self.app_name}",
+            title=f"Sobre - {self.app_name}",
             message="\n".join(lines),
         )
 

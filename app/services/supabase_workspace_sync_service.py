@@ -33,6 +33,7 @@ class SupabaseWorkspaceSyncResult:
     session_path: str
     workbook_name: str
     workbook_path: str
+    synced_at: str
     record_count: int
     plantio_count: int
     audit_event_count: int
@@ -101,6 +102,7 @@ class SupabaseWorkspaceSyncService:
             session_path=target_session_path,
             workbook_name=snapshot.workbook_name,
             workbook_path=snapshot.workbook_path,
+            synced_at=str(getattr(sqlite_summary, "synced_at", "") or ""),
             record_count=sqlite_summary.record_count,
             plantio_count=sqlite_summary.plantio_count,
             audit_event_count=len(snapshot.audit_events),

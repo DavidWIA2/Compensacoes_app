@@ -79,6 +79,25 @@ def test_filter_records_applies_text_status_and_micro_filters():
     assert filtered[0].oficio_processo == "ABC-1"
 
 
+def test_filter_records_treats_microbacia_filter_as_accent_insensitive():
+    records = [
+        make_record(oficio_processo="ABC-1", microbacia="Gregorio", compensado=""),
+        make_record(excel_row=3, oficio_processo="XYZ-2", microbacia="Medeiros", compensado=""),
+    ]
+
+    filtered = filter_records(
+        records,
+        text="",
+        status="Todos",
+        selected_micros=["Gregório"],
+        selected_eletronicos=[],
+        micro_all_selected=False,
+        eletronico_all_selected=True,
+    )
+
+    assert [record.oficio_processo for record in filtered] == ["ABC-1"]
+
+
 def test_filter_records_uses_precomputed_search_index_for_endereco_plantio():
     records = [
         make_record(oficio_processo="ABC-1", endereco="", endereco_plantio="Rua do Plantio", uid="u-1"),

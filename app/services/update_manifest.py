@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app import __version__ as APP_VERSION
+from app.services.release_metadata import release_channel_for_version
 
 
 def default_manifest_timestamp() -> str:
@@ -24,7 +25,7 @@ def build_release_manifest(
     published_at: Optional[str] = None,
     homepage_url: str = "",
     filename: str = "",
-    channel: str = "stable",
+    channel: str = "",
     signed: Optional[bool] = None,
     signature_mode: str = "",
 ) -> Dict[str, Any]:
@@ -36,7 +37,7 @@ def build_release_manifest(
         "version": clean_version,
         "notes": normalize_release_notes(notes),
         "published_at": str(published_at or default_manifest_timestamp()).strip(),
-        "channel": str(channel or "stable").strip() or "stable",
+        "channel": str(channel or "").strip() or release_channel_for_version(clean_version),
     }
 
     if download_url:

@@ -7,6 +7,7 @@ from app.application.use_cases.persistence_monitoring import (
     PersistenceRecordSampleReport,
     PersistenceStatusReport,
 )
+from app.services.access_service import AccessEnvironment, AppAccessSession
 from app.services.audit_service import AuditEvent
 
 
@@ -86,6 +87,19 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
             ),
         ),
     )
+    window.access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Produção",
+        auth_mode="password",
+        user_id="user-123",
+        user_email="analista@prefeitura.sp.gov.br",
+        supabase_url="https://yonvcnnkewzoqwnnmcdx.supabase.co",
+        local_db_path="C:/tmp/producao.db",
+        local_session_path="dummy.xlsx",
+        app_role="editor",
+        access_token="token",
+        refresh_token="refresh-token",
+    )
     window.records = [object()] * 8
     window.session_runtime.path = "dummy.xlsx"
     window._local_record_read_status = LocalRecordReadStatus(
@@ -135,6 +149,19 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
             "issues": (),
         },
     )()
+    window._remote_snapshot_refresh_status = type(
+        "RemoteStatus",
+        (),
+        {
+            "status": "refreshed",
+            "synced_at": now.isoformat(),
+            "checked_at": now.isoformat(),
+            "workbook_name": "Base oficial",
+            "record_count": 8,
+            "tcra_count": 18,
+            "issues": (),
+        },
+    )()
 
     window.refresh_operations_overview()
 
@@ -149,6 +176,8 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert window.operations_tab.selected_event.event_id == "evt-1"
     assert window.operations_tab.btn_open_backup.isEnabled() is True
     assert "Resumo visível: 2 operações" in window.operations_tab.lbl_summary.text()
+    assert "Panorama técnico:" in window.operations_tab.lbl_highlights.text()
+    assert "Sincronia remota: Supabase confirmado" in window.operations_tab.lbl_remote_sync.text()
     assert "Espelho local (SQLite): Sincronizado" in window.operations_tab.lbl_persistence.text()
     assert "Registros espelhados: 8/8" in window.operations_tab.lbl_persistence.text()
     assert "Resumo local (SQLite): 8 registros" in window.operations_tab.lbl_records_overview.text()
@@ -162,6 +191,8 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert "Gregorio: 5" in window.operations_tab.lbl_records_overview.text()
     assert "Linha 2 | AT-1 | uid-1" in window.operations_tab.lbl_records_overview.text()
     assert window.operations_tab.lbl_visible.text() == "Mostrando 2 de 2 operações"
+    assert window.operations_tab.btn_sync_production.isEnabled() is True
+    assert window.operations_tab.technical_details_frame.isHidden() is True
 
     window.operations_tab.filter_action.setCurrentText("EDIT")
 
@@ -298,17 +329,23 @@ def test_operations_overview_prefers_shell_monitoring_resolvers(ui_window_factor
     assert calls == {"status": 1, "overview": 1}
     assert window.operations_tab.lbl_persistence.text().startswith("Espelho local (SQLite): Sincronizado")
     assert window.operations_tab.lbl_records_overview.text().startswith("Resumo local (SQLite): 3 registros")
+    assert window.operations_tab.lbl_highlights.text().startswith("Panorama técnico:")
     window.close()
 
 
 def test_operations_tab_buttons_route_actions_and_refresh_on_tab_change(ui_window_factory, monkeypatch):
     window = ui_window_factory()
-    calls = {"refresh": 0, "history": 0, "rollback": 0, "backup": 0}
+    calls = {"refresh": 0, "sync": 0, "history": 0, "rollback": 0, "backup": 0}
 
     monkeypatch.setattr(
         window.operations_controller,
         "refresh_overview",
         lambda *args, **kwargs: calls.__setitem__("refresh", calls["refresh"] + 1),
+    )
+    monkeypatch.setattr(
+        window.operations_controller,
+        "refresh_production_snapshot",
+        lambda: calls.__setitem__("sync", calls["sync"] + 1),
     )
     monkeypatch.setattr(
         window.data_controller,
@@ -328,12 +365,15 @@ def test_operations_tab_buttons_route_actions_and_refresh_on_tab_change(ui_windo
 
     window.tabs.setCurrentWidget(window.operations_tab)
     window.operations_tab.btn_open_backup.setEnabled(True)
+    window.operations_tab.btn_sync_production.setEnabled(True)
     window.operations_tab.btn_refresh.click()
+    window.operations_tab.btn_sync_production.click()
     window.operations_tab.btn_history.click()
     window.operations_tab.btn_rollback.click()
     window.operations_tab.btn_open_backup.click()
 
     assert calls["refresh"] >= 2
+    assert calls["sync"] == 1
     assert calls["history"] == 1
     assert calls["rollback"] == 1
     assert calls["backup"] == 1
@@ -405,6 +445,24 @@ def test_operations_tab_shows_runtime_jobs_and_cancel_action(ui_window_factory):
     assert "runtime-sync" not in window.operations_tab.lbl_runtime_active.text()
     assert "Espelho sincronizado." in window.operations_tab.lbl_runtime_recent.text()
     assert window.operations_tab.btn_cancel_runtime.isEnabled() is False
+    window.close()
+
+
+def test_operations_tab_can_toggle_technical_details(ui_window_factory):
+    window = ui_window_factory()
+
+    assert window.operations_tab.technical_details_frame.isVisible() is False
+    assert window.operations_tab.btn_toggle_details.text() == "Ver Detalhes Técnicos"
+
+    window.operations_tab.btn_toggle_details.click()
+
+    assert window.operations_tab.technical_details_frame.isHidden() is False
+    assert window.operations_tab.btn_toggle_details.text() == "Ocultar Detalhes Técnicos"
+
+    window.operations_tab.btn_toggle_details.click()
+
+    assert window.operations_tab.technical_details_frame.isHidden() is True
+    assert window.operations_tab.btn_toggle_details.text() == "Ver Detalhes Técnicos"
     window.close()
 
 

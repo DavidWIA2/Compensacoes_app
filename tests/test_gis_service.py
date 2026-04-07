@@ -110,3 +110,57 @@ def test_get_microbacia_centroid_uses_cache_and_alias_resolution(monkeypatch):
 
     assert first == second
     assert len(calls) == 1
+
+
+def test_gis_service_lists_official_microbacias_sorted_by_lookup_key():
+    service = GisService.__new__(GisService)
+    service.name_field = "Nome_Do_Arquivo"
+    service.gdf = gpd.GeoDataFrame(
+        {
+            "Nome_Do_Arquivo": ["Água Quente", "Gregório", "Monjolinho"],
+            "geometry": [
+                Polygon(
+                    [
+                        (-47.8900, -22.0150),
+                        (-47.8890, -22.0150),
+                        (-47.8890, -22.0140),
+                        (-47.8900, -22.0140),
+                    ]
+                )
+            ]
+            * 3,
+        },
+        crs="EPSG:4326",
+    )
+    service._geojson_obj = None
+    service._centroid_cache = {}
+    service._build_name_lookup_cache()
+
+    assert service.list_microbacias() == ["Água Quente", "Gregório", "Monjolinho"]
+
+
+def test_gis_service_normalizes_alias_to_official_microbacia_name():
+    service = GisService.__new__(GisService)
+    service.name_field = "Nome_Do_Arquivo"
+    service.DE_PARA_NOMES = GisService.DE_PARA_NOMES
+    service.gdf = gpd.GeoDataFrame(
+        {
+            "Nome_Do_Arquivo": ["Gregório"],
+            "geometry": [
+                Polygon(
+                    [
+                        (-47.8900, -22.0150),
+                        (-47.8890, -22.0150),
+                        (-47.8890, -22.0140),
+                        (-47.8900, -22.0140),
+                    ]
+                )
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    service._geojson_obj = None
+    service._centroid_cache = {}
+    service._build_name_lookup_cache()
+
+    assert service.normalize_microbacia_name("Gregorio") == "Gregório"

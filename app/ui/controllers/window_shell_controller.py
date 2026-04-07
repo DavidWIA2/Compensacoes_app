@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import List, Sequence
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIntValidator, QKeySequence
@@ -36,6 +36,7 @@ from app.services.records_service import (
     TIPO_NULO,
     compute_metrics,
     display_tipo_value,
+    normalize_microbacia_key,
     tipo_is_eletronico,
 )
 from app.ui.components.themes import THEME_DARK, THEME_LIGHT, get_app_qss
@@ -110,7 +111,7 @@ class WindowShellController:
         self.window.search.textChanged.connect(self._on_global_search_changed)
         if hasattr(self.window.tcra_tab, "search_input"):
             self.window.tcra_tab.search_input.textChanged.connect(self._on_tcra_search_changed)
-        self.window.tabs.addTab(self.window.data_tab, "Dados & Cadastro")
+        self.window.tabs.addTab(self.window.data_tab, "Compensações")
         self.window.tabs.addTab(self.window.dash_tab, "Painel")
         self.window.tabs.addTab(self.window.operations_tab, "Opera\u00e7\u00f5es")
         self.window.tabs.addTab(self.window.tcra_tab, "TCRAs")
@@ -134,7 +135,7 @@ class WindowShellController:
         self.window.statusBar().addPermanentWidget(self.window.progress_cancel_button)
         self.window.statusBar().addPermanentWidget(self.window.form_state_label)
 
-        self.window.session_file_label = QLabel("Banco: local")
+        self.window.session_file_label = QLabel("Fonte: local")
         self.window.session_file_label.setObjectName("StatusChip")
         self.window.session_file_label.setMinimumWidth(int(220 * self.window.scale_factor))
         self.window.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -156,6 +157,9 @@ class WindowShellController:
         self.window.session_records_label = QLabel("Registros: 0")
         self.window.session_records_label.setObjectName("StatusChip")
 
+        self.window.session_sync_label = QLabel("Sincronia: aguardando")
+        self.window.session_sync_label.setObjectName("StatusChip")
+
         self.window.session_write_label = QLabel("Escrita: aguardando")
         self.window.session_write_label.setObjectName("StatusChip")
 
@@ -165,6 +169,7 @@ class WindowShellController:
         self.window.statusBar().addPermanentWidget(self.window.session_environment_label)
         self.window.statusBar().addPermanentWidget(self.window.session_file_label)
         self.window.statusBar().addPermanentWidget(self.window.session_records_label)
+        self.window.statusBar().addPermanentWidget(self.window.session_sync_label)
         self.window.statusBar().addPermanentWidget(self.window.session_write_label)
         self.window.statusBar().addPermanentWidget(self.window.session_selection_label)
         self.window.statusBar().setSizeGripEnabled(False)
@@ -441,11 +446,20 @@ class WindowShellController:
     def current_write_tooltip_text(self) -> str:
         return self._build_window_chrome_snapshot().write_tooltip
 
+    def current_sync_label_text(self) -> str:
+        return self._build_window_chrome_snapshot().sync_label
+
+    def current_sync_tooltip_text(self) -> str:
+        return self._build_window_chrome_snapshot().sync_tooltip
+
     def _build_window_chrome_snapshot(self):
         return build_window_chrome_snapshot(
             APP_WINDOW_TITLE,
             session_path=self.current_session_path(),
             availability=self.current_session_availability(),
+            access_session=getattr(self.window, "access_session", None),
+            remote_sync_status=getattr(self.window, "_remote_snapshot_refresh_status", None),
+            persistence_report=getattr(self.window, "_persistence_status_report", None),
             total_records=self.resolved_total_records(),
             filtered_records=self.resolved_filtered_records(),
             search_text=self.window.search.text(),
@@ -475,6 +489,8 @@ class WindowShellController:
         self.window.session_file_label.setToolTip(snapshot.file_tooltip)
         self.window.session_records_label.setText(snapshot.records_label)
         self.window.session_records_label.setToolTip(snapshot.records_tooltip)
+        self.window.session_sync_label.setText(snapshot.sync_label)
+        self.window.session_sync_label.setToolTip(snapshot.sync_tooltip)
         self.window.session_write_label.setText(snapshot.write_label)
         self.window.session_write_label.setToolTip(snapshot.write_tooltip)
         self.window.session_selection_label.setText(snapshot.selection_label)
@@ -575,6 +591,7 @@ class WindowShellController:
         self.window.dash_tab.btn_export_pdf.clicked.connect(build_command("export_dashboard_pdf_clicked"))
 
         self.window.operations_tab.btn_refresh.clicked.connect(build_command("refresh_operations_overview"))
+        self.window.operations_tab.btn_sync_production.clicked.connect(build_command("refresh_production_snapshot"))
         self.window.operations_tab.btn_history.clicked.connect(build_command("show_operation_history"))
         self.window.operations_tab.btn_rollback.clicked.connect(build_command("show_rollback_dialog"))
         self.window.operations_tab.btn_open_backup.clicked.connect(build_command("open_selected_operation_backup"))
@@ -715,9 +732,61 @@ class WindowShellController:
         mode = "dark" if self.window.is_dark_mode else "light"
         self.window._run_map_js(f"if(window.setTheme) window.setTheme('{mode}');", "theme")
 
+    def resolve_microbacia_display_name(self, value: object) -> str:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return ""
+        gis = getattr(self.window, "gis", None)
+        if gis is not None and hasattr(gis, "normalize_microbacia_name"):
+            normalized = str(gis.normalize_microbacia_name(raw_value) or "").strip()
+            if normalized:
+                return normalized
+        return raw_value
+
+    def select_form_microbacia(self, value: object) -> None:
+        combo = self.window.data_tab.in_micro
+        target_value = self.resolve_microbacia_display_name(value)
+        target_key = normalize_microbacia_key(target_value)
+        if target_key:
+            for index in range(combo.count()):
+                if normalize_microbacia_key(combo.itemText(index)) == target_key:
+                    combo.setCurrentIndex(index)
+                    return
+        combo.setCurrentText(target_value)
+
+    def _resolved_microbacia_options(self, facet_microbacias: Sequence[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+
+        def append_option(option: object) -> None:
+            display_name = self.resolve_microbacia_display_name(option)
+            key = normalize_microbacia_key(display_name)
+            if not key or key in seen:
+                return
+            seen.add(key)
+            merged.append(display_name)
+
+        gis = getattr(self.window, "gis", None)
+        if gis is not None and hasattr(gis, "list_microbacias"):
+            for microbacia in gis.list_microbacias():
+                append_option(microbacia)
+
+        for microbacia in facet_microbacias:
+            append_option(microbacia)
+
+        return merged
+
     def update_filters_from_records(self):
         facets = self.resolved_filter_facets(refresh=True)
-        self.window.data_tab.filter_micro.set_items(list(facets.microbacias))
+        current_micros = self.window.data_tab.filter_micro.checked_items()
+        current_micro_all = self.window.data_tab.filter_micro.is_all_selected()
+        micro_options = self._resolved_microbacia_options(facets.microbacias)
+        self.window.data_tab.filter_micro.set_items(micro_options)
+        self.window.data_tab.filter_micro.set_checked_items(
+            current_micros,
+            all_selected=current_micro_all,
+            emit_selection_changed=False,
+        )
         self.window.data_tab.filter_eletronico.set_items(list(STANDARD_TIPO_OPTIONS))
         self.window.data_tab.filter_year.blockSignals(True)
         self.window.data_tab.filter_year.clear()
@@ -730,10 +799,10 @@ class WindowShellController:
         self.window.data_tab.in_micro.blockSignals(True)
         self.window.data_tab.in_micro.clear()
         self.window.data_tab.in_micro.addItem("")
-        for micro in facets.microbacias:
+        for micro in self._resolved_microbacia_options(facets.microbacias):
             self.window.data_tab.in_micro.addItem(micro)
         if current_micro:
-            self.window.data_tab.in_micro.setCurrentText(current_micro)
+            self.select_form_microbacia(current_micro)
         self.window.data_tab.in_micro.blockSignals(False)
 
         checked_button = self.window.data_tab.eletronico_group.checkedButton()

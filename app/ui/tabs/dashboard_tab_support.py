@@ -102,17 +102,17 @@ def build_tcra_chart_payload(
 
 def build_local_overview_text(report: Optional[PersistenceRecordOverviewReport]) -> str:
     if report is None:
-        return "Resumo local (SQLite): indisponível para esta sessão."
+        return "Resumo do cache sincronizado: indisponível para esta sessão."
 
     if report.status == "indisponivel":
-        return "Resumo local (SQLite): o espelho local não está disponível nesta sessão."
+        return "Resumo do cache sincronizado: o cache local não está disponível nesta sessão."
 
     if report.status == "ausente":
-        return "Resumo local (SQLite): a sessão ainda não foi sincronizada para leitura local."
+        return "Resumo do cache sincronizado: a sessão ainda não foi sincronizada para leitura local."
 
     lines = [
         (
-            f"Espelho local (SQLite): {report.total_records} registro(s) | "
+            f"Cache local sincronizado: {report.total_records} registro(s) | "
             f"{report.compensados_count} compensados | "
             f"{report.pendentes_count} pendentes | "
             f"{report.records_with_plantios_count} com plantios"
@@ -137,12 +137,12 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
     if status.uses_sqlite:
         lines = [
             (
-                f"Leitura operacional atual: espelho local (SQLite) | "
+                f"Leitura operacional atual: cache local sincronizado | "
                 f"{status.filtered_records} registro(s) no recorte"
             )
         ]
         if status.strategy == "sqlite_query":
-            lines.append("Modo de leitura local: consulta indexada.")
+            lines.append("Modo de leitura: consulta indexada no cache.")
         if status.synced_at:
             lines.append(
                 f"Última sincronização válida: {format_audit_timestamp(status.synced_at)}"
@@ -162,9 +162,9 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
 
 def build_tcra_summary_text(overview: Optional[TcraRecordOverview]) -> str:
     if overview is None:
-        return "TCRAs: nenhum termo carregado no banco local."
+        return "TCRAs: nenhum termo carregado no cache sincronizado."
     return (
-        f"TCRAs no banco: {overview.total_count} | "
+        f"TCRAs no cache sincronizado: {overview.total_count} | "
         f"{overview.ativos_count} ativos | "
         f"{overview.mpsp_relacionados_count} MPSP | "
         f"{overview.sem_numero_tcra_count} sem número | "
@@ -229,8 +229,8 @@ def build_tcra_dashboard_export_context(
     if overview is None:
         return DashboardExportContext(
             title="Painel TCRA",
-            kpi_lines=("TCRAs: nenhum termo carregado no banco local.",),
-            filter_summary="Banco local TCRA",
+            kpi_lines=("TCRAs: nenhum termo carregado no cache sincronizado.",),
+            filter_summary="Cache sincronizado TCRA",
         )
 
     kpi_lines = (

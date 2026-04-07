@@ -15,7 +15,7 @@ def build_use_cases(snapshot=None, writer_calls=None):
         Path(path).write_text("{}", encoding="utf-8")
 
     return SupportOperationsUseCases(
-        app_name="Compensacoes",
+        app_name="Plataforma de Gestão Ambiental",
         app_version="1.2.3",
         log_dir="C:/logs",
         update_url_env_var="COMPENSACOES_UPDATE_URL",
@@ -32,8 +32,9 @@ def test_support_operations_build_about_dialog_data():
 
     about = use_cases.build_about_dialog_data()
 
-    assert about.title == "Sobre o Compensacoes"
-    assert "Compensacoes 1.2.3" in about.message
+    assert about.title == "Sobre - Plataforma de Gestão Ambiental"
+    assert "Plataforma de Gestão Ambiental 1.2.3" in about.message
+    assert "gestão territorial e monitoramento ambiental" in about.message.lower()
     assert "Python 3.12.0" in about.message
     assert "Manifest de atualização: https://example.com/manifest.json" in about.message
     assert "Variavel de override: COMPENSACOES_UPDATE_URL" in about.message

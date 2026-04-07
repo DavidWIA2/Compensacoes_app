@@ -38,7 +38,7 @@ from app.ui.controllers.window_session_controller import WindowSessionController
 from app.ui.controllers.window_shell_controller import WindowShellController
 from app.ui.components.job_runner import WindowJobRunner
 from app.ui.components.job_specs import BackgroundJobSpec, BlockingJobSpec
-from app.ui.components.ui_utils import resource_path, _ajustar_ambiente_pyinstaller
+from app.ui.components.ui_utils import build_app_icon, resource_path, _ajustar_ambiente_pyinstaller
 from app.ui.components.workers import UpdaterWorker
 from app.ui.main_window_support import (
     apply_window_icon,
@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
             microb_dir=MICROB_DIR,
         )
         apply_window_scaling(self, QApplication.instance())
-        apply_window_icon(self, resource_path("assets", "app.ico"))
+        apply_window_icon(self, build_app_icon())
 
         self.import_adapter_factory = ExternalSpreadsheetAdapter
         self.external_data_adapter_factory = self.import_adapter_factory

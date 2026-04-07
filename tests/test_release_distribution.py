@@ -14,7 +14,7 @@ def test_build_release_guide_filename_includes_version_and_arch():
 
 def test_build_release_guide_mentions_checksum_for_unsigned_release():
     payload = build_release_guide(
-        version="1.2.3",
+        version="1.2.3-beta.1",
         primary_filename="Compensacoes-v1.2.3-win64.zip",
         hash_filename="Compensacoes-v1.2.3-win64.sha256",
         signed=False,
@@ -24,6 +24,8 @@ def test_build_release_guide_mentions_checksum_for_unsigned_release():
     assert "verify_release_checksum.ps1" in payload
     assert "sem assinatura digital do Windows" in payload
     assert "https://example.com/app" in payload
+    assert "Canal de distribuicao: beta." in payload
+    assert "versao beta/prerelease" in payload
 
 
 def test_generate_release_guide_script_supports_direct_execution(tmp_path):

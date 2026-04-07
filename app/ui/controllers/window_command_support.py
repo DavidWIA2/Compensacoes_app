@@ -48,6 +48,7 @@ def build_window_command_bindings() -> tuple[WindowCommandBinding, ...]:
         WindowCommandBinding("show_rollback_dialog", "data_controller", "show_rollback_dialog"),
         WindowCommandBinding("show_operation_history", "data_controller", "show_operation_history"),
         WindowCommandBinding("refresh_operations_overview", "operations_controller", "refresh_overview"),
+        WindowCommandBinding("refresh_production_snapshot", "operations_controller", "refresh_production_snapshot"),
         WindowCommandBinding("open_selected_operation_backup", "operations_controller", "open_selected_backup"),
         WindowCommandBinding("open_logs_folder", "support_controller", "open_logs_folder"),
         WindowCommandBinding("export_diagnostics", "support_controller", "export_diagnostics"),

@@ -1,10 +1,11 @@
 from datetime import date
 
 from openpyxl import load_workbook
+from reportlab.platypus import Paragraph
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
-from app.services.tcra_report_service import export_tcra_excel_report, export_tcra_pdf_report
+from app.services.tcra_report_service import _build_pdf_table, export_tcra_excel_report, export_tcra_pdf_report
 
 
 def make_tcra(**overrides) -> Tcra:
@@ -94,3 +95,26 @@ def test_export_tcra_pdf_report_creates_non_empty_file(tmp_path):
 
     assert export_path.exists() is True
     assert export_path.stat().st_size > 0
+
+
+def test_build_pdf_table_uses_wrappable_paragraph_cells():
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+
+    styles = getSampleStyleSheet()
+    header_style = ParagraphStyle("header_test", parent=styles["Normal"])
+    cell_style = ParagraphStyle("cell_test", parent=styles["Normal"])
+
+    table = _build_pdf_table(
+        headers=["Coluna A", "Coluna B"],
+        rows=[["Texto muito longo para precisar quebrar linha dentro da célula", "Outro texto longo"]],
+        total_width=320,
+        column_weights=[0.5, 0.5],
+        header_style=header_style,
+        cell_style=cell_style,
+        header_background=colors.HexColor("#1F4E78"),
+    )
+
+    assert all(isinstance(cell, Paragraph) for cell in table._cellvalues[0])
+    assert all(isinstance(cell, Paragraph) for cell in table._cellvalues[1])
+    assert round(sum(table._colWidths), 5) == 320

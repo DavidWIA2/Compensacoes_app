@@ -188,7 +188,7 @@ class FormController:
             if not self.window.form_plantios:
                 self.window.data_tab.in_end_plantio.setText(snapshot.endereco_plantio)
 
-            self.window.data_tab.in_micro.setCurrentText(snapshot.microbacia)
+            self.window.shell_controller.select_form_microbacia(snapshot.microbacia)
 
             is_compensado = snapshot.compensado
             self.window.data_tab.chk_compensado.setChecked(is_compensado)

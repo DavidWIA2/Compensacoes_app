@@ -52,6 +52,8 @@ class OperationsController:
             shell_controller=getattr(self.window, "shell_controller", None),
             persistence=self.persistence,
             runtime_window=self.window,
+            access_session=getattr(self.window, "access_session", None),
+            remote_sync_status=getattr(self.window, "_remote_snapshot_refresh_status", None),
             session_source_status=getattr(self.window, "_local_session_source_status", None),
             authoritative_write_status=getattr(self.window, "_authoritative_write_status", None),
             mutation_sync_status=getattr(self.window, "_local_mutation_sync_status", None),
@@ -67,8 +69,10 @@ class OperationsController:
             snapshot.session_path,
             snapshot.events,
             snapshot.overview,
+            access_session=snapshot.access_session,
             persistence_report=snapshot.persistence_report,
             record_overview_report=snapshot.record_overview_report,
+            remote_sync_status=snapshot.remote_sync_status,
             session_source_status=snapshot.session_source_status,
             authoritative_write_status=snapshot.authoritative_write_status,
             mutation_sync_status=snapshot.mutation_sync_status,
@@ -96,3 +100,6 @@ class OperationsController:
             return
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(audit_backup_path(event)))
+
+    def refresh_production_snapshot(self):
+        return self.window.data_controller.refresh_production_snapshot()

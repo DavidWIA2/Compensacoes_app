@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def test_build_release_manifest_includes_optional_metadata():
     payload = build_release_manifest(
-        version="1.2.0",
+        version="1.2.0-beta.1",
         notes="Linha 1\n\nLinha 2",
         download_url="https://example.com/download.zip",
         sha256="ABC123",
@@ -28,10 +28,10 @@ def test_build_release_manifest_includes_optional_metadata():
     )
 
     assert payload == {
-        "version": "1.2.0",
+        "version": "1.2.0-beta.1",
         "notes": "Linha 1\nLinha 2",
         "published_at": "2026-03-18T12:00:00Z",
-        "channel": "stable",
+        "channel": "beta",
         "download_url": "https://example.com/download.zip",
         "homepage_url": "https://example.com/app",
         "filename": "download.zip",
@@ -43,6 +43,12 @@ def test_build_release_manifest_includes_optional_metadata():
 
 def test_normalize_release_notes_removes_blank_lines():
     assert normalize_release_notes("A\n\nB\n") == "A\nB"
+
+
+def test_build_release_manifest_preserves_explicit_channel_override():
+    payload = build_release_manifest(version="1.2.0-beta.1", channel="internal")
+
+    assert payload["channel"] == "internal"
 
 
 def test_write_release_manifest_persists_json(tmp_path):
@@ -103,3 +109,4 @@ def test_generate_release_manifest_script_supports_direct_execution(tmp_path):
     assert payload["download_url"] == "https://example.com/Compensacoes.zip"
     assert payload["signed"] is True
     assert payload["signature_mode"] == "store-thumbprint"
+    assert payload["channel"] == "stable"

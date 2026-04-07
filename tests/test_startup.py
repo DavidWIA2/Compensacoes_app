@@ -75,14 +75,23 @@ def test_main_stops_when_access_is_not_granted(monkeypatch):
         def setApplicationDisplayName(self, value):
             calls.append(("display", value))
 
+        def setWindowIcon(self, value):
+            calls.append(("icon", value))
+
         def exec(self):
             calls.append(("exec", None))
             return 99
 
     monkeypatch.setattr(main_module, "QApplication", FakeApp)
+    monkeypatch.setattr(
+        main_module,
+        "build_app_icon",
+        lambda: type("FakeIcon", (), {"isNull": lambda self: False})(),
+    )
     monkeypatch.setattr(main_module, "request_app_access", lambda: None)
 
     assert main_module.main() == 0
+    assert any(tag == "icon" for tag, _ in calls)
     assert ("exec", None) not in calls
 
 
@@ -109,6 +118,9 @@ def test_main_creates_window_with_access_session(monkeypatch):
         def setApplicationDisplayName(self, value):
             return None
 
+        def setWindowIcon(self, value):
+            splash_calls.append(("icon", value))
+
         def exec(self):
             return 321
 
@@ -130,6 +142,11 @@ def test_main_creates_window_with_access_session(monkeypatch):
             splash_calls.append("window-show")
 
     monkeypatch.setattr(main_module, "QApplication", FakeApp)
+    monkeypatch.setattr(
+        main_module,
+        "build_app_icon",
+        lambda: type("FakeIcon", (), {"isNull": lambda self: False})(),
+    )
     monkeypatch.setattr(main_module, "request_app_access", lambda: access_session)
     monkeypatch.setattr(main_module, "create_startup_splash", lambda: FakeSplash())
     monkeypatch.setattr(main_module, "register_tile_scheme", lambda: splash_calls.append("register-tile"))

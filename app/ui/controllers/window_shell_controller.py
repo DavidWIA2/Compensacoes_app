@@ -49,6 +49,7 @@ from app.ui.controllers.window_shell_support import (
     build_user_identity_tooltip_text,
     build_window_chrome_snapshot,
 )
+from app.ui.controllers.settings_support import ensure_window_fits_available_geometry
 from app.utils.logger import get_logger
 
 
@@ -82,7 +83,8 @@ class WindowShellController:
         central = QWidget()
         self.window.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(5, 5, 5, 0)
+        layout.setSpacing(4)
 
         toolbar_frame = QFrame(central)
         toolbar_frame.setObjectName("ShellToolbar")
@@ -367,20 +369,34 @@ class WindowShellController:
     def _is_compact_layout(self) -> bool:
         current_width = self.window.width()
         current_height = self.window.height()
+        screen = self.window.screen() or QApplication.instance().primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
+            if current_width > 0:
+                current_width = min(current_width, available.width())
+            if current_height > 0:
+                current_height = min(current_height, available.height())
         if current_width < 900 and not self.window.isVisible():
-            current_width = 1920
+            current_width = available.width() if screen is not None else 1920
         if current_height < 640 and not self.window.isVisible():
-            current_height = 1080
-        return current_width <= 1460 or current_height <= 860
+            current_height = available.height() if screen is not None else 1080
+        return current_width <= 1460 or current_height <= 980
 
     def _is_tight_layout(self) -> bool:
         current_width = self.window.width()
         current_height = self.window.height()
+        screen = self.window.screen() or QApplication.instance().primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
+            if current_width > 0:
+                current_width = min(current_width, available.width())
+            if current_height > 0:
+                current_height = min(current_height, available.height())
         if current_width < 900 and not self.window.isVisible():
-            current_width = 1920
+            current_width = available.width() if screen is not None else 1920
         if current_height < 640 and not self.window.isVisible():
-            current_height = 1080
-        return current_width <= 1320 or current_height <= 780
+            current_height = available.height() if screen is not None else 1080
+        return current_width <= 1320 or current_height <= 900
 
     def apply_responsive_layout(self) -> None:
         compact_mode = self._is_compact_layout()
@@ -953,6 +969,7 @@ class WindowShellController:
         self.window.data_tab._update_responsive_constraints()
         if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
             self.window.data_tab._finalize_responsive_layout()
+        ensure_window_fits_available_geometry(self.window)
 
     def apply_theme(self):
         theme = THEME_DARK if self.window.is_dark_mode else THEME_LIGHT

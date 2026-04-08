@@ -1,12 +1,13 @@
 import os
 from typing import List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from app.ui.controllers.settings_support import (
     build_loaded_window_settings_state,
     coerce_recent_files,
     collapse_recent_files_for_single_database_mode,
+    ensure_window_fits_available_geometry,
     is_named_session_path,
     normalize_session_path,
     resolve_preferred_directory,
@@ -134,7 +135,10 @@ class SettingsController:
         if not self.window._startup_geometry_restored:
             state |= Qt.WindowMaximized
         self.window.setWindowState(state)
+        ensure_window_fits_available_geometry(self.window)
         self.window._startup_layout_pending = True
+        QTimer.singleShot(0, self.window._finalize_startup_layout)
+        QTimer.singleShot(150, self.window._finalize_startup_layout)
 
     def load_sort_settings(self):
         if hasattr(self.window.settings, "sort_state"):

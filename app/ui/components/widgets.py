@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot, Signal, QEv
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QVBoxLayout, QLabel, QLineEdit, QCheckBox,
-    QHBoxLayout, QPushButton, QDialog, QDialogButtonBox, QSizePolicy
+    QHBoxLayout, QPushButton, QDialog, QDialogButtonBox, QSizePolicy, QSplitter, QSplitterHandle
 )
 from PySide6.QtWebEngineCore import QWebEnginePage
 
@@ -171,6 +171,29 @@ class NumericSortProxy(QSortFilterProxyModel):
             try: return float(l) < float(r)
             except: return str(l) < str(r)
         return super().lessThan(left, right)
+
+
+class LockedSplitterHandle(QSplitterHandle):
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self.setCursor(Qt.ArrowCursor)
+
+    def mousePressEvent(self, event):
+        event.ignore()
+
+    def mouseMoveEvent(self, event):
+        event.ignore()
+
+    def mouseReleaseEvent(self, event):
+        event.ignore()
+
+    def mouseDoubleClickEvent(self, event):
+        event.ignore()
+
+
+class LockedSplitter(QSplitter):
+    def createHandle(self):
+        return LockedSplitterHandle(self.orientation(), self)
 
 
 class KPICard(QFrame):

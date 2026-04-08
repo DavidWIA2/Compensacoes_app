@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.lifecycle_controller.schedule_post_show_fit()
         self._startup_close_guard_armed = True
         if not self._sign_out_activation_scheduled:
             self._sign_out_activation_scheduled = True

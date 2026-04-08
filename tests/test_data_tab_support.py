@@ -75,7 +75,8 @@ def test_data_tab_support_computes_layout_sizes():
         scale_factor=1.0,
         map_group_width=500,
         crud_buttons_width=640,
-    ) == 640
+        form_group_width=720,
+    ) == 720
 
     anchor_index = resolve_splitter_anchor_character_index("Tabela Tela Cheia")
     assert anchor_index == 9

@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableView, QHeaderView,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QHeaderView,
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
     QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton, QFrame,
 )
@@ -15,7 +15,13 @@ from PySide6.QtWebEngineCore import QWebEngineSettings
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
 from app.services.records_service import display_tipo_value
-from app.ui.components.widgets import CheckableComboBox, NumericSortProxy, MapBridge, DebugPage
+from app.ui.components.widgets import (
+    CheckableComboBox,
+    NumericSortProxy,
+    MapBridge,
+    DebugPage,
+    LockedSplitter,
+)
 from app.ui.components.model import CompensacoesTableModel
 from app.ui.components.ui_utils import resource_path
 from app.ui.tabs.data_tab_support import (
@@ -185,7 +191,7 @@ class DataTab(QWidget):
         filters_host_layout.addLayout(filters)
         layout.addWidget(filters_frame)
 
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter = LockedSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(int(8 * self.sf))
         self.splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
@@ -242,8 +248,8 @@ class DataTab(QWidget):
         self.crud_frame = crud_frame
         crud = QHBoxLayout(crud_frame)
         self.crud_layout = crud
-        crud.setContentsMargins(0, int(8 * self.sf), 0, 0)
-        crud.setSpacing(int(6 * self.sf))
+        crud.setContentsMargins(int(8 * self.sf), int(5 * self.sf), int(8 * self.sf), int(9 * self.sf))
+        crud.setSpacing(int(8 * self.sf))
         self._crud_spacing = crud.spacing()
         self.btn_clear = QPushButton("Novo cadastro")
         self.btn_add = QPushButton("Adicionar")
@@ -253,15 +259,15 @@ class DataTab(QWidget):
         self.btn_add.setProperty("kind", "success")
         self.btn_save_edit.setProperty("kind", "primary")
         self.btn_delete.setProperty("kind", "danger")
-        self.btn_clear.setProperty("kind", "chip-quiet")
-        self.btn_ficha_pdf.setProperty("kind", "chip-quiet")
+        self.btn_clear.setProperty("kind", "secondary")
+        self.btn_ficha_pdf.setProperty("kind", "secondary")
         self.btn_clear.setToolTip("Limpa o formulário atual e prepara um novo cadastro.")
         self.btn_add.setToolTip("Adiciona um novo registro de compensação.")
         self.btn_save_edit.setToolTip("Salva as alterações do registro selecionado.")
         self.btn_delete.setToolTip("Exclui o registro selecionado após confirmação.")
         self.btn_ficha_pdf.setToolTip("Gera a ficha PDF do registro atual selecionado.")
         for b in [self.btn_clear, self.btn_add, self.btn_save_edit, self.btn_delete, self.btn_ficha_pdf]:
-            b.setMinimumHeight(int(28 * self.sf))
+            b.setFixedHeight(max(int(28 * self.sf), 28))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             crud.addWidget(b)
         r_lay.addWidget(crud_frame, 0)
@@ -270,6 +276,8 @@ class DataTab(QWidget):
         r_lay.addWidget(self.map_group)
 
         self.map_host = QWidget()
+        self.map_host.setMinimumHeight(0)
+        self.map_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.map_host_layout = QVBoxLayout(self.map_host)
         self.map_host_layout.setContentsMargins(0, 0, 0, 0)
         self.map_host_layout.setSpacing(0)
@@ -284,6 +292,40 @@ class DataTab(QWidget):
         QTimer.singleShot(0, self._sync_left_panel_heights)
         QTimer.singleShot(0, self._update_responsive_constraints)
         QTimer.singleShot(0, self.align_splitter_to_table_width)
+
+    def _current_root_dimensions(self) -> tuple[int, int]:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        current_height = root.height() if root is not None and root.height() > 0 else self.height()
+
+        screen = None
+        if root is not None:
+            try:
+                screen = root.screen()
+            except Exception:
+                screen = None
+        if screen is None:
+            app = QApplication.instance()
+            screen = app.primaryScreen() if app is not None else None
+
+        if screen is not None:
+            available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
+            available_width = available.width()
+            available_height = available.height()
+            if (current_width <= 0 or current_width < 900) and not self.isVisible():
+                current_width = available_width
+            elif current_width > 0:
+                current_width = min(current_width, available_width)
+            if (current_height <= 0 or current_height < 640) and not self.isVisible():
+                current_height = available_height
+            elif current_height > 0:
+                current_height = min(current_height, available_height)
+
+        if current_width <= 0:
+            current_width = 1920
+        if current_height <= 0:
+            current_height = 1080
+        return current_width, current_height
 
     def _build_map_placeholder(self):
         self.map_placeholder = QWidget(self.map_host)
@@ -314,10 +356,13 @@ class DataTab(QWidget):
         self.map_placeholder.hide()
         self.map_placeholder.deleteLater()
         self.map_placeholder = None
+        self.map_placeholder_label = None
+        self.btn_load_map = None
 
     def _create_map_web_view(self):
         web = QWebEngineView()
         web.setMinimumHeight(int(350 * self.sf))
+        web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         web.setPage(DebugPage(web))
         settings = web.page().settings()
         settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
@@ -440,43 +485,56 @@ class DataTab(QWidget):
             scale_factor=self.sf,
             map_group_width=self.map_group.minimumSizeHint().width() if hasattr(self, "map_group") else None,
             crud_buttons_width=self._crud_buttons_minimum_width() if hasattr(self, "btn_ficha_pdf") else None,
+            form_group_width=(
+                self.form_group.minimumSizeHint().width() + max(int(12 * self.sf), 12)
+                if hasattr(self, "form_group")
+                else None
+            ),
         )
 
     def _update_responsive_constraints(self):
         if not hasattr(self, "right_panel"):
             return
-        compact_mode = self._is_compact_layout()
         preferred_width = self.preferred_right_panel_width()
-        if compact_mode:
-            preferred_width = max(int(preferred_width * 0.86), 460)
-        self.right_panel.setMinimumWidth(preferred_width)
+        self.right_panel.setMinimumWidth(max(preferred_width, 520))
 
     def _is_compact_layout(self) -> bool:
-        root = self.window()
-        current_width = root.width() if root is not None and root.width() > 0 else self.width()
-        if current_width < 900 and not self.isVisible():
-            current_width = 1920
-        return current_width <= 1460
+        current_width, current_height = self._current_root_dimensions()
+        return current_width <= 1460 or current_height <= 1048
 
     def _is_tight_layout(self) -> bool:
-        root = self.window()
-        current_width = root.width() if root is not None and root.width() > 0 else self.width()
-        if current_width < 900 and not self.isVisible():
-            current_width = 1920
-        return current_width <= 1320
+        current_width, current_height = self._current_root_dimensions()
+        return current_width <= 1320 or current_height <= 980
+
+    def _is_short_layout(self) -> bool:
+        _, current_height = self._current_root_dimensions()
+        return current_height <= 1048
+
+    def _is_very_short_layout(self) -> bool:
+        _, current_height = self._current_root_dimensions()
+        return current_height <= 960
 
     def _apply_responsive_layout(self) -> None:
         compact_mode = self._is_compact_layout()
         tight_mode = self._is_tight_layout()
+        short_mode = self._is_short_layout()
+        very_short_mode = self._is_very_short_layout()
 
-        self.lbl_workspace_subtitle.setVisible(not tight_mode)
-        self.lbl_workspace_helper.setVisible(not compact_mode)
-        self.lbl_form_context.setVisible(not compact_mode)
+        self.lbl_workspace_subtitle.setVisible(not tight_mode and not very_short_mode)
+        self.lbl_workspace_helper.setVisible(not compact_mode and not short_mode)
+        self.lbl_form_context.setVisible(not compact_mode and not short_mode)
+
+        filter_margin = max(int((8 if short_mode else 10) * self.sf), 6)
+        filter_spacing = max(int((4 if short_mode else 6) * self.sf), 4)
+        self.filters_host_layout.setContentsMargins(filter_margin, filter_margin, filter_margin, filter_margin)
+        self.filters_host_layout.setSpacing(filter_spacing)
+        self.filters_row.setSpacing(max(int((8 if short_mode else 12) * self.sf), 6))
+        self.filters_buttons_layout.setContentsMargins(0, int((8 if short_mode else 12) * self.sf), 0, 0)
 
         self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar filtros")
         self.btn_reset_sort.setText("Ordem" if compact_mode else "Restaurar ordem")
         self.btn_columns.setText("Colunas" if compact_mode else "Exibir colunas")
-        self.btn_table_full.setText("Tela cheia" if compact_mode else "Expandir tabela")
+        self.btn_table_full.setText("Expandir tabela")
         self.btn_manage_plantios.setText("Plantios" if compact_mode else "Plantios...")
 
         self.filter_micro.setMinimumWidth(int((160 if compact_mode else 220) * self.sf))
@@ -484,19 +542,108 @@ class DataTab(QWidget):
         self.filter_status.setMinimumWidth(int((108 if compact_mode else 130) * self.sf))
         self.filter_year.setMinimumWidth(int((82 if compact_mode else 90) * self.sf))
 
-        totals_height = max(int((190 if compact_mode else 230) * self.sf), 156 if compact_mode else 200)
-        self.group_totals.setFixedHeight(totals_height)
-        self.kpi_table.setMinimumHeight(max(int((92 if compact_mode else 120) * self.sf), 80))
-        self.micro_table.setMinimumHeight(max(int((92 if compact_mode else 120) * self.sf), 80))
+        compact_filter_button_height = 26 if short_mode else 28
+        for button in [self.btn_clear_filters, self.btn_reset_sort, self.btn_columns, self.btn_table_full]:
+            button.setMinimumHeight(max(int(compact_filter_button_height * self.sf), 24))
 
-        export_height = max(int((36 if compact_mode else 42) * self.sf), 32)
+        totals_height = max(
+            int(
+                (
+                    166
+                    if very_short_mode
+                    else 174
+                    if short_mode
+                    else 190
+                    if compact_mode
+                    else 230
+                )
+                * self.sf
+            ),
+            148 if very_short_mode else 156 if compact_mode or short_mode else 200,
+        )
+        self.group_totals.setFixedHeight(totals_height)
+        metrics_min_height = max(
+            int(((72 if very_short_mode else 80 if short_mode else 92 if compact_mode else 120) * self.sf)),
+            68 if very_short_mode else 76,
+        )
+        self.kpi_table.setMinimumHeight(metrics_min_height)
+        self.micro_table.setMinimumHeight(metrics_min_height)
+
+        export_height = max(int(((30 if short_mode else 36 if compact_mode else 42) * self.sf)), 28)
         self.bar_export.setFixedHeight(export_height)
+        export_button_height = max(min(export_height - 4, int(28 * self.sf)), 24)
+        export_vertical_margin = max((export_height - export_button_height) // 2, 2)
+        if hasattr(self, "export_bar_layout"):
+            self.export_bar_layout.setContentsMargins(
+                int(8 * self.sf),
+                export_vertical_margin,
+                int(8 * self.sf),
+                export_vertical_margin,
+            )
+        for button in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
+            button.setFixedHeight(export_button_height)
         if hasattr(self, "export_label"):
-            self.export_label.setVisible(not tight_mode)
+            self.export_label.setVisible(not tight_mode and not short_mode)
 
         self.combo_heatmap_type.setMinimumWidth(max(int((120 if compact_mode else 150) * self.sf), 110))
-        if hasattr(self, "map_placeholder_label"):
-            self.map_placeholder_label.setVisible(not tight_mode)
+        placeholder_label = getattr(self, "map_placeholder_label", None)
+        if placeholder_label is not None:
+            placeholder_label.setVisible(not tight_mode)
+
+        input_height = max(int(((25 if very_short_mode else 27 if short_mode else 30) * self.sf)), 24)
+        for widget in [
+            self.in_oficio,
+            self.in_avtec,
+            self.in_comp,
+            self.in_end,
+            self.in_end_plantio,
+            self.in_micro,
+            self.in_caixa,
+            self.btn_manage_plantios,
+            self.eletronico_cont,
+        ]:
+            widget.setFixedHeight(input_height)
+
+        self.chk_sn.setFixedWidth(max(int(((96 if short_mode else 108) * self.sf)), 84))
+        form_layout = self.form_group.layout()
+        if form_layout is not None:
+            side_margin = max(int(((12 if short_mode else 15) * self.sf)), 10)
+            top_margin = max(int(((10 if very_short_mode else 12 if short_mode else 14) * self.sf)), 8)
+            bottom_margin = max(int(((8 if short_mode else 10) * self.sf)), 8)
+            form_layout.setContentsMargins(side_margin, top_margin, side_margin, bottom_margin)
+            form_layout.setHorizontalSpacing(max(int(((8 if short_mode else 10) * self.sf)), 6))
+            form_layout.setVerticalSpacing(max(int(((7 if very_short_mode else 8 if short_mode else 10) * self.sf)), 6))
+            for row_index in range(4):
+                form_layout.setRowMinimumHeight(row_index, input_height)
+
+        map_layout = self.map_group.layout()
+        if map_layout is not None:
+            map_layout.setContentsMargins(
+                max(int(((8 if short_mode else 10) * self.sf)), 6),
+                max(int(((8 if short_mode else 10) * self.sf)), 6),
+                max(int(((8 if short_mode else 10) * self.sf)), 6),
+                max(int(((8 if short_mode else 10) * self.sf)), 6),
+            )
+            map_layout.setHorizontalSpacing(max(int(((6 if short_mode else 8) * self.sf)), 4))
+            map_layout.setVerticalSpacing(max(int(((4 if short_mode else 6) * self.sf)), 4))
+        map_button_height = max(int(((22 if short_mode else 24) * self.sf)), 20)
+        for button in [
+            self.btn_maps,
+            self.btn_maps_plantio,
+            self.btn_batch_geo,
+            self.btn_map_full,
+            self.btn_street_view,
+            self.btn_add_layer,
+        ]:
+            button.setMinimumHeight(map_button_height)
+        if self.has_map_web_view():
+            map_height = max(
+                int(((200 if very_short_mode else 230 if short_mode else 350) * self.sf)),
+                170 if very_short_mode else 205 if short_mode else 280,
+            )
+            self.web.setMinimumHeight(map_height)
+
+        self._update_form_group_height()
 
     def _finalize_responsive_layout(self) -> None:
         self._apply_responsive_layout()
@@ -543,8 +690,11 @@ class DataTab(QWidget):
         if not hasattr(self, "splitter") or self.splitter.count() < 2:
             return
 
-        sizes = self.splitter.sizes()
-        total_width = sum(sizes)
+        splitter_rect = self.splitter.contentsRect()
+        handle_total_width = self.splitter.handleWidth() * max(self.splitter.count() - 1, 0)
+        total_width = splitter_rect.width() - handle_total_width
+        if total_width <= 0:
+            total_width = sum(self.splitter.sizes())
         if total_width <= 0:
             return
 
@@ -670,7 +820,8 @@ class DataTab(QWidget):
         w.setProperty("panel", "subtle")
         w.setFixedHeight(int(42 * self.sf))
         l = QHBoxLayout(w)
-        l.setContentsMargins(int(8 * self.sf), int(6 * self.sf), int(8 * self.sf), int(6 * self.sf))
+        self.export_bar_layout = l
+        l.setContentsMargins(int(8 * self.sf), int(2 * self.sf), int(8 * self.sf), int(2 * self.sf))
         l.setSpacing(int(6 * self.sf))
         export_label = QLabel("Exportação do recorte atual")
         self.export_label = export_label
@@ -681,7 +832,7 @@ class DataTab(QWidget):
         self.btn_export_pdf = QPushButton("PDF")
         for b in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
             b.setProperty("kind", "chip-quiet")
-            b.setMinimumHeight(int(28 * self.sf))
+            b.setFixedHeight(max(int(24 * self.sf), 24))
             l.addWidget(b)
         l.addStretch(1)
         return w

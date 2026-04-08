@@ -4,6 +4,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from app.ui.components.job_specs import BackgroundJobSpec
+from app.ui.controllers.settings_support import ensure_window_fits_available_geometry
 from app.ui.controllers.window_lifecycle_support import (
     build_update_disconnect_callbacks,
     build_update_prompt_content,
@@ -16,6 +17,7 @@ class WindowLifecycleController:
     def __init__(self, window):
         self.window = window
         self._timers_bound = False
+        self._post_show_fit_scheduled = False
 
     def initialize_timers(self):
         self.window._startup_window_timer = QTimer(self.window)
@@ -70,6 +72,18 @@ class WindowLifecycleController:
         if self.window._startup_layout_pending and not self.window.isMinimized():
             self.window._startup_layout_pending = False
             self.window._finalize_startup_layout()
+
+    def schedule_post_show_fit(self):
+        if self._post_show_fit_scheduled:
+            return
+        self._post_show_fit_scheduled = True
+        QTimer.singleShot(0, self._fit_window_after_show)
+        QTimer.singleShot(180, self._fit_window_after_show)
+
+    def _fit_window_after_show(self):
+        if not self.window.isVisible() or self.window.isMinimized():
+            return
+        ensure_window_fits_available_geometry(self.window)
 
     def prompt_update(self, version: str, notes: str):
         prompt = build_update_prompt_content(version, notes)

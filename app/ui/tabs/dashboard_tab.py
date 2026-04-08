@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -50,8 +51,8 @@ class DashboardTab(QWidget):
         self.comp_web: QWebEngineView | None = None
         self.tcra_web: QWebEngineView | None = None
         self.web: QWebEngineView | None = None
-        self._chart_min_height = int(560 * self.sf)
-        self._card_max_height = int(46 * self.sf)
+        self._chart_min_height = self._resolve_chart_min_height()
+        self._card_max_height = self._resolve_card_max_height()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
@@ -106,6 +107,68 @@ class DashboardTab(QWidget):
 
         self.btn_open_operations.clicked.connect(self._open_operations_tab)
         self.btn_open_tcra_agenda.clicked.connect(self._open_tcra_tab)
+        self._apply_responsive_layout()
+
+    def _current_root_dimensions(self) -> tuple[int, int]:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        current_height = root.height() if root is not None and root.height() > 0 else self.height()
+
+        screen = None
+        if root is not None:
+            try:
+                screen = root.screen()
+            except Exception:
+                screen = None
+        if screen is None:
+            app = QApplication.instance()
+            screen = app.primaryScreen() if app is not None else None
+
+        if screen is not None:
+            available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
+            available_width = available.width()
+            available_height = available.height()
+            if (current_width <= 0 or current_width < 900) and not self.isVisible():
+                current_width = available_width
+            elif current_width > 0:
+                current_width = min(current_width, available_width)
+            if (current_height <= 0 or current_height < 640) and not self.isVisible():
+                current_height = available_height
+            elif current_height > 0:
+                current_height = min(current_height, available_height)
+
+        if current_width <= 0:
+            current_width = 1920
+        if current_height <= 0:
+            current_height = 1080
+        return current_width, current_height
+
+    def _is_short_layout(self) -> bool:
+        _, current_height = self._current_root_dimensions()
+        return current_height <= 1032
+
+    def _is_very_short_layout(self) -> bool:
+        _, current_height = self._current_root_dimensions()
+        return current_height <= 920
+
+    def _resolve_chart_min_height(self) -> int:
+        compact_mode = self._is_compact_layout()
+        short_mode = self._is_short_layout()
+        very_short_mode = self._is_very_short_layout()
+        target_height = (
+            250 if very_short_mode else
+            320 if short_mode else
+            420 if compact_mode else
+            520
+        )
+        minimum_height = 220 if very_short_mode else 260 if short_mode else 300
+        return max(int(target_height * self.sf), minimum_height)
+
+    def _resolve_card_max_height(self) -> int:
+        compact_mode = self._is_compact_layout()
+        short_mode = self._is_short_layout()
+        target_height = 34 if short_mode else 40 if compact_mode else 46
+        return max(int(target_height * self.sf), 30)
 
     def _configure_compact_info_label(self, label: QLabel, *, max_height: int) -> None:
         label.setWordWrap(True)
@@ -293,25 +356,21 @@ class DashboardTab(QWidget):
         self._apply_responsive_layout()
 
     def _is_compact_layout(self) -> bool:
-        root = self.window()
-        current_width = root.width() if root is not None and root.width() > 0 else self.width()
-        current_height = root.height() if root is not None and root.height() > 0 else self.height()
-        if current_width < 900 and not self.isVisible():
-            current_width = 1920
-        if current_height < 640 and not self.isVisible():
-            current_height = 1080
-        return current_width <= 1460 or current_height <= 860
+        current_width, current_height = self._current_root_dimensions()
+        return current_width <= 1460 or current_height <= 1032
 
     def _apply_responsive_layout(self) -> None:
         compact_mode = self._is_compact_layout()
-        tight_mode = compact_mode and self.height() <= 760
-        self.lbl_panel_subtitle.setVisible(not compact_mode)
+        short_mode = self._is_short_layout()
+        very_short_mode = self._is_very_short_layout()
+        tight_mode = compact_mode and very_short_mode
+        self.lbl_panel_subtitle.setVisible(not compact_mode and not short_mode)
         self.lbl_panel_context.setVisible(not tight_mode)
-        self.comp_subtitle.setVisible(not compact_mode)
-        self.tcra_subtitle.setVisible(not compact_mode)
+        self.comp_subtitle.setVisible(not short_mode)
+        self.tcra_subtitle.setVisible(not short_mode)
 
-        self._chart_min_height = max(int((420 if compact_mode else 560) * self.sf), 300)
-        self._card_max_height = max(int((40 if compact_mode else 46) * self.sf), 34)
+        self._chart_min_height = self._resolve_chart_min_height()
+        self._card_max_height = self._resolve_card_max_height()
         for card in [
             self.card_total,
             self.card_pend,
@@ -323,6 +382,13 @@ class DashboardTab(QWidget):
             self.card_tcra_cumpridos,
         ]:
             card.setMaximumHeight(self._card_max_height)
+
+        self.lbl_comp_summary.setMaximumHeight(max(int((22 if short_mode else 26) * self.sf), 20))
+        self.lbl_tcra_summary.setMaximumHeight(max(int((24 if short_mode else 28) * self.sf), 22))
+        self.lbl_local_overview.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
+        self.lbl_read_source.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
+        self.lbl_agenda_summary.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
+        self.lbl_tcra_agenda.setMaximumHeight(max(int((24 if short_mode else 30) * self.sf), 22))
 
         self.comp_web_host.setMinimumHeight(self._chart_min_height)
         self.tcra_web_host.setMinimumHeight(self._chart_min_height)

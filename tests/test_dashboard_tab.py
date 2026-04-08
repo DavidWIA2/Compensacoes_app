@@ -39,8 +39,8 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
 
     tab = dashboard_tab_module.DashboardTab(parent)
     assert tab.scope_tabs.count() == 2
-    assert tab.comp_web_host.minimumHeight() >= 400
-    assert tab.tcra_web_host.minimumHeight() >= 400
+    assert tab.comp_web_host.minimumHeight() >= 250
+    assert tab.tcra_web_host.minimumHeight() >= 250
     assert tab.compensation_details_panel.isHidden() is True
     assert getattr(tab, "compensacoes_web_placeholder_container") is not None
     report = PersistenceRecordOverviewReport(

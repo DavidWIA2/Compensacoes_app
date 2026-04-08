@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt, QObject, Signal, QTimer
+from PySide6.QtCore import Qt, QObject, Signal, QTimer, QRect
 from PySide6.QtGui import QCloseEvent, QPalette, QStandardItemModel
 
 from app.application.use_cases.persistence_monitoring import (
@@ -26,6 +26,7 @@ from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.tabs.data_tab import DataTab
 from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
+from app.ui.components.widgets import LockedSplitter
 from app.application.use_cases.local_record_queries import (
     LocalDuplicateCheckResult,
     LocalFilterFacetsResult,
@@ -958,6 +959,17 @@ def test_splitter_and_panels_ignore_vertical_size_hints():
     assert window.data_tab.left_panel.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
     assert window.data_tab.right_panel.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Ignored
 
+
+def test_compensacoes_splitter_is_locked_for_manual_drag():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    settle_window(window)
+
+    assert isinstance(window.data_tab.splitter, LockedSplitter)
+
+    window.close()
+
     window.close()
 
 
@@ -1141,6 +1153,38 @@ def test_batch_geocode_keeps_window_height_stable(monkeypatch):
     window.close()
 
 
+def test_export_bar_buttons_fit_inside_bar_height():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    settle_window(window)
+
+    export_bar_height = window.data_tab.bar_export.height()
+    for button in [
+        window.data_tab.btn_export_csv,
+        window.data_tab.btn_export_spreadsheet,
+        window.data_tab.btn_export_pdf,
+    ]:
+        assert button.geometry().bottom() <= export_bar_height
+
+    window.close()
+
+
+def test_crud_bar_has_padding_and_secondary_edge_actions():
+    window = MainWindow()
+    window.resize(1600, 900)
+    window.show()
+    settle_window(window)
+
+    margins = window.data_tab.crud_layout.contentsMargins()
+    assert margins.top() > 0
+    assert margins.bottom() > 0
+    assert window.data_tab.btn_clear.property("kind") == "secondary"
+    assert window.data_tab.btn_ficha_pdf.property("kind") == "secondary"
+
+    window.close()
+
+
 def test_right_panel_reserves_width_for_original_form_layout():
     window = MainWindow()
     window.resize(1600, 900)
@@ -1149,14 +1193,10 @@ def test_right_panel_reserves_width_for_original_form_layout():
 
     preferred_width = window.data_tab.preferred_right_panel_width()
     minimum_width = window.data_tab.right_panel.minimumWidth()
-    if window.data_tab._is_compact_layout():
-        assert minimum_width == max(int(preferred_width * 0.86), 460)
-        assert minimum_width >= min(window.data_tab.map_group.minimumSizeHint().width(), 460)
-        assert minimum_width >= 460
-    else:
-        assert minimum_width >= preferred_width
-        assert minimum_width >= window.data_tab.map_group.minimumSizeHint().width()
-        assert minimum_width >= 560
+    assert minimum_width >= preferred_width
+    assert minimum_width >= window.data_tab.map_group.minimumSizeHint().width()
+    assert minimum_width >= window.data_tab.form_group.minimumSizeHint().width()
+    assert minimum_width >= 560
     assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
     assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
     assert window.data_tab.form_group.layout().itemAtPosition(4, 1).widget() is window.data_tab.plantio_actions_container
@@ -1164,6 +1204,27 @@ def test_right_panel_reserves_width_for_original_form_layout():
         window.data_tab.btn_manage_plantios.fontMetrics().horizontalAdvance(window.data_tab.btn_manage_plantios.text()) + 20
     )
     assert window.data_tab.in_end_plantio.minimumWidth() >= 170
+
+    window.close()
+
+
+def test_align_splitter_uses_available_width_instead_of_stale_sizes(monkeypatch):
+    window = MainWindow()
+    captured = {}
+    expected_right_width = 714
+
+    monkeypatch.setattr(window.data_tab, "_update_responsive_constraints", lambda: window.data_tab.right_panel.setMinimumWidth(expected_right_width))
+    monkeypatch.setattr(window.data_tab, "preferred_left_panel_width", lambda: 1200)
+    monkeypatch.setattr(window.data_tab, "_preferred_splitter_anchor_left_width", lambda: None)
+    monkeypatch.setattr(window.data_tab.splitter, "sizes", lambda: [120, 120])
+    monkeypatch.setattr(window.data_tab.splitter, "contentsRect", lambda: QRect(0, 0, 1890, 640))
+    monkeypatch.setattr(window.data_tab.splitter, "count", lambda: 2)
+    monkeypatch.setattr(window.data_tab.splitter, "handleWidth", lambda: 7)
+    monkeypatch.setattr(window.data_tab.splitter, "setSizes", lambda sizes: captured.setdefault("sizes", list(sizes)))
+
+    window.data_tab.align_splitter_to_table_width()
+
+    assert captured["sizes"] == [1169, 714]
 
     window.close()
 
@@ -1225,9 +1286,22 @@ def test_left_panel_layout_keeps_bottom_breathing_room():
     assert window.data_tab.left_panel.layout().contentsMargins().bottom() >= 12
     assert window.data_tab.group_totals.minimumHeight() == window.data_tab.group_totals.maximumHeight()
     compact_mode = window.data_tab._is_compact_layout()
+    short_mode = window.data_tab._is_short_layout()
+    very_short_mode = window.data_tab._is_very_short_layout()
     expected_height = max(
-        int((190 if compact_mode else 230) * window.scale_factor),
-        156 if compact_mode else 200,
+        int(
+            (
+                166
+                if very_short_mode
+                else 174
+                if short_mode
+                else 190
+                if compact_mode
+                else 230
+            )
+            * window.scale_factor
+        ),
+        148 if very_short_mode else 156 if compact_mode or short_mode else 200,
     )
     assert window.data_tab.group_totals.height() == expected_height
 

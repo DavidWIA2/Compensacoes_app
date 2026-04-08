@@ -45,7 +45,7 @@ def resolve_primary_screen_dimensions(app: QApplication | None = None) -> tuple[
     screen = qt_app.primaryScreen()
     if screen is None:
         return 1920, 1080
-    geometry = screen.geometry()
+    geometry = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
     return geometry.width(), geometry.height()
 
 

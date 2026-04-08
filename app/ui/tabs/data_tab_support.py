@@ -89,6 +89,7 @@ def compute_preferred_right_panel_width(
     scale_factor: float,
     map_group_width: int | None = None,
     crud_buttons_width: int | None = None,
+    form_group_width: int | None = None,
 ) -> int:
     responsive_scale = max(float(scale_factor), 0.82)
     widths = [max(int(620 * responsive_scale), 500)]
@@ -96,6 +97,8 @@ def compute_preferred_right_panel_width(
         widths.append(int(map_group_width))
     if crud_buttons_width is not None:
         widths.append(int(crud_buttons_width))
+    if form_group_width is not None:
+        widths.append(int(form_group_width))
     return max(widths)
 
 

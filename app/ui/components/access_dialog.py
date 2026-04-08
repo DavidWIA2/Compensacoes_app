@@ -4,6 +4,7 @@ from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QDialog,
     QFormLayout,
     QFrame,
@@ -63,6 +64,19 @@ QLabel#suffixLabel {
 }
 QLabel#accessHint { color: #57718f; font-size: 12px; }
 QLabel#accessStatusText { color: #20446f; font-size: 12px; font-weight: 600; }
+QLabel#accessBadge {
+    color: #20446f;
+    background-color: rgba(255,255,255,0.16);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 11px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 700;
+}
+QFrame#accessBadgeRow {
+    background: transparent;
+    border: none;
+}
 QLineEdit {
     min-height: 42px;
     background-color: #ffffff;
@@ -135,8 +149,56 @@ def _build_corporate_email_row(input_field: QLineEdit, *, parent: QWidget | None
     return container
 
 
+def _build_password_row(
+    input_field: QLineEdit,
+    *,
+    parent: QWidget | None = None,
+    show_label: str = "Mostrar",
+    hide_label: str = "Ocultar",
+) -> tuple[QWidget, QPushButton]:
+    container = QWidget(parent)
+    container_layout = QHBoxLayout(container)
+    container_layout.setContentsMargins(0, 0, 0, 0)
+    container_layout.setSpacing(8)
+
+    toggle_button = QPushButton(show_label, container)
+    toggle_button.setCheckable(True)
+    toggle_button.setAutoDefault(False)
+    toggle_button.setDefault(False)
+    toggle_button.setMinimumWidth(88)
+    toggle_button.setToolTip("Alterna a visibilidade da senha digitada.")
+    _set_button_role(toggle_button, "subtle")
+
+    def _sync_visibility(checked: bool) -> None:
+        input_field.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+        toggle_button.setText(hide_label if checked else show_label)
+
+    toggle_button.toggled.connect(_sync_visibility)
+    _sync_visibility(False)
+
+    container_layout.addWidget(input_field, stretch=1)
+    container_layout.addWidget(toggle_button, stretch=0)
+    return container, toggle_button
+
+
 def _normalize_corporate_email_field(input_field: QLineEdit) -> str:
     return normalize_corporate_email(input_field.text())
+
+
+def _build_access_badge_row(*texts: str, parent: QWidget | None = None) -> QWidget:
+    container = QFrame(parent)
+    container.setObjectName("accessBadgeRow")
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    for text in texts:
+        if not str(text).strip():
+            continue
+        label = QLabel(str(text), container)
+        label.setObjectName("accessBadge")
+        layout.addWidget(label, 0)
+    layout.addStretch(1)
+    return container
 
 
 def _configure_text_input(
@@ -196,16 +258,26 @@ class SplashVisualPanel(QFrame):
         feature_layout.addWidget(feature_title)
 
         for text in (
-            "Compensações, TCRAs e monitoramento ambiental em um único fluxo.",
-            "Autenticação de produção, ambiente de demonstração e base sincronizada.",
-            "Experiência institucional alinhada ao painel principal do sistema.",
+            "Compensações, TCRAs e monitoramento ambiental no mesmo ambiente institucional.",
+            "Acesso de produção com autenticação corporativa, demonstração isolada e base sincronizada.",
+            "Experiência alinhada à rotina operacional da Prefeitura, com leitura clara e ações guiadas.",
         ):
             label = QLabel(text, feature_block)
             label.setWordWrap(True)
             label.setStyleSheet("color: rgba(255,255,255,0.86); font-size: 12px;")
             feature_layout.addWidget(label)
 
-        footer = QLabel("Base oficial protegida • cache sincronizado • operação assistida", self)
+        badges = _build_access_badge_row(
+            "Base oficial protegida",
+            "Conta corporativa",
+            "Operação assistida",
+            parent=self,
+        )
+
+        footer = QLabel(
+            "Uso institucional com identidade corporativa, base oficial protegida e suporte operacional.",
+            self,
+        )
         footer.setWordWrap(True)
         footer.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 12px; font-weight: 600;")
 
@@ -214,6 +286,7 @@ class SplashVisualPanel(QFrame):
         layout.addWidget(title, stretch=0)
         layout.addWidget(subtitle, stretch=0)
         layout.addWidget(accent, stretch=0)
+        layout.addWidget(badges, stretch=0)
         layout.addStretch(1)
         layout.addWidget(feature_block, stretch=0)
         layout.addStretch(1)
@@ -315,14 +388,17 @@ class BootstrapFirstAdminDialog(QDialog):
         title = QLabel("Criar primeiro administrador", shell)
         title.setObjectName("accessTitle")
         title.setStyleSheet("font-size: 22px;")
-        subtitle = QLabel(
-            "Use este fluxo apenas na primeira configuração do ambiente de produção.",
+        self.header_subtitle = QLabel(
+            "Use este fluxo apenas na primeira configuração do ambiente oficial da Prefeitura.",
             shell,
         )
-        subtitle.setObjectName("accessSubtitle")
-        subtitle.setWordWrap(True)
+        self.header_subtitle.setObjectName("accessSubtitle")
+        self.header_subtitle.setWordWrap(True)
         layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(self.header_subtitle)
+        layout.addWidget(
+            _build_access_badge_row("Primeiro acesso", "Perfil administrador", parent=shell)
+        )
 
         form_host = QFrame(shell)
         form_host.setObjectName("accessSection")
@@ -334,6 +410,11 @@ class BootstrapFirstAdminDialog(QDialog):
         self.email_input = QLineEdit(form_host)
         self.password_input = QLineEdit(form_host)
         self.confirm_password_input = QLineEdit(form_host)
+        password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=form_host)
+        confirm_password_row, self.confirm_password_toggle_button = _build_password_row(
+            self.confirm_password_input,
+            parent=form_host,
+        )
 
         _configure_text_input(self.display_name_input, placeholder="Nome para exibição")
         _configure_text_input(self.email_input, placeholder="nome.sobrenome")
@@ -343,8 +424,8 @@ class BootstrapFirstAdminDialog(QDialog):
         rows = {
             "Nome": self.display_name_input,
             "Email": _build_corporate_email_row(self.email_input, parent=form_host),
-            "Senha": self.password_input,
-            "Confirmar": self.confirm_password_input,
+            "Senha": password_row,
+            "Confirmar": confirm_password_row,
         }
         for label_text, field in rows.items():
             label = QLabel(label_text, form_host)
@@ -352,6 +433,14 @@ class BootstrapFirstAdminDialog(QDialog):
             form_layout.addRow(label, field)
 
         layout.addWidget(form_host)
+
+        helper = QLabel(
+            "Use o nome corporativo do servidor, defina uma senha inicial forte e confirme os dados antes de liberar o primeiro acesso.",
+            shell,
+        )
+        helper.setObjectName("accessHint")
+        helper.setWordWrap(True)
+        layout.addWidget(helper)
 
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("Cancelar", shell)
@@ -415,13 +504,16 @@ class RequestPasswordResetDialog(QDialog):
         title.setObjectName("accessTitle")
         title.setStyleSheet("font-size: 22px;")
         subtitle = QLabel(
-            "Informe seu email corporativo para solicitar o código ou link de recuperação.",
+            "Informe seu email corporativo para solicitar um código ou link de recuperação diretamente no ambiente oficial.",
             shell,
         )
         subtitle.setObjectName("accessSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addWidget(
+            _build_access_badge_row("Conta corporativa", "Fluxo oficial", parent=shell)
+        )
 
         form_host = QFrame(shell)
         form_host.setObjectName("accessSection")
@@ -439,6 +531,14 @@ class RequestPasswordResetDialog(QDialog):
         email_label.setObjectName("fieldLabel")
         form_layout.addRow(email_label, _build_corporate_email_row(self.email_input, parent=form_host))
         layout.addWidget(form_host)
+
+        helper = QLabel(
+            "Se preferir, um administrador também pode redefinir sua senha pela tela de Administração do sistema.",
+            shell,
+        )
+        helper.setObjectName("accessHint")
+        helper.setWordWrap(True)
+        layout.addWidget(helper)
 
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("Cancelar", shell)
@@ -488,13 +588,16 @@ class CompletePasswordResetDialog(QDialog):
         title.setObjectName("accessTitle")
         title.setStyleSheet("font-size: 22px;")
         subtitle = QLabel(
-            "Cole o link ou código recebido e defina a nova senha para concluir a recuperação.",
+            "Cole o link ou código recebido por email e defina a nova senha para concluir a recuperação no próprio desktop.",
             shell,
         )
         subtitle.setObjectName("accessSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(subtitle)
+        layout.addWidget(
+            _build_access_badge_row("Link ou código", "Redefinição segura", parent=shell)
+        )
 
         form_host = QFrame(shell)
         form_host.setObjectName("accessSection")
@@ -506,6 +609,11 @@ class CompletePasswordResetDialog(QDialog):
         self.recovery_input = QLineEdit(form_host)
         self.password_input = QLineEdit(form_host)
         self.confirm_password_input = QLineEdit(form_host)
+        password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=form_host)
+        confirm_password_row, self.confirm_password_toggle_button = _build_password_row(
+            self.confirm_password_input,
+            parent=form_host,
+        )
 
         _configure_text_input(self.email_input, placeholder="nome.sobrenome")
         _configure_text_input(
@@ -519,8 +627,8 @@ class CompletePasswordResetDialog(QDialog):
         rows = (
             ("Email", _build_corporate_email_row(self.email_input, parent=form_host)),
             ("Link ou código", self.recovery_input),
-            ("Nova senha", self.password_input),
-            ("Confirmar", self.confirm_password_input),
+            ("Nova senha", password_row),
+            ("Confirmar", confirm_password_row),
         )
         for label_text, field in rows:
             label = QLabel(label_text, form_host)
@@ -528,6 +636,14 @@ class CompletePasswordResetDialog(QDialog):
             form_layout.addRow(label, field)
 
         layout.addWidget(form_host)
+
+        helper = QLabel(
+            "Você pode colar o link completo recebido no email ou somente o código de recuperação, sem sair do aplicativo.",
+            shell,
+        )
+        helper.setObjectName("accessHint")
+        helper.setWordWrap(True)
+        layout.addWidget(helper)
 
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("Cancelar", shell)
@@ -585,7 +701,7 @@ class AccessDialog(QDialog):
         self.setObjectName("AccessDialog")
         self.setWindowTitle(f"Acesso - {APP_NAME}")
         self.setModal(True)
-        self.setMinimumSize(1040, 640)
+        self.setMinimumSize(920, 580)
         self.setSizeGripEnabled(False)
         _apply_access_dialog_theme(self)
 
@@ -602,6 +718,7 @@ class AccessDialog(QDialog):
         root.addWidget(self.shell)
 
         shell_layout = QHBoxLayout(self.shell)
+        self.shell_layout = shell_layout
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
@@ -613,10 +730,12 @@ class AccessDialog(QDialog):
         shell_layout.addWidget(self.form_pane, stretch=11)
 
         form_layout = QVBoxLayout(self.form_pane)
+        self.form_layout = form_layout
         form_layout.setContentsMargins(40, 34, 40, 34)
         form_layout.setSpacing(18)
 
         header_row = QHBoxLayout()
+        self.header_row = header_row
         header_row.setSpacing(14)
 
         logo_label = QLabel(self.form_pane)
@@ -638,15 +757,22 @@ class AccessDialog(QDialog):
         eyebrow.setObjectName("accessEyebrow")
         title = QLabel(APP_NAME, self.form_pane)
         title.setObjectName("accessTitle")
-        subtitle = QLabel(
-            "Entre no ambiente de produção, explore a demonstração ou recupere o acesso com a mesma identidade visual do sistema.",
+        self.header_subtitle = QLabel(
+            "Acesse o ambiente oficial, utilize a demonstração isolada ou recupere sua senha mantendo o mesmo padrão institucional do sistema.",
             self.form_pane,
         )
-        subtitle.setObjectName("accessSubtitle")
-        subtitle.setWordWrap(True)
+        self.header_subtitle.setObjectName("accessSubtitle")
+        self.header_subtitle.setWordWrap(True)
         title_stack.addWidget(eyebrow)
         title_stack.addWidget(title)
-        title_stack.addWidget(subtitle)
+        self.header_badges = _build_access_badge_row(
+            "Produção oficial",
+            "Demonstração isolada",
+            "Email corporativo",
+            parent=self.form_pane,
+        )
+        title_stack.addWidget(self.header_subtitle)
+        title_stack.addWidget(self.header_badges)
 
         header_row.addWidget(logo_label, stretch=0, alignment=Qt.AlignTop)
         header_row.addLayout(title_stack, stretch=1)
@@ -654,8 +780,16 @@ class AccessDialog(QDialog):
 
         self.production_group, production_layout, self.production_hint = _build_section_shell(
             "Produção",
-            "Use sua conta institucional para acessar a base oficial compartilhada.",
+            "Use sua conta institucional da Prefeitura para acessar a base oficial compartilhada.",
             parent=self.form_pane,
+        )
+        production_layout.addWidget(
+            _build_access_badge_row(
+                "Base oficial",
+                "Sincronia ativa",
+                "Uso corporativo",
+                parent=self.production_group,
+            )
         )
         production_form = QFormLayout()
         production_form.setContentsMargins(0, 0, 0, 0)
@@ -663,6 +797,10 @@ class AccessDialog(QDialog):
 
         self.email_input = QLineEdit(self.production_group)
         self.password_input = QLineEdit(self.production_group)
+        self.password_row, self.password_toggle_button = _build_password_row(
+            self.password_input,
+            parent=self.production_group,
+        )
         _configure_text_input(
             self.email_input,
             placeholder="nome.sobrenome",
@@ -675,8 +813,8 @@ class AccessDialog(QDialog):
             password=True,
         )
 
-        self.production_button = QPushButton("Entrar em Produção", self.production_group)
-        self.forgot_password_button = QPushButton("Recuperar senha", self.production_group)
+        self.production_button = QPushButton("Entrar na Produção", self.production_group)
+        self.forgot_password_button = QPushButton("Esqueci minha senha", self.production_group)
         self.bootstrap_button = QPushButton("Criar primeiro administrador", self.production_group)
         self.production_status = QLabel("", self.production_group)
         self.production_status.setObjectName("accessStatusText")
@@ -694,47 +832,84 @@ class AccessDialog(QDialog):
         password_label = QLabel("Senha", self.production_group)
         password_label.setObjectName("fieldLabel")
         production_form.addRow(email_label, _build_corporate_email_row(self.email_input, parent=self.production_group))
-        production_form.addRow(password_label, self.password_input)
+        production_form.addRow(password_label, self.password_row)
         production_layout.addLayout(production_form)
+        self.production_domain_hint = QLabel(
+            "Digite apenas a parte antes de @saocarlos.sp.gov.br. O domínio corporativo é completado automaticamente.",
+            self.production_group,
+        )
+        self.production_domain_hint.setObjectName("accessHint")
+        self.production_domain_hint.setWordWrap(True)
+        self.production_security_note = QLabel(
+            "Somente contas autorizadas podem acessar a base oficial e sincronizar o cache local.",
+            self.production_group,
+        )
+        self.production_security_note.setObjectName("accessHint")
+        self.production_security_note.setWordWrap(True)
+        production_layout.addWidget(self.production_domain_hint)
+        production_layout.addWidget(self.production_security_note)
         production_layout.addWidget(self.production_status)
 
         production_actions = QHBoxLayout()
+        self.production_actions = production_actions
         production_actions.setSpacing(10)
         production_actions.addWidget(self.production_button, stretch=1)
         production_layout.addLayout(production_actions)
 
-        production_secondary = QHBoxLayout()
-        production_secondary.setSpacing(10)
-        production_secondary.addWidget(self.forgot_password_button, stretch=1)
-        production_secondary.addWidget(self.bootstrap_button, stretch=1)
-        production_layout.addLayout(production_secondary)
+        self.production_secondary = QBoxLayout(QBoxLayout.LeftToRight)
+        self.production_secondary.setContentsMargins(0, 0, 0, 0)
+        self.production_secondary.setSpacing(10)
+        self.production_secondary.addWidget(self.forgot_password_button, stretch=1)
+        self.production_secondary.addWidget(self.bootstrap_button, stretch=1)
+        production_layout.addLayout(self.production_secondary)
 
         self.demo_group, demo_layout, self.demo_hint = _build_section_shell(
             "Demonstração",
             "Abra uma base fictícia isolada para conhecer a experiência do produto sem impactar a produção.",
             parent=self.form_pane,
         )
-        self.demo_button = QPushButton("Entrar em Demonstração", self.demo_group)
+        demo_layout.addWidget(
+            _build_access_badge_row(
+                "Treinamento",
+                "Base separada",
+                "Sem impacto na produção",
+                parent=self.demo_group,
+            )
+        )
+        self.demo_button = QPushButton("Abrir demonstração", self.demo_group)
         self.demo_button.setToolTip("Abre a base de demonstração com dados fictícios e independentes da produção.")
         _set_button_role(self.demo_button, "success")
+        self.demo_note = QLabel(
+            "Ideal para treinamento, testes e validação visual sem qualquer risco para a base oficial.",
+            self.demo_group,
+        )
+        self.demo_note.setObjectName("accessHint")
+        self.demo_note.setWordWrap(True)
         demo_layout.addWidget(self.demo_button)
+        demo_layout.addWidget(self.demo_note)
 
         self.status_panel = QFrame(self.form_pane)
         self.status_panel.setObjectName("accessStatusPanel")
         status_layout = QVBoxLayout(self.status_panel)
         status_layout.setContentsMargins(18, 16, 18, 16)
         status_layout.setSpacing(6)
-        status_title = QLabel("Estado do acesso", self.status_panel)
+        status_title = QLabel("Orientação do acesso", self.status_panel)
         status_title.setObjectName("sectionTitle")
         status_title.setStyleSheet("font-size: 14px;")
         self.status_label = QLabel(
-            "Selecione como deseja entrar. O ambiente de produção usa autenticação institucional e cache sincronizado.",
+            "Selecione como deseja entrar. Produção usa autenticação institucional e cache sincronizado; Demonstração abre uma base isolada.",
             self.status_panel,
         )
         self.status_label.setObjectName("accessHint")
         self.status_label.setWordWrap(True)
+        self.status_badges = _build_access_badge_row(
+            "Produção: base oficial",
+            "Demonstração: ambiente isolado",
+            parent=self.status_panel,
+        )
         status_layout.addWidget(status_title)
         status_layout.addWidget(self.status_label)
+        status_layout.addWidget(self.status_badges)
 
         footer_row = QHBoxLayout()
         footer_row.setSpacing(10)
@@ -755,6 +930,72 @@ class AccessDialog(QDialog):
         self.bootstrap_button.clicked.connect(self._handle_bootstrap_admin)
         self.demo_button.clicked.connect(self._handle_demo_entry)
         self.cancel_button.clicked.connect(self.reject)
+        self.email_input.editingFinished.connect(
+            lambda: self.email_input.setText(display_corporate_email_local_part(self.email_input.text()))
+        )
+        self.password_input.returnPressed.connect(self._handle_production_login)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._apply_responsive_layout()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _is_compact_layout(self) -> bool:
+        current_width = self.width()
+        current_height = self.height()
+        if current_width < 820 and not self.isVisible():
+            current_width = 1280
+        if current_height < 560 and not self.isVisible():
+            current_height = 800
+        return current_width <= 1220 or current_height <= 760
+
+    def _is_tight_layout(self) -> bool:
+        current_width = self.width()
+        current_height = self.height()
+        if current_width < 820 and not self.isVisible():
+            current_width = 1280
+        if current_height < 560 and not self.isVisible():
+            current_height = 800
+        return current_width <= 1080 or current_height <= 700
+
+    def _apply_responsive_layout(self) -> None:
+        compact_mode = self._is_compact_layout()
+        tight_mode = self._is_tight_layout()
+        self.visual_panel.setVisible(not tight_mode)
+        if hasattr(self, "header_subtitle"):
+            self.header_subtitle.setVisible(not compact_mode)
+        if hasattr(self, "header_badges"):
+            self.header_badges.setVisible(not compact_mode)
+        if hasattr(self, "production_domain_hint"):
+            self.production_domain_hint.setVisible(not tight_mode)
+        if hasattr(self, "production_security_note"):
+            self.production_security_note.setVisible(not compact_mode)
+        if hasattr(self, "demo_note"):
+            self.demo_note.setVisible(not compact_mode)
+        if hasattr(self, "status_badges"):
+            self.status_badges.setVisible(not compact_mode)
+
+        self.form_layout.setContentsMargins(
+            24 if compact_mode else 40,
+            22 if compact_mode else 34,
+            24 if compact_mode else 40,
+            22 if compact_mode else 34,
+        )
+        self.form_layout.setSpacing(14 if compact_mode else 18)
+        self.header_row.setSpacing(10 if compact_mode else 14)
+        self.production_secondary.setDirection(QBoxLayout.TopToBottom if tight_mode else QBoxLayout.LeftToRight)
+        self.production_secondary.setSpacing(8 if compact_mode else 10)
+        self.production_button.setText("Entrar" if tight_mode else "Entrar na Produção")
+        self.forgot_password_button.setText("Recuperar senha" if compact_mode else "Esqueci minha senha")
+        self.bootstrap_button.setText("Primeiro admin" if compact_mode else "Criar primeiro administrador")
+        self.demo_button.setText("Abrir demo" if compact_mode else "Abrir demonstração")
+        self.cancel_button.setText("Fechar" if compact_mode else "Cancelar")
+        self.password_toggle_button.setText(
+            "Ocultar" if self.password_toggle_button.isChecked() else ("Ver" if compact_mode else "Mostrar")
+        )
 
     def _apply_defaults(self) -> None:
         last_access_email = self.settings.last_access_email()
@@ -762,22 +1003,28 @@ class AccessDialog(QDialog):
             self.email_input.setText(display_corporate_email_local_part(last_access_email))
 
         if self.access_service.can_sign_in_production():
-            self.production_status.setText("Use seu email corporativo para autenticar no ambiente oficial.")
+            self.production_status.setText(
+                "Produção pronta para autenticação com email corporativo e sincronização da base oficial."
+            )
             self.email_input.setEnabled(True)
             self.password_input.setEnabled(True)
             self.production_button.setEnabled(True)
             self.forgot_password_button.setEnabled(True)
+            self.password_toggle_button.setEnabled(True)
         else:
-            self.production_status.setText("A autenticação de produção ainda não está configurada nesta instalação.")
+            self.production_status.setText(
+                "A autenticação de produção ainda não está configurada nesta instalação."
+            )
             self.email_input.setEnabled(False)
             self.password_input.setEnabled(False)
             self.production_button.setEnabled(False)
             self.forgot_password_button.setEnabled(False)
+            self.password_toggle_button.setEnabled(False)
 
         demo_label_resolver = getattr(self.access_service, "demo_entry_label", None)
         demo_hint = demo_label_resolver() if callable(demo_label_resolver) else "Demonstração"
         self.demo_hint.setText(
-            f"Abra o ambiente de {demo_hint.lower()} para navegar pelo sistema com dados fictícios."
+            f"Abra o ambiente de {demo_hint.lower()} para navegar pelo sistema com dados fictícios e independentes."
         )
         can_open_demo = getattr(self.access_service, "can_open_demo", lambda: True)
         self.demo_button.setEnabled(bool(can_open_demo()))
@@ -790,6 +1037,7 @@ class AccessDialog(QDialog):
             self.email_input.setFocus()
         elif self.password_input.isEnabled():
             self.password_input.setFocus()
+        self._apply_responsive_layout()
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
         self._busy = bool(busy)
@@ -803,6 +1051,7 @@ class AccessDialog(QDialog):
                 self.bootstrap_button,
                 self.demo_button,
                 self.cancel_button,
+                self.password_toggle_button,
             ):
                 widget.setEnabled(False)
             if message:
@@ -818,6 +1067,7 @@ class AccessDialog(QDialog):
         self.password_input.setEnabled(production_available)
         self.production_button.setEnabled(production_available)
         self.forgot_password_button.setEnabled(production_available)
+        self.password_toggle_button.setEnabled(production_available)
         can_open_demo = getattr(self.access_service, "can_open_demo", lambda: True)
         self.demo_button.setEnabled(bool(can_open_demo()))
         self._apply_bootstrap_availability()
@@ -825,8 +1075,9 @@ class AccessDialog(QDialog):
             self.status_label.setText(message)
         elif not self.status_label.text().strip():
             self.status_label.setText(
-                "Selecione como deseja entrar. O ambiente de produção usa autenticação institucional e cache sincronizado."
+                "Selecione como deseja entrar. Produção usa autenticação institucional e cache sincronizado; Demonstração abre uma base isolada."
             )
+        self._apply_responsive_layout()
 
     def _apply_bootstrap_availability(self) -> None:
         if not self.access_service.can_sign_in_production() or self.admin_users_service is None:
@@ -854,7 +1105,7 @@ class AccessDialog(QDialog):
             QMessageBox.warning(self, "Produção", "Informe email e senha para entrar em produção.")
             return
 
-        self._set_busy(True, "Autenticando em Produção e sincronizando a base oficial...")
+        self._set_busy(True, "Autenticando na Produção e sincronizando a base oficial...")
         try:
             session = self.access_service.sign_in_production(email=email, password=password)
         except AccessAuthError as exc:
@@ -917,7 +1168,7 @@ class AccessDialog(QDialog):
             return
 
         payload = bootstrap_dialog.payload()
-        self._set_busy(True, "Criando o primeiro administrador e autenticando em produção...")
+        self._set_busy(True, "Criando o primeiro administrador e autenticando na produção...")
         try:
             self.admin_users_service.bootstrap_first_admin(
                 email=payload["email"],

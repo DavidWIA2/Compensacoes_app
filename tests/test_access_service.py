@@ -6,6 +6,7 @@ import pytest
 
 from app.services.access_service import (
     AccessAuthError,
+    AppAccessSession,
     AccessEnvironment,
     SupabaseAccessProfile,
     SupabaseAccessService,
@@ -515,6 +516,34 @@ def test_refresh_production_cache_reuses_authenticated_session_tokens():
         "access_token": "token",
         "refresh_token": "refresh-token",
     }
+
+
+def test_sign_out_session_reuses_authenticated_client_and_signs_out():
+    service = SupabaseAccessService()
+    signed_out = []
+    fake_client = SimpleNamespace(auth=SimpleNamespace(sign_out=lambda: signed_out.append(True)))
+    service.create_authenticated_client = lambda access_session: fake_client  # type: ignore[method-assign]
+    access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Produção",
+        auth_mode="password",
+        access_token="token",
+        refresh_token="refresh",
+    )
+
+    service.sign_out_session(access_session)
+
+    assert signed_out == [True]
+
+
+def test_sign_out_session_ignores_local_sessions():
+    service = SupabaseAccessService()
+    called = []
+    service.create_authenticated_client = lambda access_session: called.append(access_session)  # type: ignore[method-assign]
+
+    service.sign_out_session(AppAccessSession.local_default())
+
+    assert called == []
 
 
 def test_enter_demo_falls_back_to_local_seed_and_creates_fake_database(tmp_path):

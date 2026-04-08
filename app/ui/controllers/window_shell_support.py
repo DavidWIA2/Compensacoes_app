@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.config import display_corporate_email_local_part
 from app.services.audit_service import format_audit_timestamp
 
 
-COMPENSACOES_SEARCH_PLACEHOLDER = "Buscar (ofício, av. tec., endereço...)"
-TCRA_SEARCH_PLACEHOLDER = "Buscar TCRA por processo, local, órgão, evento ou observação..."
+COMPENSACOES_SEARCH_PLACEHOLDER = (
+    "Buscar compensações por ofício, av. tec., endereço ou microbacia..."
+)
+TCRA_SEARCH_PLACEHOLDER = (
+    "Buscar TCRAs por processo, local, órgão, evento ou observação..."
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,35 @@ class WindowChromeSnapshot:
     write_tooltip: str
     selection_label: str
     selection_tooltip: str
+
+
+def build_user_identity_label_text(access_session: object | None) -> str:
+    environment = _environment_kind(access_session)
+    user_email = str(getattr(access_session, "user_email", "") or "").strip()
+    if user_email:
+        identity = display_corporate_email_local_part(user_email) or user_email
+        return f"Conta: {identity}"
+    if environment == "production":
+        return "Conta: autenticada"
+    if environment == "demo":
+        return "Conta: demonstração"
+    return "Conta: local"
+
+
+def build_user_identity_tooltip_text(access_session: object | None) -> str:
+    environment = _environment_kind(access_session)
+    user_email = str(getattr(access_session, "user_email", "") or "").strip()
+    role = str(getattr(access_session, "app_role", "") or "").strip()
+    if user_email:
+        lines = [f"Usuário autenticado: {user_email}."]
+        if role:
+            lines.append(f"Perfil de acesso: {role}.")
+        if environment == "production":
+            lines.append('Use "Sair" para encerrar a sessão e voltar à tela de login.')
+        return "\n".join(lines)
+    if environment == "demo":
+        return 'Sessão de demonstração ativa. Use "Sair" para voltar à tela de login.'
+    return 'Sessão local ativa. Use "Sair" para voltar à tela de login.'
 
 
 def _environment_kind(access_session: object | None) -> str:
@@ -49,14 +83,10 @@ def _availability_tooltip(
     environment = _environment_kind(access_session)
     if environment == "production":
         base_message = "Cache local sincronizado da base oficial do Supabase."
-        if detail_message:
-            return f"{base_message}\n{detail_message}"
-        return base_message
+        return f"{base_message}\n{detail_message}" if detail_message else base_message
     if environment == "demo":
         base_message = "Base de demonstração isolada para testes."
-        if detail_message:
-            return f"{base_message}\n{detail_message}"
-        return base_message
+        return f"{base_message}\n{detail_message}" if detail_message else base_message
     return detail_message or "Base local carregada."
 
 
@@ -107,7 +137,9 @@ def build_sync_tooltip_text(
     synced_at = str(getattr(remote_sync_status, "synced_at", "") or "").strip()
     checked_at = str(getattr(remote_sync_status, "checked_at", "") or "").strip()
     workbook_name = str(getattr(remote_sync_status, "workbook_name", "") or "").strip() or "Base oficial"
-    issues = tuple(str(item) for item in getattr(remote_sync_status, "issues", ()) or () if str(item).strip())
+    issues = tuple(
+        str(item) for item in getattr(remote_sync_status, "issues", ()) or () if str(item).strip()
+    )
     persistence_synced_at = str(getattr(persistence_report, "synced_at", "") or "").strip()
 
     if remote_status_value == "refreshed":
@@ -121,13 +153,17 @@ def build_sync_tooltip_text(
         return "\n".join(lines)
 
     if remote_status_value == "deferred":
-        lines = ["A sincronização remota foi pausada para não sobrescrever alterações pendentes no formulário."]
+        lines = [
+            "A sincronização remota foi pausada para não sobrescrever alterações pendentes no formulário."
+        ]
         if issues:
             lines.append("Detalhes: " + " | ".join(issues))
         return "\n".join(lines)
 
     if remote_status_value in {"failed", "unavailable"}:
-        lines = ["A última tentativa de sincronização com o Supabase falhou; o app continua usando o cache local."]
+        lines = [
+            "A última tentativa de sincronização com o Supabase falhou; o app continua usando o cache local."
+        ]
         if checked_at:
             lines.append(f"Última checagem remota: {format_audit_timestamp(checked_at)}.")
         if synced_at:
@@ -159,7 +195,7 @@ def build_records_tooltip_text(search_text: str) -> str:
     normalized_search = str(search_text or "").strip()
     if normalized_search:
         return f"Busca atual: {normalized_search}"
-    return "Resumo do conjunto filtrado na tela."
+    return "Resumo do recorte atualmente visível na tela."
 
 
 def _selected_summary(selected: object | None) -> str:
@@ -184,7 +220,7 @@ def build_selection_label_text(selected: object | None) -> str:
 
 def build_selection_tooltip_text(selected: object | None) -> str:
     if selected is None:
-        return "Formulário pronto para novo cadastro."
+        return "Formulário pronto para iniciar um novo cadastro."
     return "Registro atualmente carregado no formulário."
 
 
@@ -221,7 +257,7 @@ def build_write_tooltip_text(status: object | None, *, has_active_session: bool)
     status_value = str(getattr(status, "status", "") or "").strip()
     operation = str(getattr(status, "operation", "") or "").strip() or "mutação"
     issues = tuple(getattr(status, "issues", ()) or ())
-    lines = [f"Última mutação: {operation}"]
+    lines = [f"Última mutação: {operation}."]
 
     if status_value == "sqlite_authoritative":
         lines.append("Fluxo: SQLite como autoridade operacional do banco local.")
@@ -288,6 +324,7 @@ def build_window_chrome_snapshot(
     has_active_session = _has_active_session(session_path)
     display_label = _availability_label(availability)
     environment = _environment_kind(access_session)
+
     if not has_active_session:
         file_label = "Fonte: local"
     elif environment == "production":

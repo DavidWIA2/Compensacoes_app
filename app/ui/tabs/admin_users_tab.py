@@ -1,10 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -57,6 +59,38 @@ def _configure_text_input(
         input_field.setEchoMode(QLineEdit.Password)
 
 
+def _build_password_row(
+    input_field: QLineEdit,
+    *,
+    parent: QWidget | None = None,
+    show_label: str = "Mostrar",
+    hide_label: str = "Ocultar",
+) -> tuple[QWidget, QPushButton]:
+    container = QWidget(parent)
+    container_layout = QHBoxLayout(container)
+    container_layout.setContentsMargins(0, 0, 0, 0)
+    container_layout.setSpacing(8)
+
+    toggle_button = QPushButton(show_label, container)
+    toggle_button.setCheckable(True)
+    toggle_button.setAutoDefault(False)
+    toggle_button.setDefault(False)
+    toggle_button.setProperty("kind", "ghost")
+    toggle_button.setMinimumWidth(88)
+    toggle_button.setToolTip("Alterna a visibilidade da senha digitada.")
+
+    def _sync_visibility(checked: bool) -> None:
+        input_field.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+        toggle_button.setText(hide_label if checked else show_label)
+
+    toggle_button.toggled.connect(_sync_visibility)
+    _sync_visibility(False)
+
+    container_layout.addWidget(input_field, 1)
+    container_layout.addWidget(toggle_button, 0)
+    return container, toggle_button
+
+
 class ResetUserPasswordDialog(QDialog):
     def __init__(self, email: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -97,10 +131,15 @@ class ResetUserPasswordDialog(QDialog):
             tooltip="Repita a senha provisória para confirmar a alteração.",
             password=True,
         )
+        password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=self)
+        confirm_password_row, self.confirm_password_toggle_button = _build_password_row(
+            self.confirm_password_input,
+            parent=self,
+        )
         self.confirm_password_input.returnPressed.connect(self._submit)
 
-        form.addRow("Senha:", self.password_input)
-        form.addRow("Confirmar:", self.confirm_password_input)
+        form.addRow("Senha:", password_row)
+        form.addRow("Confirmar:", confirm_password_row)
         layout.addLayout(form)
 
         self.status_label = QLabel("")
@@ -111,8 +150,10 @@ class ResetUserPasswordDialog(QDialog):
         actions = QHBoxLayout()
         actions.addStretch(1)
         cancel_button = QPushButton("Cancelar")
+        cancel_button.setProperty("kind", "ghost")
         cancel_button.clicked.connect(self.reject)
         submit_button = QPushButton("Aplicar senha")
+        submit_button.setProperty("kind", "primary")
         submit_button.clicked.connect(self._submit)
         actions.addWidget(cancel_button)
         actions.addWidget(submit_button)
@@ -157,27 +198,122 @@ class AdminUsersTab(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
-        layout.setSpacing(int(10 * self.sf))
+        layout.setSpacing(int(8 * self.sf))
 
+        header_frame = QFrame(self)
+        header_frame.setProperty("panel", "section")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(int(10 * self.sf), int(9 * self.sf), int(10 * self.sf), int(9 * self.sf))
+        header_layout.setSpacing(int(5 * self.sf))
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(int(10 * self.sf))
+        title_text_layout = QVBoxLayout()
+        title_text_layout.setSpacing(int(2 * self.sf))
+        kicker = QLabel("GESTÃO DE ACESSO")
+        kicker.setProperty("role", "eyebrow")
         title = QLabel("Administração de usuários")
-        title.setStyleSheet("font-size: 18px; font-weight: 700;")
-        subtitle = QLabel(
-            "Tela restrita a administradores ativos. Aqui você cadastra novos acessos e controla usuários existentes."
+        title.setProperty("role", "page-title")
+        self.header_subtitle = QLabel(
+            "Ambiente restrito a administradores ativos para cadastro, liberação e manutenção de acessos."
         )
-        subtitle.setWordWrap(True)
-        subtitle.setObjectName("FormStateLabel")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        self.header_subtitle.setWordWrap(True)
+        self.header_subtitle.setProperty("role", "page-subtitle")
+        header_badges = QHBoxLayout()
+        header_badges.setContentsMargins(0, 0, 0, 0)
+        header_badges.setSpacing(int(6 * self.sf))
+        for badge_text in ("Produção oficial", "Acesso corporativo", "Perfis e permissões"):
+            badge = QLabel(badge_text)
+            badge.setProperty("role", "context-chip")
+            header_badges.addWidget(badge, 0)
+        header_badges.addStretch(1)
+        title_text_layout.addWidget(kicker)
+        title_text_layout.addWidget(title)
+        title_text_layout.addWidget(self.header_subtitle)
+        title_text_layout.addLayout(header_badges)
+        title_row.addLayout(title_text_layout, 1)
+        self.btn_refresh = QPushButton("Atualizar")
+        self.btn_refresh.setProperty("kind", "ghost")
+        self.btn_refresh.setToolTip("Recarrega a lista de usuários e o estado de cada perfil.")
+        self.btn_refresh.setMinimumHeight(int(28 * self.sf))
+        title_row.addWidget(self.btn_refresh, 0, Qt.AlignTop)
+        header_layout.addLayout(title_row)
 
-        top_actions = QHBoxLayout()
         self.status_label = QLabel("Abra esta aba ou use Atualizar para carregar os usuários.")
         self.status_label.setObjectName("FormStateLabel")
-        self.btn_refresh = QPushButton("Atualizar")
-        self.btn_refresh.setProperty("kind", "secondary")
-        self.btn_refresh.setToolTip("Recarrega a lista de usuários e o estado de cada perfil.")
-        top_actions.addWidget(self.status_label, 1)
-        top_actions.addWidget(self.btn_refresh)
-        layout.addLayout(top_actions)
+        header_layout.addWidget(self.status_label)
+
+        summary_row = QHBoxLayout()
+        summary_row.setContentsMargins(0, 0, 0, 0)
+        summary_row.setSpacing(int(6 * self.sf))
+        self.summary_total_label = QLabel("Usuários: 0")
+        self.summary_total_label.setObjectName("StatusChip")
+        self.summary_active_label = QLabel("Ativos: 0")
+        self.summary_active_label.setObjectName("StatusChip")
+        self.summary_admin_label = QLabel("Admins: 0")
+        self.summary_admin_label.setObjectName("StatusChip")
+        self.summary_visible_label = QLabel("Visíveis: 0")
+        self.summary_visible_label.setObjectName("StatusChip")
+        summary_row.addWidget(self.summary_total_label)
+        summary_row.addWidget(self.summary_active_label)
+        summary_row.addWidget(self.summary_admin_label)
+        summary_row.addWidget(self.summary_visible_label)
+        summary_row.addStretch(1)
+        header_layout.addLayout(summary_row)
+        layout.addWidget(header_frame)
+
+        filters_frame = QFrame(self)
+        filters_frame.setProperty("panel", "toolbar")
+        filters_container = QVBoxLayout(filters_frame)
+        filters_container.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        filters_container.setSpacing(int(5 * self.sf))
+        self.filters_hint = QLabel("Localize contas por nome, email, perfil ou situação antes de aplicar ações administrativas.")
+        self.filters_hint.setProperty("role", "helper")
+        self.filters_hint.setWordWrap(True)
+        filters_layout = QHBoxLayout()
+        filters_layout.setContentsMargins(0, 0, 0, 0)
+        filters_layout.setSpacing(int(5 * self.sf))
+        self.table_search_input = QLineEdit(self)
+        _configure_text_input(
+            self.table_search_input,
+            placeholder="Buscar por email, nome ou perfil",
+            tooltip="Filtra os usuários já carregados nesta tela.",
+        )
+        self.status_filter_combo = QComboBox(self)
+        self.status_filter_combo.addItem("Todos os status", "all")
+        self.status_filter_combo.addItem("Somente ativos", "active")
+        self.status_filter_combo.addItem("Somente inativos", "inactive")
+        self.role_filter_combo = QComboBox(self)
+        self.role_filter_combo.addItem("Todos os perfis", "all")
+        self.role_filter_combo.addItem("Administradores", "admin")
+        self.role_filter_combo.addItem("Editores", "editor")
+        self.role_filter_combo.addItem("Leitores", "viewer")
+        filters_layout.addWidget(QLabel("Busca:"))
+        filters_layout.addWidget(self.table_search_input, 1)
+        filters_layout.addWidget(QLabel("Status:"))
+        filters_layout.addWidget(self.status_filter_combo)
+        filters_layout.addWidget(QLabel("Perfil:"))
+        filters_layout.addWidget(self.role_filter_combo)
+        filters_container.addWidget(self.filters_hint)
+        filters_container.addLayout(filters_layout)
+        layout.addWidget(filters_frame)
+
+        content_layout = QHBoxLayout()
+        self.content_layout = content_layout
+        content_layout.setSpacing(int(8 * self.sf))
+
+        table_panel = QFrame(self)
+        table_panel.setProperty("panel", "section")
+        table_panel_layout = QVBoxLayout(table_panel)
+        table_panel_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
+        table_panel_layout.setSpacing(int(5 * self.sf))
+        table_title = QLabel("Usuários cadastrados")
+        table_title.setProperty("role", "section-title")
+        table_panel_layout.addWidget(table_title)
+        self.table_hint = QLabel("Use busca e filtros para localizar rapidamente a conta que você precisa revisar.")
+        self.table_hint.setProperty("role", "helper")
+        self.table_hint.setWordWrap(True)
+        table_panel_layout.addWidget(self.table_hint)
 
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(["Email", "Nome", "Perfil", "Situação", "Criado"])
@@ -185,41 +321,102 @@ class AdminUsersTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(True)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(int(28 * self.sf))
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        layout.addWidget(self.table, 1)
+        table_panel_layout.addWidget(self.table, 1)
+
+        sidebar = QWidget(self)
+        self.sidebar = sidebar
+        sidebar.setMinimumWidth(int(320 * self.sf))
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(int(6 * self.sf))
+
+        manage_group = QGroupBox("Conta selecionada")
+        manage_layout = QVBoxLayout(manage_group)
+        manage_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
+        manage_layout.setSpacing(int(6 * self.sf))
+        self.manage_hint = QLabel("Selecione uma conta para revisar o perfil, o status e as ações disponíveis.")
+        self.manage_hint.setProperty("role", "helper")
+        self.manage_hint.setWordWrap(True)
+        manage_layout.addWidget(self.manage_hint)
+        selected_caption = QLabel("Contexto da conta")
+        selected_caption.setProperty("role", "panel-caption")
+        manage_layout.addWidget(selected_caption)
+        self.selection_summary_label = QLabel("Nenhuma conta selecionada")
+        self.selection_summary_label.setObjectName("StatusChip")
+        manage_layout.addWidget(self.selection_summary_label)
+        self.selection_profile_label = QLabel("Perfil: --")
+        self.selection_profile_label.setObjectName("FormStateLabel")
+        self.selection_status_label = QLabel("Situação: --")
+        self.selection_status_label.setObjectName("FormStateLabel")
+        self.selection_created_label = QLabel("Criado: --")
+        self.selection_created_label.setObjectName("FormStateLabel")
+        manage_layout.addWidget(self.selection_profile_label)
+        manage_layout.addWidget(self.selection_status_label)
+        manage_layout.addWidget(self.selection_created_label)
 
         action_row = QHBoxLayout()
-        self.btn_activate = QPushButton("Reativar")
-        self.btn_activate.setProperty("kind", "secondary")
+        action_row.setSpacing(int(6 * self.sf))
+        self.btn_activate = QPushButton("Reativar acesso")
+        self.btn_activate.setProperty("kind", "success")
         self.btn_activate.setToolTip("Reativa o acesso do usuário selecionado.")
-        self.btn_deactivate = QPushButton("Desativar")
-        self.btn_deactivate.setProperty("kind", "secondary")
+        self.btn_deactivate = QPushButton("Desativar acesso")
+        self.btn_deactivate.setProperty("kind", "chip-quiet")
         self.btn_deactivate.setToolTip("Bloqueia temporariamente o acesso do usuário selecionado.")
         self.btn_reset_password = QPushButton("Redefinir senha")
-        self.btn_reset_password.setProperty("kind", "secondary")
+        self.btn_reset_password.setProperty("kind", "chip-quiet")
         self.btn_reset_password.setToolTip("Define uma senha provisória para o usuário selecionado.")
-        self.btn_delete = QPushButton("Excluir")
+        self.btn_delete = QPushButton("Excluir conta")
         self.btn_delete.setProperty("kind", "danger")
         self.btn_delete.setToolTip("Remove definitivamente o usuário selecionado.")
-        self.selection_hint = QLabel("Selecione um usuário para gerenciar.")
+        for button in [self.btn_activate, self.btn_deactivate, self.btn_reset_password, self.btn_delete]:
+            button.setMinimumHeight(int(28 * self.sf))
+        self.selection_hint = QLabel("Selecione uma conta para liberar, bloquear, redefinir senha ou excluir.")
         self.selection_hint.setObjectName("FormStateLabel")
+        actions_caption = QLabel("Ações disponíveis")
+        actions_caption.setProperty("role", "panel-caption")
         action_row.addWidget(self.btn_activate)
         action_row.addWidget(self.btn_deactivate)
-        action_row.addWidget(self.btn_reset_password)
-        action_row.addWidget(self.btn_delete)
-        action_row.addWidget(self.selection_hint, 1)
-        layout.addLayout(action_row)
+        manage_layout.addWidget(actions_caption)
+        manage_layout.addLayout(action_row)
+        action_row_secondary = QHBoxLayout()
+        action_row_secondary.setSpacing(int(6 * self.sf))
+        action_row_secondary.addWidget(self.btn_reset_password)
+        action_row_secondary.addWidget(self.btn_delete)
+        action_row_secondary.addStretch(1)
+        manage_layout.addLayout(action_row_secondary)
+        manage_layout.addWidget(self.selection_hint)
+        sidebar_layout.addWidget(manage_group)
 
-        create_group = QGroupBox("Novo usuário")
+        create_group = QGroupBox("Cadastrar nova conta")
         create_layout = QFormLayout(create_group)
         create_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         create_layout.setHorizontalSpacing(int(12 * self.sf))
-        create_layout.setVerticalSpacing(int(10 * self.sf))
+        create_layout.setVerticalSpacing(int(8 * self.sf))
+        self.create_hint = QLabel("Preencha os dados essenciais para liberar o primeiro acesso da conta corporativa.")
+        self.create_hint.setProperty("role", "helper")
+        self.create_hint.setWordWrap(True)
+        create_layout.addRow(self.create_hint)
+        self.create_role_hint = QLabel(
+            "Administradores podem cadastrar, redefinir senhas e controlar o status de acesso dos demais usuários."
+        )
+        self.create_role_hint.setProperty("role", "helper")
+        self.create_role_hint.setWordWrap(True)
+        create_layout.addRow(self.create_role_hint)
+        self.create_domain_hint = QLabel(
+            "O domínio corporativo é acrescentado automaticamente. Informe apenas a parte antes de @saocarlos.sp.gov.br.",
+            create_group,
+        )
+        self.create_domain_hint.setProperty("role", "helper")
+        self.create_domain_hint.setWordWrap(True)
+        create_layout.addRow(self.create_domain_hint)
 
         self.email_input = QLineEdit(self)
         _configure_text_input(
@@ -241,6 +438,7 @@ class AdminUsersTab(QWidget):
             tooltip="Senha inicial entregue ao usuário para o primeiro acesso.",
             password=True,
         )
+        self.password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=create_group)
         self.role_combo = QComboBox(self)
         self.role_combo.addItem("Editor", "editor")
         self.role_combo.addItem("Leitor", "viewer")
@@ -251,7 +449,9 @@ class AdminUsersTab(QWidget):
         self.is_active_combo.addItem("Inativo", False)
         self.is_active_combo.setToolTip("Escolhe se o usuário já entra liberado ou bloqueado.")
         self.btn_create = QPushButton("Cadastrar usuário")
+        self.btn_create.setProperty("kind", "primary")
         self.btn_create.setToolTip("Cria um novo usuário de produção com o perfil informado.")
+        self.btn_create.setMinimumHeight(int(30 * self.sf))
 
         email_row = QWidget(self)
         email_layout = QHBoxLayout(email_row)
@@ -264,11 +464,16 @@ class AdminUsersTab(QWidget):
 
         create_layout.addRow("Email:", email_row)
         create_layout.addRow("Nome:", self.display_name_input)
-        create_layout.addRow("Senha:", self.password_input)
+        create_layout.addRow("Senha:", self.password_row)
         create_layout.addRow("Perfil:", self.role_combo)
         create_layout.addRow("Liberação:", self.is_active_combo)
         create_layout.addRow("", self.btn_create)
-        layout.addWidget(create_group)
+        sidebar_layout.addWidget(create_group)
+        sidebar_layout.addStretch(1)
+
+        content_layout.addWidget(table_panel, 3)
+        content_layout.addWidget(sidebar, 1)
+        layout.addLayout(content_layout, 1)
 
         self.btn_refresh.clicked.connect(self.refresh_users)
         self.btn_create.clicked.connect(self._handle_create_user)
@@ -277,7 +482,46 @@ class AdminUsersTab(QWidget):
         self.btn_reset_password.clicked.connect(self._handle_reset_password)
         self.btn_delete.clicked.connect(self._handle_delete_user)
         self.table.itemSelectionChanged.connect(self._refresh_action_state)
+        self.table_search_input.textChanged.connect(self._populate_table)
+        self.status_filter_combo.currentIndexChanged.connect(self._populate_table)
+        self.role_filter_combo.currentIndexChanged.connect(self._populate_table)
+        self._refresh_summary_chips(0)
         self._refresh_action_state()
+        self._apply_responsive_layout()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._apply_responsive_layout()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _is_compact_layout(self) -> bool:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        current_height = root.height() if root is not None and root.height() > 0 else self.height()
+        if current_width < 900 and not self.isVisible():
+            current_width = 1920
+        if current_height < 640 and not self.isVisible():
+            current_height = 1080
+        return current_width <= 1460 or current_height <= 860
+
+    def _apply_responsive_layout(self) -> None:
+        compact_mode = self._is_compact_layout()
+        self.header_subtitle.setVisible(not compact_mode)
+        self.filters_hint.setVisible(not compact_mode)
+        self.table_hint.setVisible(not compact_mode)
+        self.manage_hint.setVisible(not compact_mode)
+        self.create_hint.setVisible(not compact_mode)
+        self.create_role_hint.setVisible(not compact_mode)
+        self.create_domain_hint.setVisible(not compact_mode)
+
+        self.sidebar.setMinimumWidth(max(int((260 if compact_mode else 320) * self.sf), 220))
+        self.btn_activate.setText("Reativar" if compact_mode else "Reativar acesso")
+        self.btn_deactivate.setText("Desativar" if compact_mode else "Desativar acesso")
+        self.btn_reset_password.setText("Senha" if compact_mode else "Redefinir senha")
+        self.btn_delete.setText("Excluir" if compact_mode else "Excluir conta")
 
     def handle_tab_activated(self) -> None:
         self.refresh_users()
@@ -301,8 +545,10 @@ class AdminUsersTab(QWidget):
         self._set_busy(False, f"{len(self.users)} usuário(s) carregado(s).")
 
     def _populate_table(self) -> None:
-        self.table.setRowCount(len(self.users))
-        for row_index, user in enumerate(self.users):
+        visible_users = self._filtered_users()
+        self._refresh_summary_chips(len(visible_users))
+        self.table.setRowCount(len(visible_users))
+        for row_index, user in enumerate(visible_users):
             email_item = QTableWidgetItem(user.email)
             email_item.setData(Qt.UserRole, user.user_id)
             name_item = QTableWidgetItem(user.display_name or "--")
@@ -310,16 +556,77 @@ class AdminUsersTab(QWidget):
             status_item = QTableWidgetItem(user.status_label)
             created_item = QTableWidgetItem((user.created_at or "")[:10] or "--")
             for column, item in enumerate((email_item, name_item, role_item, status_item, created_item)):
+                if column == 2:
+                    self._apply_role_item_style(item, user.role)
                 if column == 3:
-                    if user.is_active:
-                        item.setBackground(Qt.GlobalColor.green)
-                        item.setForeground(Qt.GlobalColor.white)
-                    else:
-                        item.setBackground(Qt.GlobalColor.darkYellow)
-                        item.setForeground(Qt.GlobalColor.black)
+                    self._apply_status_item_style(item, user.is_active)
                 self.table.setItem(row_index, column, item)
         self.table.resizeRowsToContents()
         self._refresh_action_state()
+
+    def _apply_status_item_style(self, item: QTableWidgetItem, is_active: bool) -> None:
+        base = self.palette().base().color()
+        light_theme = base.lightness() >= 150
+        if is_active:
+            background = QColor("#d8f0df") if light_theme else QColor("#214a31")
+            foreground = QColor("#1e5631") if light_theme else QColor("#f3fbf5")
+        else:
+            background = QColor("#f6e2b8") if light_theme else QColor("#5a4515")
+            foreground = QColor("#7a5100") if light_theme else QColor("#fff4d6")
+        item.setBackground(background)
+        item.setForeground(foreground)
+
+    def _apply_role_item_style(self, item: QTableWidgetItem, role: str) -> None:
+        normalized_role = str(role or "").strip().lower()
+        base = self.palette().base().color()
+        light_theme = base.lightness() >= 150
+        if normalized_role == "admin":
+            background = QColor("#dfe7ff") if light_theme else QColor("#26345f")
+            foreground = QColor("#1d3897") if light_theme else QColor("#eef3ff")
+        elif normalized_role == "viewer":
+            background = QColor("#eceff3") if light_theme else QColor("#39414a")
+            foreground = QColor("#4d5968") if light_theme else QColor("#edf2f7")
+        else:
+            background = QColor("#e4f4ec") if light_theme else QColor("#214c39")
+            foreground = QColor("#1b6b45") if light_theme else QColor("#edfff5")
+        item.setBackground(background)
+        item.setForeground(foreground)
+
+    def _filtered_users(self) -> list[AdminUserRecord]:
+        search_text = self.table_search_input.text().strip().lower()
+        status_filter = str(self.status_filter_combo.currentData() or "all").strip()
+        role_filter = str(self.role_filter_combo.currentData() or "all").strip()
+
+        visible_users: list[AdminUserRecord] = []
+        for user in self.users:
+            if status_filter == "active" and not bool(user.is_active):
+                continue
+            if status_filter == "inactive" and bool(user.is_active):
+                continue
+            if role_filter != "all" and str(user.role or "").strip().lower() != role_filter:
+                continue
+            if search_text:
+                haystack = " ".join(
+                    [
+                        str(user.email or ""),
+                        str(user.display_name or ""),
+                        str(user.role or ""),
+                        str(user.status_label or ""),
+                    ]
+                ).lower()
+                if search_text not in haystack:
+                    continue
+            visible_users.append(user)
+        return visible_users
+
+    def _refresh_summary_chips(self, visible_count: int | None = None) -> None:
+        active_count = sum(1 for user in self.users if bool(user.is_active))
+        admin_count = sum(1 for user in self.users if str(user.role or "").strip().lower() == "admin")
+        visible_value = len(self.users) if visible_count is None else int(visible_count)
+        self.summary_total_label.setText(f"Usuários: {len(self.users)}")
+        self.summary_active_label.setText(f"Ativos: {active_count}")
+        self.summary_admin_label.setText(f"Admins: {admin_count}")
+        self.summary_visible_label.setText(f"Visíveis: {visible_value}")
 
     def _selected_user(self) -> AdminUserRecord | None:
         items = self.table.selectedItems()
@@ -341,15 +648,26 @@ class AdminUsersTab(QWidget):
         self.btn_reset_password.setEnabled(can_manage)
         self.btn_delete.setEnabled(can_manage and not can_manage_self)
         if user is None:
-            self.selection_hint.setText("Selecione um usuário para gerenciar.")
+            self.selection_summary_label.setText("Nenhuma conta selecionada")
+            self.selection_profile_label.setText("Perfil: --")
+            self.selection_status_label.setText("Situação: --")
+            self.selection_created_label.setText("Criado: --")
+            self.selection_hint.setText("Selecione uma conta para revisar perfil, situação e ações administrativas disponíveis.")
         elif can_manage_self:
+            self.selection_summary_label.setText(f"{user.email} | sua conta")
+            self.selection_profile_label.setText(f"Perfil: {_format_role(user.role)}")
+            self.selection_status_label.setText(f"Situação: {user.status_label}")
+            self.selection_created_label.setText(f"Criado: {(user.created_at or '')[:10] or '--'}")
             self.selection_hint.setText(
-                "Seu próprio usuário não pode ser desativado ou excluído por esta tela, "
-                "mas a senha ainda pode ser redefinida."
+                "Sua própria conta não pode ser desativada nem excluída por esta tela, mas a senha ainda pode ser redefinida."
             )
         else:
+            self.selection_summary_label.setText(f"{user.email} | {_format_role(user.role)}")
+            self.selection_profile_label.setText(f"Perfil: {_format_role(user.role)}")
+            self.selection_status_label.setText(f"Situação: {user.status_label}")
+            self.selection_created_label.setText(f"Criado: {(user.created_at or '')[:10] or '--'}")
             self.selection_hint.setText(
-                f"Selecionado: {user.email} | {_format_role(user.role)} | {user.status_label}"
+                f"Conta pronta para gestão: {user.email} • {_format_role(user.role)} • {user.status_label}"
             )
 
     def _normalize_email_field(self) -> None:
@@ -471,6 +789,9 @@ class AdminUsersTab(QWidget):
         self.btn_create.setEnabled(not busy)
         self.btn_reset_password.setEnabled(not busy and self._selected_user() is not None)
         for widget in (
+            self.table_search_input,
+            self.status_filter_combo,
+            self.role_filter_combo,
             self.email_input,
             self.display_name_input,
             self.password_input,
@@ -490,3 +811,6 @@ class AdminUsersTab(QWidget):
         if str(access_session.app_role or "").strip().lower() != "admin":
             raise AdminUsersError("Apenas administradores podem abrir esta tela.")
         return access_session
+
+
+

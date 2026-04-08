@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import tempfile
 import uuid
@@ -6,9 +6,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -45,19 +47,52 @@ class DashboardTab(QWidget):
         self._last_record_read_status: Optional[LocalRecordReadStatus] = None
         self._last_tcra_overview: Optional[TcraRecordOverview] = None
         self._last_tcra_agenda: tuple[TcraAgendaItem, ...] = ()
+        self.comp_web: QWebEngineView | None = None
+        self.tcra_web: QWebEngineView | None = None
+        self.web: QWebEngineView | None = None
+        self._chart_min_height = int(560 * self.sf)
+        self._card_max_height = int(46 * self.sf)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
-        layout.setSpacing(int(10 * self.sf))
+        layout.setSpacing(int(6 * self.sf))
 
-        actions_layout = QHBoxLayout()
-        self.btn_export_pdf = QPushButton("Exportar Painel (PDF)")
-        self.btn_export_pdf.setMinimumHeight(int(30 * self.sf))
-        actions_layout.addStretch(1)
-        actions_layout.addWidget(self.btn_export_pdf)
-        layout.addLayout(actions_layout)
+        hero_frame = QFrame(self)
+        hero_frame.setProperty("panel", "hero")
+        hero_layout = QHBoxLayout(hero_frame)
+        hero_layout.setContentsMargins(int(12 * self.sf), int(10 * self.sf), int(12 * self.sf), int(10 * self.sf))
+        hero_layout.setSpacing(int(10 * self.sf))
+        hero_text = QVBoxLayout()
+        hero_text.setSpacing(int(2 * self.sf))
+        self.lbl_panel_kicker = QLabel("VISÃO EXECUTIVA")
+        self.lbl_panel_kicker.setProperty("role", "eyebrow")
+        self.lbl_panel_title = QLabel("Painel consolidado da base sincronizada")
+        self.lbl_panel_title.setProperty("role", "page-title")
+        self.lbl_panel_subtitle = QLabel(
+            "Acompanhe indicadores, pendências e leituras executivas sem sair do contexto operacional."
+        )
+        self.lbl_panel_subtitle.setProperty("role", "page-subtitle")
+        self.lbl_panel_subtitle.setWordWrap(True)
+        self.lbl_panel_context = QLabel("Base sincronizada pronta para leitura.")
+        self.lbl_panel_context.setProperty("role", "page-meta")
+        self.lbl_panel_context.setWordWrap(True)
+        hero_text.addWidget(self.lbl_panel_kicker)
+        hero_text.addWidget(self.lbl_panel_title)
+        hero_text.addWidget(self.lbl_panel_subtitle)
+        hero_text.addWidget(self.lbl_panel_context)
+        hero_layout.addLayout(hero_text, 1)
+        hero_actions = QVBoxLayout()
+        hero_actions.setSpacing(int(5 * self.sf))
+        hero_actions.addStretch(1)
+        self.btn_export_pdf = QPushButton("Exportar painel (PDF)")
+        self.btn_export_pdf.setProperty("kind", "ghost")
+        self.btn_export_pdf.setMinimumHeight(int(26 * self.sf))
+        hero_actions.addWidget(self.btn_export_pdf, 0, Qt.AlignRight)
+        hero_layout.addLayout(hero_actions, 0)
+        layout.addWidget(hero_frame)
 
         self.scope_tabs = QTabWidget(self)
+        self.scope_tabs.setDocumentMode(True)
         layout.addWidget(self.scope_tabs, 1)
 
         self.comp_page = QWidget(self)
@@ -67,98 +102,311 @@ class DashboardTab(QWidget):
 
         self._build_compensation_page()
         self._build_tcra_page()
+        self.scope_tabs.currentChanged.connect(self._ensure_current_scope_webview)
 
         self.btn_open_operations.clicked.connect(self._open_operations_tab)
         self.btn_open_tcra_agenda.clicked.connect(self._open_tcra_tab)
 
+    def _configure_compact_info_label(self, label: QLabel, *, max_height: int) -> None:
+        label.setWordWrap(True)
+        label.setObjectName("FormStateLabel")
+        label.setMaximumHeight(max_height)
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+
+    def _set_compensation_details_visible(self, visible: bool) -> None:
+        show_details = bool(visible)
+        self.compensation_details_panel.setVisible(show_details)
+        self.btn_toggle_comp_details.setText("Ocultar detalhes" if show_details else "Detalhes")
+
+    def _refresh_compensation_summary(self) -> None:
+        metrics = dict(self._last_metrics or {})
+        total_processos = int(metrics.get("count_total", 0) or 0)
+        total_pendente = int(metrics.get("total_pendente", 0) or 0)
+        total_compensado = int(metrics.get("total_compensado", 0) or 0)
+        if total_processos <= 0:
+            self.lbl_comp_summary.setText("Painel operacional: aguardando leitura da base.")
+            return
+        self.lbl_comp_summary.setText(
+            f"Recorte atual: {total_processos} processo(s) | {total_pendente} pendente(s) | {total_compensado} compensado(s)"
+        )
+
     def _build_compensation_page(self) -> None:
         layout = QVBoxLayout(self.comp_page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(int(10 * self.sf))
+        layout.setSpacing(int(4 * self.sf))
+
+        header_frame = QFrame(self.comp_page)
+        header_frame.setProperty("panel", "toolbar")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        header_layout.setSpacing(int(3 * self.sf))
+        comp_kicker = QLabel("COMPENSAÇÕES")
+        comp_kicker.setProperty("role", "eyebrow")
+        comp_title = QLabel("Resumo executivo do recorte atual")
+        comp_title.setProperty("role", "section-title")
+        self.comp_subtitle = QLabel("Indicadores-chave, leitura operacional e gráficos do recorte carregado.")
+        self.comp_subtitle.setProperty("role", "helper")
+        self.comp_subtitle.setWordWrap(True)
+        header_layout.addWidget(comp_kicker)
+        header_layout.addWidget(comp_title)
+        header_layout.addWidget(self.comp_subtitle)
+        layout.addWidget(header_frame)
 
         cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(int(10 * self.sf))
-        self.card_total = KPICard("Total Mudas", "0", "#2176ff")
-        self.card_pend = KPICard("Pendentes", "0", "#d32f2f")
-        self.card_comp = KPICard("Compensadas", "0", "#2e7d32")
-        self.card_records = KPICard("Total Processos", "0", "#ff9800")
+        cards_layout.setSpacing(int(6 * self.sf))
+        self.card_total = KPICard("Total de mudas", "0", "#2176ff", compact=True)
+        self.card_pend = KPICard("Pendentes", "0", "#d32f2f", compact=True)
+        self.card_comp = KPICard("Compensadas", "0", "#2e7d32", compact=True)
+        self.card_records = KPICard("Total de processos", "0", "#ff9800", compact=True)
         for card in [self.card_total, self.card_pend, self.card_comp, self.card_records]:
+            card.setMaximumHeight(self._card_max_height)
             cards_layout.addWidget(card)
         layout.addLayout(cards_layout)
+
+        comp_summary_row = QHBoxLayout()
+        comp_summary_row.setContentsMargins(0, 0, 0, 0)
+        comp_summary_row.setSpacing(int(6 * self.sf))
+        self.lbl_comp_summary = QLabel("Painel operacional: aguardando leitura da base.")
+        self._configure_compact_info_label(self.lbl_comp_summary, max_height=int(26 * self.sf))
+        self.btn_open_operations = QPushButton("Operações")
+        self.btn_open_operations.setProperty("kind", "chip-quiet")
+        self.btn_open_operations.setMinimumHeight(int(24 * self.sf))
+        self.btn_open_tcra_agenda = QPushButton("Agenda TCRA")
+        self.btn_open_tcra_agenda.setProperty("kind", "chip-quiet")
+        self.btn_open_tcra_agenda.setMinimumHeight(int(24 * self.sf))
+        self.btn_toggle_comp_details = QPushButton("Detalhes")
+        self.btn_toggle_comp_details.setProperty("kind", "chip-quiet")
+        self.btn_toggle_comp_details.setMaximumWidth(int(104 * self.sf))
+        self.btn_toggle_comp_details.setMinimumHeight(int(24 * self.sf))
+        comp_summary_row.addWidget(self.lbl_comp_summary, 1)
+        comp_summary_row.addWidget(self.btn_open_operations, 0)
+        comp_summary_row.addWidget(self.btn_open_tcra_agenda, 0)
+        comp_summary_row.addWidget(self.btn_toggle_comp_details, 0)
+        layout.addLayout(comp_summary_row)
+
+        self.compensation_details_panel = QWidget(self.comp_page)
+        self.compensation_details_panel.setProperty("panel", "subtle")
+        details_layout = QVBoxLayout(self.compensation_details_panel)
+        details_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        details_layout.setSpacing(int(4 * self.sf))
+        details_title = QLabel("Leitura operacional detalhada")
+        details_title.setProperty("role", "sidebar-title")
+        details_caption = QLabel("Use este bloco para validar o cache sincronizado, o recorte local e a agenda executiva.")
+        details_caption.setProperty("role", "sidebar-helper")
+        details_caption.setWordWrap(True)
+        details_layout.addWidget(details_title)
+        details_layout.addWidget(details_caption)
+        self.btn_toggle_comp_details.clicked.connect(
+            lambda: self._set_compensation_details_visible(not self.compensation_details_panel.isVisible())
+        )
 
         self.lbl_local_overview = QLabel(
             "Resumo local (SQLite): carregue uma sessão para acompanhar a qualidade dos dados."
         )
-        self.lbl_local_overview.setWordWrap(True)
-        self.lbl_local_overview.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_local_overview)
+        self._configure_compact_info_label(self.lbl_local_overview, max_height=int(34 * self.sf))
+        details_layout.addWidget(self.lbl_local_overview)
 
         self.lbl_read_source = QLabel(
             "Leitura operacional atual: aguardando aplicação dos filtros."
         )
-        self.lbl_read_source.setWordWrap(True)
-        self.lbl_read_source.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_read_source)
+        self._configure_compact_info_label(self.lbl_read_source, max_height=int(34 * self.sf))
+        details_layout.addWidget(self.lbl_read_source)
 
         self.lbl_agenda_summary = QLabel("Agenda executiva: aguardando leitura inicial.")
-        self.lbl_agenda_summary.setWordWrap(True)
-        self.lbl_agenda_summary.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_agenda_summary)
+        self._configure_compact_info_label(self.lbl_agenda_summary, max_height=int(34 * self.sf))
+        details_layout.addWidget(self.lbl_agenda_summary)
+        layout.addWidget(self.compensation_details_panel)
+        self._set_compensation_details_visible(False)
 
-        agenda_actions = QHBoxLayout()
-        agenda_actions.setSpacing(int(8 * self.sf))
-        self.btn_open_operations = QPushButton("Abrir Operações")
-        self.btn_open_operations.setProperty("kind", "secondary")
-        self.btn_open_tcra_agenda = QPushButton("Abrir TCRAs")
-        self.btn_open_tcra_agenda.setProperty("kind", "secondary")
-        agenda_actions.addWidget(self.btn_open_operations)
-        agenda_actions.addWidget(self.btn_open_tcra_agenda)
-        agenda_actions.addStretch(1)
-        layout.addLayout(agenda_actions)
-
-        self.comp_web = self._build_dashboard_webview("compensacoes")
-        self.web = self.comp_web
-        layout.addWidget(self.comp_web, 1)
+        self.comp_web_host = self._build_dashboard_host("compensacoes")
+        layout.addWidget(self.comp_web_host, 1)
 
     def _build_tcra_page(self) -> None:
         layout = QVBoxLayout(self.tcra_page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(int(10 * self.sf))
+        layout.setSpacing(int(4 * self.sf))
+
+        header_frame = QFrame(self.tcra_page)
+        header_frame.setProperty("panel", "toolbar")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        header_layout.setSpacing(int(3 * self.sf))
+        tcra_kicker = QLabel("TCRAs")
+        tcra_kicker.setProperty("role", "eyebrow")
+        tcra_title = QLabel("Acompanhamento executivo dos termos")
+        tcra_title.setProperty("role", "section-title")
+        self.tcra_subtitle = QLabel("Alertas, próximos relatórios e situação do módulo TCRA no mesmo painel.")
+        self.tcra_subtitle.setProperty("role", "helper")
+        self.tcra_subtitle.setWordWrap(True)
+        header_layout.addWidget(tcra_kicker)
+        header_layout.addWidget(tcra_title)
+        header_layout.addWidget(self.tcra_subtitle)
+        layout.addWidget(header_frame)
 
         cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(int(10 * self.sf))
-        self.card_tcra_total = KPICard("TCRAs", "0", "#0b6e4f")
-        self.card_tcra_alertas = KPICard("Alertas", "0", "#d32f2f")
-        self.card_tcra_proximos = KPICard("Próx. 30 dias", "0", "#fb8c00")
-        self.card_tcra_cumpridos = KPICard("Cumpridos", "0", "#3949ab")
+        cards_layout.setSpacing(int(8 * self.sf))
+        self.card_tcra_total = KPICard("Total de TCRAs", "0", "#0b6e4f", compact=True)
+        self.card_tcra_alertas = KPICard("Alertas", "0", "#d32f2f", compact=True)
+        self.card_tcra_proximos = KPICard("Próx. 30 dias", "0", "#fb8c00", compact=True)
+        self.card_tcra_cumpridos = KPICard("Cumpridos", "0", "#3949ab", compact=True)
         for card in [self.card_tcra_total, self.card_tcra_alertas, self.card_tcra_proximos, self.card_tcra_cumpridos]:
+            card.setMaximumHeight(self._card_max_height)
             cards_layout.addWidget(card)
         layout.addLayout(cards_layout)
 
+        tcra_summary_row = QHBoxLayout()
+        tcra_summary_row.setContentsMargins(0, 0, 0, 0)
+        tcra_summary_row.setSpacing(int(6 * self.sf))
         self.lbl_tcra_summary = QLabel("TCRAs: nenhum termo carregado no banco local.")
-        self.lbl_tcra_summary.setWordWrap(True)
-        self.lbl_tcra_summary.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_tcra_summary)
-
-        self.lbl_tcra_agenda = QLabel("Agenda TCRA: --")
-        self.lbl_tcra_agenda.setWordWrap(True)
-        self.lbl_tcra_agenda.setObjectName("FormStateLabel")
-        layout.addWidget(self.lbl_tcra_agenda)
-
-        tcra_actions = QHBoxLayout()
-        tcra_actions.setSpacing(int(8 * self.sf))
-        self.btn_open_tcra_page = QPushButton("Abrir Módulo TCRA")
-        self.btn_open_tcra_page.setProperty("kind", "secondary")
+        self._configure_compact_info_label(self.lbl_tcra_summary, max_height=int(28 * self.sf))
+        self.btn_open_tcra_page = QPushButton("Abrir módulo TCRA")
+        self.btn_open_tcra_page.setProperty("kind", "chip-quiet")
+        self.btn_open_tcra_page.setMinimumHeight(int(24 * self.sf))
         self.btn_open_tcra_page.clicked.connect(self._open_tcra_tab)
-        tcra_actions.addWidget(self.btn_open_tcra_page)
-        tcra_actions.addStretch(1)
-        layout.addLayout(tcra_actions)
+        tcra_summary_row.addWidget(self.lbl_tcra_summary, 1)
+        tcra_summary_row.addWidget(self.btn_open_tcra_page, 0)
+        layout.addLayout(tcra_summary_row)
 
-        self.tcra_web = self._build_dashboard_webview("tcra")
-        layout.addWidget(self.tcra_web, 1)
+        tcra_agenda_frame = QFrame(self.tcra_page)
+        tcra_agenda_frame.setProperty("panel", "subtle")
+        tcra_agenda_layout = QVBoxLayout(tcra_agenda_frame)
+        tcra_agenda_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        tcra_agenda_layout.setSpacing(int(4 * self.sf))
+        tcra_agenda_title = QLabel("Agenda prioritária")
+        tcra_agenda_title.setProperty("role", "panel-caption")
+        self.lbl_tcra_agenda = QLabel("Agenda TCRA: --")
+        self._configure_compact_info_label(self.lbl_tcra_agenda, max_height=int(30 * self.sf))
+        tcra_agenda_layout.addWidget(tcra_agenda_title)
+        tcra_agenda_layout.addWidget(self.lbl_tcra_agenda)
+        layout.addWidget(tcra_agenda_frame)
+
+        self.tcra_web_host = self._build_dashboard_host("tcra")
+        layout.addWidget(self.tcra_web_host, 1)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._apply_responsive_layout()
+        self._ensure_current_scope_webview()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _is_compact_layout(self) -> bool:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        current_height = root.height() if root is not None and root.height() > 0 else self.height()
+        if current_width < 900 and not self.isVisible():
+            current_width = 1920
+        if current_height < 640 and not self.isVisible():
+            current_height = 1080
+        return current_width <= 1460 or current_height <= 860
+
+    def _apply_responsive_layout(self) -> None:
+        compact_mode = self._is_compact_layout()
+        tight_mode = compact_mode and self.height() <= 760
+        self.lbl_panel_subtitle.setVisible(not compact_mode)
+        self.lbl_panel_context.setVisible(not tight_mode)
+        self.comp_subtitle.setVisible(not compact_mode)
+        self.tcra_subtitle.setVisible(not compact_mode)
+
+        self._chart_min_height = max(int((420 if compact_mode else 560) * self.sf), 300)
+        self._card_max_height = max(int((40 if compact_mode else 46) * self.sf), 34)
+        for card in [
+            self.card_total,
+            self.card_pend,
+            self.card_comp,
+            self.card_records,
+            self.card_tcra_total,
+            self.card_tcra_alertas,
+            self.card_tcra_proximos,
+            self.card_tcra_cumpridos,
+        ]:
+            card.setMaximumHeight(self._card_max_height)
+
+        self.comp_web_host.setMinimumHeight(self._chart_min_height)
+        self.tcra_web_host.setMinimumHeight(self._chart_min_height)
+        if self.comp_web is not None:
+            self.comp_web.setMinimumHeight(self._chart_min_height)
+        if self.tcra_web is not None:
+            self.tcra_web.setMinimumHeight(self._chart_min_height)
+        placeholder_container = getattr(self, "compensacoes_web_placeholder_container", None)
+        if placeholder_container is not None:
+            placeholder_container.setMinimumHeight(self._chart_min_height)
+        placeholder_container = getattr(self, "tcra_web_placeholder_container", None)
+        if placeholder_container is not None:
+            placeholder_container.setMinimumHeight(self._chart_min_height)
+
+        if compact_mode and self.compensation_details_panel.isVisible():
+            self._set_compensation_details_visible(False)
+
+    def _build_dashboard_host(self, kind: str) -> QWidget:
+        host = QWidget(self)
+        host.setMinimumHeight(self._chart_min_height)
+        host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+
+        placeholder_container = QWidget(host)
+        placeholder_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        placeholder_layout = QVBoxLayout(placeholder_container)
+        placeholder_layout.setContentsMargins(0, 0, 0, 0)
+        placeholder_layout.setSpacing(0)
+
+        placeholder = QLabel("Os gráficos serão carregados quando esta visão for aberta.")
+        placeholder.setWordWrap(True)
+        placeholder.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        placeholder.setObjectName("FormStateLabel")
+        placeholder.setMaximumWidth(int(420 * self.sf))
+        placeholder_container.setMinimumHeight(self._chart_min_height)
+
+        placeholder_layout.addWidget(placeholder, 0, Qt.AlignTop)
+        placeholder_layout.addStretch(1)
+        host_layout.addWidget(placeholder_container, 1)
+
+        setattr(self, f"{kind}_web_host_layout", host_layout)
+        setattr(self, f"{kind}_web_placeholder_container", placeholder_container)
+        setattr(self, f"{kind}_web_placeholder", placeholder)
+        return host
+
+    def _ensure_current_scope_webview(self, *_args) -> None:
+        if self.scope_tabs.currentWidget() is self.tcra_page:
+            self._ensure_dashboard_webview("tcra")
+            return
+        self._ensure_dashboard_webview("compensacoes")
+
+    def _ensure_dashboard_webview(self, kind: str) -> QWebEngineView:
+        current_web = self.comp_web if kind == "compensacoes" else self.tcra_web
+        if current_web is not None:
+            return current_web
+
+        host_layout = getattr(self, f"{kind}_web_host_layout")
+        placeholder = getattr(self, f"{kind}_web_placeholder", None)
+        placeholder_container = getattr(self, f"{kind}_web_placeholder_container", None)
+        if placeholder_container is not None:
+            host_layout.removeWidget(placeholder_container)
+            placeholder_container.hide()
+            placeholder_container.deleteLater()
+            setattr(self, f"{kind}_web_placeholder_container", None)
+        if placeholder is not None:
+            placeholder.hide()
+            placeholder.deleteLater()
+            setattr(self, f"{kind}_web_placeholder", None)
+
+        web = self._build_dashboard_webview(kind)
+        host_layout.addWidget(web, 1)
+        if kind == "compensacoes":
+            self.comp_web = web
+            self.web = web
+        else:
+            self.tcra_web = web
+        return web
 
     def _build_dashboard_webview(self, kind: str) -> QWebEngineView:
         web = QWebEngineView()
+        web.setMinimumHeight(self._chart_min_height)
+        web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         web.setStyleSheet("background: transparent;")
         web.page().setBackgroundColor(Qt.transparent)
         web.loadFinished.connect(lambda ok, scope=kind: self._on_load_finished(scope, ok))
@@ -176,7 +424,7 @@ class DashboardTab(QWidget):
             self._send_to_js(kind, payload)
 
     def _send_to_js(self, kind: str, data: Dict) -> None:
-        target = self.comp_web if kind == "compensacoes" else self.tcra_web
+        target = self._ensure_dashboard_webview(kind)
         script = f"if(window.updateDashboard) window.updateDashboard({json.dumps(json.dumps(data))});"
         target.page().runJavaScript(script)
 
@@ -196,6 +444,7 @@ class DashboardTab(QWidget):
         self.card_pend.update_value(f"{m['total_pendente']:,.0f}".replace(",", "."))
         self.card_comp.update_value(f"{m['total_compensado']:,.0f}".replace(",", "."))
         self.card_records.update_value(f"{m['count_total']}")
+        self._refresh_compensation_summary()
         self.lbl_local_overview.setText(build_local_overview_text(record_overview))
         self.lbl_read_source.setText(build_read_source_text(record_read_status))
 
@@ -298,6 +547,8 @@ class DashboardTab(QWidget):
 
     def export_images(self) -> Tuple[str, str]:
         active_web = self.comp_web if self.scope_tabs.currentWidget() is self.comp_page else self.tcra_web
+        if active_web is None:
+            return "", ""
         pixmap = active_web.grab()
         if pixmap.isNull():
             return "", ""
@@ -325,3 +576,4 @@ class DashboardTab(QWidget):
         if self.scope_tabs.currentWidget() is self.tcra_page:
             return build_tcra_dashboard_export_context(self._last_tcra_overview, self._last_tcra_agenda)
         return None
+

@@ -96,8 +96,8 @@ def build_status_highlights_text(
         chips.append("Atenção: ver detalhes")
 
     if not chips:
-        return "Panorama técnico: aguardando sessão."
-    return "Panorama técnico: " + " | ".join(chips)
+        return "Panorama operacional: aguardando sessão."
+    return "Panorama operacional: " + " | ".join(chips)
 
 
 def build_remote_sync_text(
@@ -195,7 +195,7 @@ def build_visible_summary_text(overview: AuditOverview) -> str:
                 f"{overview.events_today} hoje | "
                 f"{overview.available_backups}/{overview.configured_backups} backups disponíveis"
             ),
-            f"Ações visíveis: {actions_text}",
+            f"Ações em destaque: {actions_text}",
         ]
     )
 
@@ -285,7 +285,7 @@ def build_record_overview_text(report: Optional[PersistenceRecordOverviewReport]
 
 def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
     if status is None or status.status == "indisponivel":
-        return "Leitura operacional atual: sessão em memória."
+        return "Leitura operacional: sessão em memória."
 
     if status.uses_sqlite:
         lines = [
@@ -295,7 +295,7 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
             )
         ]
         if status.strategy == "sqlite_query":
-            lines.append("Modo de leitura local: consulta indexada.")
+            lines.append("Modo de leitura: consulta indexada no cache.")
         if status.synced_at:
             lines.append(
                 f"Última sincronização válida: {format_audit_timestamp(status.synced_at)}"

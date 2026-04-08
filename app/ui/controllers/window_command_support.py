@@ -21,6 +21,7 @@ def build_window_command_bindings() -> tuple[WindowCommandBinding, ...]:
         WindowCommandBinding("open_session", "data_controller", "open_session"),
         WindowCommandBinding("open_session_source", "data_controller", "open_session"),
         WindowCommandBinding("reload", "data_controller", "reload"),
+        WindowCommandBinding("sign_out", "shell_controller", "sign_out"),
         WindowCommandBinding("toggle_theme", "settings_controller", "toggle_theme"),
         WindowCommandBinding("clear_filters", "data_controller", "clear_filters"),
         WindowCommandBinding("reset_sorting", "settings_controller", "reset_sorting"),

@@ -5,188 +5,481 @@
     <title>Dashboard</title>
     <script src="vendor/echarts.min.js"></script>
     <style>
-        body, html {
+        :root {
+            color-scheme: light dark;
+        }
+
+        body,
+        html {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             background-color: transparent;
+            overflow: hidden;
+            font-family: "Segoe UI", Arial, sans-serif;
+        }
+
+        body {
             display: flex;
             flex-direction: row;
-            overflow: hidden;
+            gap: 14px;
+            align-items: stretch;
+            padding: 4px 2px 2px;
+            box-sizing: border-box;
         }
-        #pie_chart { width: 45%; height: 100%; }
-        #bar_chart { width: 55%; height: 100%; }
+
+        .chart-shell {
+            flex: 1 1 0;
+            min-width: 0;
+            height: 100%;
+            border-radius: 18px;
+            border: 1px solid rgba(124, 138, 156, 0.22);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+            box-sizing: border-box;
+            padding: 8px;
+        }
+
+        #pie_shell {
+            flex: 0 0 38%;
+            min-width: 320px;
+        }
+
+        #bar_shell {
+            flex: 1 1 auto;
+            min-width: 560px;
+        }
+
+        #pie_chart,
+        #bar_chart {
+            width: 100%;
+            height: 100%;
+        }
     </style>
 </head>
 <body>
-    <div id="pie_chart"></div>
-    <div id="bar_chart"></div>
+    <section class="chart-shell" id="pie_shell">
+        <div id="pie_chart"></div>
+    </section>
+    <section class="chart-shell" id="bar_shell">
+        <div id="bar_chart"></div>
+    </section>
 
     <script>
-        var pieChart = echarts.init(document.getElementById('pie_chart'));
-        var barChart = echarts.init(document.getElementById('bar_chart'));
+        var pieChart = echarts.init(document.getElementById("pie_chart"));
+        var barChart = echarts.init(document.getElementById("bar_chart"));
 
-        window.addEventListener('resize', function() {
+        function rgba(hex, opacity) {
+            var clean = String(hex || "#000000").replace("#", "");
+            if (clean.length === 3) {
+                clean = clean.split("").map(function (char) { return char + char; }).join("");
+            }
+            var bigint = parseInt(clean, 16);
+            var r = (bigint >> 16) & 255;
+            var g = (bigint >> 8) & 255;
+            var b = bigint & 255;
+            return "rgba(" + r + "," + g + "," + b + "," + opacity + ")";
+        }
+
+        function formatNumber(value) {
+            return Number(value || 0).toLocaleString("pt-BR");
+        }
+
+        function resizeCharts() {
             pieChart.resize();
             barChart.resize();
-        });
+        }
 
-        function renderCompensacoes(data, titleColor, textColor, isDark) {
+        function applyShellStyles(isDark) {
+            var shellBorder = isDark ? "rgba(118, 130, 148, 0.24)" : "rgba(125, 139, 158, 0.24)";
+            var shellGradient = isDark
+                ? "linear-gradient(180deg, rgba(53, 60, 72, 0.76), rgba(39, 44, 54, 0.72))"
+                : "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246,249,252,0.94))";
+            document.querySelectorAll(".chart-shell").forEach(function (shell) {
+                shell.style.borderColor = shellBorder;
+                shell.style.background = shellGradient;
+            });
+        }
+
+        window.addEventListener("resize", resizeCharts);
+
+        function buildBaseText(isDark) {
+            return {
+                titleColor: isDark ? "#f8fafc" : "#172033",
+                subtitleColor: isDark ? "#98a2b3" : "#66768b",
+                axisColor: isDark ? "#c8d1dd" : "#5d6a7c",
+                gridColor: isDark ? "rgba(162, 174, 188, 0.16)" : "rgba(82, 97, 120, 0.12)",
+                borderColor: isDark ? "#556070" : "#cfd7e3",
+                emptyColor: isDark ? "#8b97aa" : "#8b98aa",
+            };
+        }
+
+        function renderPieChart(config) {
+            pieChart.setOption({
+                animationDuration: 500,
+                title: {
+                    text: config.title,
+                    subtext: config.subtitle,
+                    left: "center",
+                    top: 8,
+                    textStyle: {
+                        color: config.text.titleColor,
+                        fontSize: 16,
+                        fontWeight: 800
+                    },
+                    subtextStyle: {
+                        color: config.text.subtitleColor,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        lineHeight: 18
+                    }
+                },
+                tooltip: {
+                    trigger: "item",
+                    backgroundColor: config.isDark ? "rgba(24, 30, 40, 0.96)" : "rgba(255, 255, 255, 0.98)",
+                    borderColor: config.text.gridColor,
+                    borderWidth: 1,
+                    textStyle: { color: config.text.titleColor, fontSize: 12 },
+                    formatter: "{b}: {c} ({d}%)"
+                },
+                legend: {
+                    orient: "horizontal",
+                    bottom: "3%",
+                    left: "center",
+                    itemWidth: 14,
+                    itemHeight: 10,
+                    icon: "roundRect",
+                    textStyle: {
+                        color: config.text.axisColor,
+                        fontSize: 11,
+                        fontWeight: 700
+                    }
+                },
+                graphic: config.graphics,
+                series: [
+                    {
+                        name: config.seriesName,
+                        type: "pie",
+                        radius: ["50%", "77%"],
+                        center: ["50%", "54%"],
+                        minAngle: 6,
+                        avoidLabelOverlap: true,
+                        label: { show: false },
+                        labelLine: { show: false },
+                        itemStyle: {
+                            borderColor: config.isDark ? "#242a34" : "#ffffff",
+                            borderWidth: 3,
+                            shadowBlur: 12,
+                            shadowColor: rgba(config.text.titleColor, config.isDark ? 0.12 : 0.08)
+                        },
+                        emphasis: {
+                            scale: true,
+                            scaleSize: 6
+                        },
+                        data: config.data
+                    }
+                ]
+            }, true);
+        }
+
+        function renderBarChart(config) {
+            if (!config.categories.length) {
+                barChart.setOption({
+                    animationDuration: 350,
+                    title: {
+                        text: config.title,
+                        subtext: config.subtitle,
+                        left: "center",
+                        top: 8,
+                        textStyle: {
+                            color: config.text.titleColor,
+                            fontSize: 15,
+                            fontWeight: 800
+                        },
+                        subtextStyle: {
+                            color: config.text.subtitleColor,
+                            fontSize: 11,
+                            fontWeight: 600
+                        }
+                    },
+                    graphic: [
+                        {
+                            type: "text",
+                            left: "center",
+                            top: "48%",
+                            style: {
+                                text: "Sem dados para exibir",
+                                fill: config.text.emptyColor,
+                                fontSize: 14,
+                                fontWeight: 700
+                            }
+                        }
+                    ],
+                    xAxis: { show: false },
+                    yAxis: { show: false },
+                    series: []
+                }, true);
+                return;
+            }
+
+            barChart.setOption({
+                animationDuration: 500,
+                title: {
+                    text: config.title,
+                    subtext: config.subtitle,
+                    left: "center",
+                    top: 8,
+                    textStyle: {
+                        color: config.text.titleColor,
+                        fontSize: 15,
+                        fontWeight: 800
+                    },
+                    subtextStyle: {
+                        color: config.text.subtitleColor,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        lineHeight: 18
+                    }
+                },
+                tooltip: {
+                    trigger: "axis",
+                    axisPointer: {
+                        type: "shadow",
+                        shadowStyle: {
+                            color: rgba(config.text.titleColor, config.isDark ? 0.08 : 0.05)
+                        }
+                    },
+                    backgroundColor: config.isDark ? "rgba(24, 30, 40, 0.96)" : "rgba(255, 255, 255, 0.98)",
+                    borderColor: config.text.gridColor,
+                    borderWidth: 1,
+                    textStyle: { color: config.text.titleColor, fontSize: 12 }
+                },
+                grid: {
+                    left: "7%",
+                    right: "4%",
+                    top: "21%",
+                    bottom: "18%",
+                    containLabel: true
+                },
+                xAxis: [
+                    {
+                        type: "category",
+                        data: config.categories,
+                        axisLine: { lineStyle: { color: config.text.borderColor } },
+                        axisTick: { show: false },
+                        axisLabel: {
+                            color: config.text.axisColor,
+                            interval: 0,
+                            rotate: config.rotate || 18,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            overflow: "truncate",
+                            width: 110
+                        }
+                    }
+                ],
+                yAxis: [
+                    {
+                        type: "value",
+                        axisLine: { show: false },
+                        axisTick: { show: false },
+                        axisLabel: {
+                            color: config.text.axisColor,
+                            fontSize: 10,
+                            fontWeight: 600
+                        },
+                        splitLine: {
+                            lineStyle: {
+                                color: config.text.gridColor,
+                                type: "dashed"
+                            }
+                        }
+                    }
+                ],
+                series: [
+                    {
+                        name: config.seriesName,
+                        type: "bar",
+                        barWidth: "54%",
+                        itemStyle: {
+                            borderRadius: [10, 10, 0, 0]
+                        },
+                        label: {
+                            show: true,
+                            position: "top",
+                            color: config.text.titleColor,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            formatter: function (params) {
+                                return formatNumber(params.value);
+                            }
+                        },
+                        data: config.values.map(function (value, index) {
+                            var color = config.colors[index] || "#3388ff";
+                            return {
+                                value: value,
+                                itemStyle: {
+                                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                        { offset: 0, color: color },
+                                        { offset: 1, color: rgba(color, 0.78) }
+                                    ])
+                                }
+                            };
+                        })
+                    }
+                ]
+            }, true);
+        }
+
+        function buildDonutGraphics(total, subtitle, text) {
+            if (!total) {
+                return [
+                    {
+                        type: "text",
+                        left: "center",
+                        top: "46%",
+                        style: {
+                            text: "Sem dados",
+                            fill: text.emptyColor,
+                            fontSize: 14,
+                            fontWeight: 700
+                        }
+                    }
+                ];
+            }
+
+            return [
+                {
+                    type: "text",
+                    left: "center",
+                    top: "40%",
+                    style: {
+                        text: formatNumber(total),
+                        fill: text.titleColor,
+                        fontSize: 28,
+                        fontWeight: 800
+                    }
+                },
+                {
+                    type: "text",
+                    left: "center",
+                    top: "49%",
+                    style: {
+                        text: subtitle,
+                        fill: text.subtitleColor,
+                        fontSize: 11,
+                        fontWeight: 700
+                    }
+                }
+            ];
+        }
+
+        function renderCompensacoes(data, isDark) {
             var metrics = data.metrics || {};
+            var text = buildBaseText(isDark);
             var totalPendente = Number(metrics.total_pendente || 0);
             var totalCompensado = Number(metrics.total_compensado || 0);
             var total = totalPendente + totalCompensado;
-            var pieData = [];
+            var pieData = total === 0
+                ? [{ value: 1, name: "Sem dados", itemStyle: { color: text.emptyColor } }]
+                : [
+                    { value: totalPendente, name: "Pendentes", itemStyle: { color: "#f0533a" } },
+                    { value: totalCompensado, name: "Compensadas", itemStyle: { color: "#1fb66a" } }
+                ];
 
-            if (total === 0) {
-                pieData.push({value: 1, name: 'Sem dados', itemStyle: {color: '#888'}});
-            } else {
-                pieData.push({value: totalPendente, name: 'PENDENTE', itemStyle: {color: '#FF4B2B'}});
-                pieData.push({value: totalCompensado, name: 'REALIZADO', itemStyle: {color: '#00C853'}});
-            }
-
-            pieChart.setOption({
-                title: { text: 'Status Geral de Compensação', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
-                legend: { orient: 'horizontal', bottom: '5%', textStyle: {color: textColor, fontSize: 10} },
-                series: [
-                    {
-                        name: 'Status',
-                        type: 'pie',
-                        radius: ['35%', '65%'],
-                        avoidLabelOverlap: false,
-                        label: { show: false },
-                        data: pieData
-                    }
-                ]
+            renderPieChart({
+                isDark: isDark,
+                text: text,
+                title: "Status geral das compensações",
+                subtitle: "Distribuição do recorte atual",
+                seriesName: "Compensações",
+                data: pieData,
+                graphics: buildDonutGraphics(total, "mudas no recorte", text)
             });
 
             var pendSorted = metrics.pend_micro_sorted || [];
-            var categories = pendSorted.slice(0, 10).map(function(item) { return item[0]; });
-            var values = pendSorted.slice(0, 10).map(function(item) { return item[1]; });
+            var categories = pendSorted.slice(0, 10).map(function (item) { return item[0]; });
+            var values = pendSorted.slice(0, 10).map(function (item) { return Number(item[1] || 0); });
 
-            var palette = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4'];
+            var palette = ["#e65f5c", "#5972d9", "#d85de4", "#42b649", "#ffd72f", "#ff8e38", "#8d2bc1", "#3bc8dd", "#6e7cff", "#d9467f"];
             var paletteKeys = data.micro_palette_keys || categories;
-            var uniqueMicros = [...new Set(paletteKeys)].sort();
+            var uniqueMicros = Array.from(new Set(paletteKeys)).sort();
             var colorMap = {};
-            uniqueMicros.forEach(function(label, index) {
+            uniqueMicros.forEach(function (label, index) {
                 colorMap[label] = palette[index % palette.length];
             });
-            var itemStyles = categories.map(function(category) { return colorMap[category] || '#3388ff'; });
 
-            barChart.setOption({
-                title: { text: 'Top 10 - Mudas Pendentes por Microbacia', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
-                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                grid: { left: '5%', right: '5%', bottom: '15%', containLabel: true },
-                xAxis: [
-                    {
-                        type: 'category',
-                        data: categories,
-                        axisLabel: { color: textColor, interval: 0, rotate: 30, fontSize: 9 }
-                    }
-                ],
-                yAxis: [
-                    {
-                        type: 'value',
-                        axisLabel: { color: textColor, fontSize: 9 },
-                        splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } }
-                    }
-                ],
-                series: [
-                    {
-                        name: 'Pendentes',
-                        type: 'bar',
-                        barWidth: '60%',
-                        data: values.map(function(value, index) {
-                            return {value: value, itemStyle: {color: itemStyles[index]}};
-                        }),
-                        label: { show: true, position: 'top', color: textColor, fontSize: 10 }
-                    }
-                ]
+            renderBarChart({
+                isDark: isDark,
+                text: text,
+                title: "Pendências por microbacia",
+                subtitle: "Top 10 do recorte atual",
+                seriesName: "Pendentes",
+                categories: categories,
+                values: values,
+                colors: categories.map(function (category) { return colorMap[category] || "#3388ff"; }),
+                rotate: 22
             });
         }
 
-        function renderTcra(data, titleColor, textColor, isDark) {
+        function renderTcra(data, isDark) {
+            var text = buildBaseText(isDark);
             var statusRows = data.status_rows || [];
             var attentionRows = data.attention_rows || [];
-            var pieData = statusRows.filter(function(item) { return Number(item.value || 0) > 0; }).map(function(item) {
-                return {
-                    value: Number(item.value || 0),
-                    name: item.name,
-                    itemStyle: { color: item.color || '#3388ff' }
-                };
-            });
+            var pieData = statusRows
+                .filter(function (item) { return Number(item.value || 0) > 0; })
+                .map(function (item) {
+                    return {
+                        value: Number(item.value || 0),
+                        name: item.name,
+                        itemStyle: { color: item.color || "#3388ff" }
+                    };
+                });
 
             if (!pieData.length) {
-                pieData = [{value: 1, name: 'Sem dados', itemStyle: {color: '#888'}}];
+                pieData = [{ value: 1, name: "Sem dados", itemStyle: { color: text.emptyColor } }];
             }
 
-            pieChart.setOption({
-                title: { text: 'Status Operacional de TCRAs', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
-                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
-                legend: { orient: 'horizontal', bottom: '5%', textStyle: {color: textColor, fontSize: 10} },
-                series: [
-                    {
-                        name: 'Status TCRA',
-                        type: 'pie',
-                        radius: ['35%', '65%'],
-                        avoidLabelOverlap: false,
-                        label: { show: false },
-                        data: pieData
-                    }
-                ]
+            var monitoredTerms = statusRows.reduce(function (acc, item) {
+                return acc + Number(item.value || 0);
+            }, 0);
+
+            renderPieChart({
+                isDark: isDark,
+                text: text,
+                title: "Situação operacional dos TCRAs",
+                subtitle: "Distribuição do módulo monitorado",
+                seriesName: "TCRAs",
+                data: pieData,
+                graphics: buildDonutGraphics(monitoredTerms, "termos monitorados", text)
             });
 
-            var categories = attentionRows.map(function(item) { return item.label; });
-            var values = attentionRows.map(function(item) { return Number(item.value || 0); });
-
-            barChart.setOption({
-                title: { text: 'Radar Administrativo de TCRAs', left: 'center', textStyle: {color: titleColor, fontSize: 14} },
-                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                grid: { left: '5%', right: '5%', bottom: '15%', containLabel: true },
-                xAxis: [
-                    {
-                        type: 'category',
-                        data: categories,
-                        axisLabel: { color: textColor, interval: 0, rotate: 25, fontSize: 9 }
-                    }
-                ],
-                yAxis: [
-                    {
-                        type: 'value',
-                        axisLabel: { color: textColor, fontSize: 9 },
-                        splitLine: { lineStyle: { color: isDark ? '#444' : '#eee' } }
-                    }
-                ],
-                series: [
-                    {
-                        name: 'TCRAs',
-                        type: 'bar',
-                        barWidth: '60%',
-                        data: attentionRows.map(function(item) {
-                            return {
-                                value: Number(item.value || 0),
-                                itemStyle: { color: item.color || '#3388ff' }
-                            };
-                        }),
-                        label: { show: true, position: 'top', color: textColor, fontSize: 10 }
-                    }
-                ]
+            renderBarChart({
+                isDark: isDark,
+                text: text,
+                title: "Radar administrativo",
+                subtitle: "Alertas e pendências do módulo TCRA",
+                seriesName: "TCRAs",
+                categories: attentionRows.map(function (item) { return item.label; }),
+                values: attentionRows.map(function (item) { return Number(item.value || 0); }),
+                colors: attentionRows.map(function (item) { return item.color || "#3388ff"; }),
+                rotate: 14
             });
         }
 
-        window.updateDashboard = function(dataStr) {
+        window.updateDashboard = function (dataStr) {
             var data = JSON.parse(dataStr);
             var isDark = !!data.is_dark;
-            var textColor = isDark ? '#e9e9ea' : '#333333';
-            var titleColor = isDark ? '#ffffff' : '#111111';
+            applyShellStyles(isDark);
 
-            if (data.kind === 'tcra') {
-                renderTcra(data, titleColor, textColor, isDark);
-                return;
+            if (data.kind === "tcra") {
+                renderTcra(data, isDark);
+            } else {
+                renderCompensacoes(data, isDark);
             }
-            renderCompensacoes(data, titleColor, textColor, isDark);
+
+            resizeCharts();
         };
     </script>
 </body>

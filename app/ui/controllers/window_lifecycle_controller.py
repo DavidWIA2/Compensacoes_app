@@ -43,8 +43,10 @@ class WindowLifecycleController:
             self._timers_bound = True
         else:
             self._rewire_timers()
-        self.window.data_tab.bridge._on_clicked = self.window._on_map_click
-        self.window.data_tab.bridge._on_layer_changed = self.window.save_map_layer_preference
+        bridge = getattr(self.window.data_tab, "bridge", None)
+        if bridge is not None:
+            bridge._on_clicked = self.window._on_map_click
+            bridge._on_layer_changed = self.window.save_map_layer_preference
 
     def finalize_initialization(self):
         run_startup_sequence(self.window)
@@ -82,14 +84,19 @@ class WindowLifecycleController:
             )
 
     def prepare_close(self, event) -> bool:
-        if not self.window._skip_close_discard_confirmation and not self.window.form_controller.confirm_discard_changes(
-            "fechar a janela"
-        ):
+        form_controller = getattr(self.window, "form_controller", None)
+        should_confirm_discard = (
+            not getattr(self.window, "_skip_close_discard_confirmation", False)
+            and form_controller is not None
+        )
+        if should_confirm_discard and not form_controller.confirm_discard_changes("fechar a janela"):
             event.ignore()
             return False
 
         self.stop_owned_timers()
-        self.window.settings_controller.save_before_close()
+        settings_controller = getattr(self.window, "settings_controller", None)
+        if settings_controller is not None:
+            settings_controller.save_before_close()
 
         if hasattr(self.window, "support_controller"):
             self.window.support_controller.shutdown()

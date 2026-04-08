@@ -1,4 +1,4 @@
-import os
+﻿import os
 from typing import List, Dict, Optional
 
 from PySide6.QtCore import Qt, QTimer, QUrl
@@ -6,7 +6,7 @@ from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, Q
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableView, QHeaderView,
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
-    QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton,
+    QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton, QFrame,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
@@ -60,24 +60,30 @@ class DataTab(QWidget):
         self.main_window = parent
         self.sf = getattr(parent, "scale_factor", 1.0)
         self._map_loaded = False
+        self._web_view_initialized = False
         self._locked_table_height: Optional[int] = None
         self._locked_splitter_height: Optional[int] = None
+        self.web = None
+        self.channel = None
+        self.bridge = None
         self.setup_ui()
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._map_loaded:
-            self.load_map()
         self._update_form_group_height()
         self._sync_left_panel_heights()
+        self._apply_responsive_layout()
         self._update_responsive_constraints()
+        QTimer.singleShot(0, self._finalize_responsive_layout)
         QTimer.singleShot(0, self.align_splitter_to_table_width)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_form_group_height()
         self._sync_left_panel_heights()
+        self._apply_responsive_layout()
         self._update_responsive_constraints()
+        QTimer.singleShot(0, self._finalize_responsive_layout)
 
     def setup_ui(self):
         panel_gap = max(int(10 * self.sf), 8)
@@ -85,16 +91,53 @@ class DataTab(QWidget):
         self._panel_gap = panel_gap
         layout = QVBoxLayout(self)
         layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
-        layout.setSpacing(int(10 * self.sf))
+        layout.setSpacing(int(8 * self.sf))
+
+        filters_frame = QFrame(self)
+        filters_frame.setProperty("panel", "toolbar")
+        self.filters_frame = filters_frame
+        filters_host_layout = QVBoxLayout(filters_frame)
+        self.filters_host_layout = filters_host_layout
+        filters_host_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
+        filters_host_layout.setSpacing(int(6 * self.sf))
+
+        header_row = QHBoxLayout()
+        self.filters_header_row = header_row
+        header_row.setSpacing(int(8 * self.sf))
+        header_text_layout = QVBoxLayout()
+        header_text_layout.setSpacing(int(2 * self.sf))
+        self.lbl_workspace_kicker = QLabel("COMPENSAÇÕES")
+        self.lbl_workspace_kicker.setProperty("role", "eyebrow")
+        self.lbl_workspace_title = QLabel("Base de compensa\u00e7\u00f5es")
+        self.lbl_workspace_title.setProperty("role", "section-title")
+        self.lbl_workspace_subtitle = QLabel(
+            "Consulta operacional da base, filtros do recorte e edição do cadastro em andamento."
+        )
+        self.lbl_workspace_subtitle.setProperty("role", "page-subtitle")
+        self.lbl_workspace_helper = QLabel(
+            "Use a grade para localizar processos e o painel lateral para revisar cadastro, plantios e mapa."
+        )
+        self.lbl_workspace_helper.setProperty("role", "helper")
+        self.lbl_workspace_helper.setWordWrap(True)
+        header_text_layout.addWidget(self.lbl_workspace_kicker)
+        header_text_layout.addWidget(self.lbl_workspace_title)
+        header_text_layout.addWidget(self.lbl_workspace_subtitle)
+        header_text_layout.addWidget(self.lbl_workspace_helper)
+        header_row.addLayout(header_text_layout, 1)
+        self.lbl_results = QLabel("0 registros")
+        self.lbl_results.setObjectName("StatusChip")
+        header_row.addWidget(self.lbl_results, 0, Qt.AlignRight | Qt.AlignVCenter)
+        filters_host_layout.addLayout(header_row)
 
         filters = QHBoxLayout()
-        filters.setSpacing(int(15 * self.sf))
+        self.filters_row = filters
+        filters.setSpacing(int(12 * self.sf))
 
         def mk_f(lbl, w):
             v = QVBoxLayout()
             v.setSpacing(int(2 * self.sf))
             l = QLabel(lbl)
-            l.setStyleSheet(f"font-size: {int(10 * self.sf)}px; font-weight: 800; color: #888;")
+            l.setProperty("role", "muted")
             v.addWidget(l)
             v.addWidget(w)
             filters.addLayout(v)
@@ -110,36 +153,37 @@ class DataTab(QWidget):
         self.filter_year.addItem("Todos")
         self.filter_year.setMinimumWidth(int(90 * self.sf))
 
-        self.btn_clear_filters = QPushButton("Limpar Filtros")
-        self.btn_reset_sort = QPushButton("Redefinir Ordem")
-        self.btn_columns = QPushButton("Colunas Visíveis")
-        self.btn_table_full = QPushButton("Tabela Tela Cheia")
+        self.btn_clear_filters = QPushButton("Limpar filtros")
+        self.btn_reset_sort = QPushButton("Restaurar ordem")
+        self.btn_columns = QPushButton("Exibir colunas")
+        self.btn_table_full = QPushButton("Expandir tabela")
+        self.btn_clear_filters.setProperty("kind", "chip-quiet")
+        for b in [self.btn_reset_sort, self.btn_columns, self.btn_table_full]:
+            b.setProperty("kind", "chip-quiet")
         for b in [self.btn_clear_filters, self.btn_reset_sort, self.btn_columns, self.btn_table_full]:
-            b.setProperty("kind", "secondary")
             b.setMinimumHeight(int(28 * self.sf))
         self.btn_clear_filters.setToolTip("Remove busca e filtros aplicados na lista principal.")
-        self.btn_reset_sort.setToolTip("Restaura a ordenação padrão da tabela.")
-        self.btn_columns.setToolTip("Escolhe quais colunas ficam visíveis na tabela.")
-        self.btn_table_full.setToolTip("Abre a tabela de compensações em tela cheia.")
+        self.btn_reset_sort.setToolTip("Restaura a ordem padrão da tabela.")
+        self.btn_columns.setToolTip("Escolhe quais colunas ficam visíveis.")
+        self.btn_table_full.setToolTip("Expande a tabela de compensações.")
 
-        mk_f("MICROBACIAS", self.filter_micro)
-        mk_f("TIPO", self.filter_eletronico)
-        mk_f("STATUS", self.filter_status)
-        mk_f("ANO", self.filter_year)
+        mk_f("Microbacias", self.filter_micro)
+        mk_f("Tipo", self.filter_eletronico)
+        mk_f("Situa\u00e7\u00e3o", self.filter_status)
+        mk_f("Ano", self.filter_year)
 
         btns = QHBoxLayout()
+        self.filters_buttons_layout = btns
         btns.setSpacing(int(6 * self.sf))
-        btns.setContentsMargins(0, int(14 * self.sf), 0, 0)
+        btns.setContentsMargins(0, int(12 * self.sf), 0, 0)
         btns.addWidget(self.btn_clear_filters)
         btns.addWidget(self.btn_reset_sort)
         btns.addWidget(self.btn_columns)
         btns.addWidget(self.btn_table_full)
         filters.addLayout(btns)
         filters.addStretch(1)
-        self.lbl_results = QLabel("0 registros")
-        self.lbl_results.setContentsMargins(0, int(14 * self.sf), 0, 0)
-        filters.addWidget(self.lbl_results)
-        layout.addLayout(filters)
+        filters_host_layout.addLayout(filters)
+        layout.addWidget(filters_frame)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -152,7 +196,7 @@ class DataTab(QWidget):
         self.left_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         l_lay = QVBoxLayout(self.left_panel)
         l_lay.setContentsMargins(0, 0, panel_gap, panel_bottom_gap)
-        l_lay.setSpacing(int(8 * self.sf))
+        l_lay.setSpacing(int(6 * self.sf))
         self.table_model = CompensacoesTableModel()
         self.proxy = NumericSortProxy()
         self.proxy.setSourceModel(self.table_model)
@@ -162,6 +206,8 @@ class DataTab(QWidget):
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.SingleSelection)
         self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(True)
+        self.table.verticalHeader().setDefaultSectionSize(int(28 * self.sf))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setMinimumHeight(0)
@@ -180,62 +226,127 @@ class DataTab(QWidget):
         self.right_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         r_lay = QVBoxLayout(self.right_panel)
         r_lay.setContentsMargins(panel_gap, 0, 0, 0)
-        r_lay.setSpacing(int(8 * self.sf))
+        r_lay.setSpacing(int(6 * self.sf))
+        self.lbl_form_context = QLabel(
+            "O painel lateral concentra o cadastro do processo, plantios vinculados e ações de geocodificação."
+        )
+        self.lbl_form_context.setProperty("role", "helper")
+        self.lbl_form_context.setWordWrap(True)
+        r_lay.addWidget(self.lbl_form_context, 0)
         self.form_group = self._create_form_group()
         self._update_form_group_height()
         r_lay.addWidget(self.form_group, 0)
 
-        crud = QHBoxLayout()
+        crud_frame = QFrame(self.right_panel)
+        crud_frame.setProperty("panel", "subtle")
+        self.crud_frame = crud_frame
+        crud = QHBoxLayout(crud_frame)
+        self.crud_layout = crud
         crud.setContentsMargins(0, int(8 * self.sf), 0, 0)
-        crud.setSpacing(int(8 * self.sf))
+        crud.setSpacing(int(6 * self.sf))
         self._crud_spacing = crud.spacing()
-        self.btn_clear = QPushButton("Limpar Form")
+        self.btn_clear = QPushButton("Novo cadastro")
         self.btn_add = QPushButton("Adicionar")
         self.btn_save_edit = QPushButton("Salvar")
         self.btn_delete = QPushButton("Excluir")
-        self.btn_ficha_pdf = QPushButton("Gerar Ficha")
+        self.btn_ficha_pdf = QPushButton("Gerar ficha")
         self.btn_add.setProperty("kind", "success")
         self.btn_save_edit.setProperty("kind", "primary")
         self.btn_delete.setProperty("kind", "danger")
-        self.btn_clear.setProperty("kind", "secondary")
-        self.btn_ficha_pdf.setProperty("kind", "secondary")
-        self.btn_clear.setToolTip("Limpa o formulário de cadastro/edição.")
+        self.btn_clear.setProperty("kind", "chip-quiet")
+        self.btn_ficha_pdf.setProperty("kind", "chip-quiet")
+        self.btn_clear.setToolTip("Limpa o formulário atual e prepara um novo cadastro.")
         self.btn_add.setToolTip("Adiciona um novo registro de compensação.")
         self.btn_save_edit.setToolTip("Salva as alterações do registro selecionado.")
         self.btn_delete.setToolTip("Exclui o registro selecionado após confirmação.")
-        self.btn_ficha_pdf.setToolTip("Gera a ficha PDF do registro atual.")
+        self.btn_ficha_pdf.setToolTip("Gera a ficha PDF do registro atual selecionado.")
         for b in [self.btn_clear, self.btn_add, self.btn_save_edit, self.btn_delete, self.btn_ficha_pdf]:
-            b.setMinimumHeight(int(30 * self.sf))
+            b.setMinimumHeight(int(28 * self.sf))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             crud.addWidget(b)
-        r_lay.addLayout(crud)
+        r_lay.addWidget(crud_frame, 0)
 
         self.map_group = self._create_map_group()
         r_lay.addWidget(self.map_group)
 
-        self.web = QWebEngineView()
-        self.web.setMinimumHeight(int(350 * self.sf))
-        self.web.setPage(DebugPage(self.web))
-        s = self.web.page().settings()
-        s.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-        s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        self.channel = QWebChannel(self.web.page())
+        self.map_host = QWidget()
+        self.map_host_layout = QVBoxLayout(self.map_host)
+        self.map_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.map_host_layout.setSpacing(0)
+        self._build_map_placeholder()
+        r_lay.addWidget(self.map_host, 1)
+        self.splitter.addWidget(self.right_panel)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self._update_responsive_constraints()
+        self._apply_responsive_layout()
+        self.splitter.setSizes([max(int(980 * self.sf), 720), self.right_panel.minimumWidth()])
+        QTimer.singleShot(0, self._sync_left_panel_heights)
+        QTimer.singleShot(0, self._update_responsive_constraints)
+        QTimer.singleShot(0, self.align_splitter_to_table_width)
+
+    def _build_map_placeholder(self):
+        self.map_placeholder = QWidget(self.map_host)
+        placeholder_layout = QVBoxLayout(self.map_placeholder)
+        placeholder_layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
+        placeholder_layout.setSpacing(int(6 * self.sf))
+
+        self.map_placeholder_label = QLabel(
+            "O mapa embutido será carregado sob demanda para manter a abertura do app mais estável."
+        )
+        self.map_placeholder_label.setWordWrap(True)
+        self.map_placeholder_label.setObjectName("FormStateLabel")
+
+        self.btn_load_map = QPushButton("Carregar mapa")
+        self.btn_load_map.setProperty("kind", "primary")
+        self.btn_load_map.setMinimumHeight(int(30 * self.sf))
+        self.btn_load_map.clicked.connect(self.load_map)
+
+        placeholder_layout.addWidget(self.map_placeholder_label, 0, Qt.AlignTop | Qt.AlignHCenter)
+        placeholder_layout.addWidget(self.btn_load_map, 0, Qt.AlignTop | Qt.AlignHCenter)
+        placeholder_layout.addStretch(1)
+        self.map_host_layout.addWidget(self.map_placeholder, 1)
+
+    def _detach_map_placeholder(self):
+        if getattr(self, "map_placeholder", None) is None:
+            return
+        self.map_host_layout.removeWidget(self.map_placeholder)
+        self.map_placeholder.hide()
+        self.map_placeholder.deleteLater()
+        self.map_placeholder = None
+
+    def _create_map_web_view(self):
+        web = QWebEngineView()
+        web.setMinimumHeight(int(350 * self.sf))
+        web.setPage(DebugPage(web))
+        settings = web.page().settings()
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+
+        self.channel = QWebChannel(web.page())
         self.bridge = MapBridge(
             getattr(self.main_window, "_on_map_click", None) if self.main_window else None,
             getattr(self.main_window, "save_map_layer_preference", None) if self.main_window else None,
         )
         self.channel.registerObject("bridge", self.bridge)
-        self.web.page().setWebChannel(self.channel)
+        web.page().setWebChannel(self.channel)
 
-        r_lay.addWidget(self.web, 1)
-        self.splitter.addWidget(self.right_panel)
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
-        self._update_responsive_constraints()
-        self.splitter.setSizes([max(int(980 * self.sf), 720), self.right_panel.minimumWidth()])
-        QTimer.singleShot(0, self._sync_left_panel_heights)
-        QTimer.singleShot(0, self._update_responsive_constraints)
-        QTimer.singleShot(0, self.align_splitter_to_table_width)
+        if self.main_window is not None and hasattr(self.main_window, "_on_map_loaded"):
+            web.loadFinished.connect(self.main_window._on_map_loaded)
+        return web
+
+    def ensure_map_web_view(self):
+        if self._web_view_initialized and self.web is not None:
+            return self.web
+
+        self._detach_map_placeholder()
+        self.web = self._create_map_web_view()
+        self.map_host_layout.addWidget(self.web, 1)
+        self._web_view_initialized = True
+        return self.web
+
+    def has_map_web_view(self) -> bool:
+        return bool(self._web_view_initialized and self.web is not None)
 
     def _sync_left_panel_heights(self):
         if not hasattr(self, "left_panel") or not self.left_panel:
@@ -334,7 +445,64 @@ class DataTab(QWidget):
     def _update_responsive_constraints(self):
         if not hasattr(self, "right_panel"):
             return
-        self.right_panel.setMinimumWidth(self.preferred_right_panel_width())
+        compact_mode = self._is_compact_layout()
+        preferred_width = self.preferred_right_panel_width()
+        if compact_mode:
+            preferred_width = max(int(preferred_width * 0.86), 460)
+        self.right_panel.setMinimumWidth(preferred_width)
+
+    def _is_compact_layout(self) -> bool:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        if current_width < 900 and not self.isVisible():
+            current_width = 1920
+        return current_width <= 1460
+
+    def _is_tight_layout(self) -> bool:
+        root = self.window()
+        current_width = root.width() if root is not None and root.width() > 0 else self.width()
+        if current_width < 900 and not self.isVisible():
+            current_width = 1920
+        return current_width <= 1320
+
+    def _apply_responsive_layout(self) -> None:
+        compact_mode = self._is_compact_layout()
+        tight_mode = self._is_tight_layout()
+
+        self.lbl_workspace_subtitle.setVisible(not tight_mode)
+        self.lbl_workspace_helper.setVisible(not compact_mode)
+        self.lbl_form_context.setVisible(not compact_mode)
+
+        self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar filtros")
+        self.btn_reset_sort.setText("Ordem" if compact_mode else "Restaurar ordem")
+        self.btn_columns.setText("Colunas" if compact_mode else "Exibir colunas")
+        self.btn_table_full.setText("Tela cheia" if compact_mode else "Expandir tabela")
+        self.btn_manage_plantios.setText("Plantios" if compact_mode else "Plantios...")
+
+        self.filter_micro.setMinimumWidth(int((160 if compact_mode else 220) * self.sf))
+        self.filter_eletronico.setMinimumWidth(int((110 if compact_mode else 140) * self.sf))
+        self.filter_status.setMinimumWidth(int((108 if compact_mode else 130) * self.sf))
+        self.filter_year.setMinimumWidth(int((82 if compact_mode else 90) * self.sf))
+
+        totals_height = max(int((190 if compact_mode else 230) * self.sf), 156 if compact_mode else 200)
+        self.group_totals.setFixedHeight(totals_height)
+        self.kpi_table.setMinimumHeight(max(int((92 if compact_mode else 120) * self.sf), 80))
+        self.micro_table.setMinimumHeight(max(int((92 if compact_mode else 120) * self.sf), 80))
+
+        export_height = max(int((36 if compact_mode else 42) * self.sf), 32)
+        self.bar_export.setFixedHeight(export_height)
+        if hasattr(self, "export_label"):
+            self.export_label.setVisible(not tight_mode)
+
+        self.combo_heatmap_type.setMinimumWidth(max(int((120 if compact_mode else 150) * self.sf), 110))
+        if hasattr(self, "map_placeholder_label"):
+            self.map_placeholder_label.setVisible(not tight_mode)
+
+    def _finalize_responsive_layout(self) -> None:
+        self._apply_responsive_layout()
+        self._update_responsive_constraints()
+        self._sync_left_panel_heights()
+        self.align_splitter_to_table_width()
 
     def _preferred_splitter_anchor_left_width(self) -> int | None:
         if not hasattr(self, "btn_table_full") or not hasattr(self, "splitter"):
@@ -450,15 +618,23 @@ class DataTab(QWidget):
         header.resizeSection(column_index, target_width)
 
     def load_map(self):
-        self._map_loaded = True
         map_html = resource_path("app", "ui", "map_leaflet.html")
-        if os.path.exists(map_html):
-            url = QUrl.fromLocalFile(map_html)
-            url.setQuery("tileScheme=compmap")
-            self.web.setUrl(url)
+        if not os.path.exists(map_html):
+            if getattr(self, "map_placeholder_label", None) is not None:
+                self.map_placeholder_label.setText("Não foi possível localizar o HTML do mapa nesta instalação.")
+            return
+
+        web = self.ensure_map_web_view()
+        if self._map_loaded:
+            return
+
+        url = QUrl.fromLocalFile(map_html)
+        url.setQuery("tileScheme=compmap")
+        web.setUrl(url)
+        self._map_loaded = True
 
     def _create_totals_group(self):
-        g = QGroupBox("Totais (Filtro Atual)")
+        g = QGroupBox("Indicadores do recorte")
         l = QHBoxLayout(g)
         l.setContentsMargins(int(8 * self.sf), int(10 * self.sf), int(8 * self.sf), int(8 * self.sf))
         l.setSpacing(int(8 * self.sf))
@@ -491,15 +667,20 @@ class DataTab(QWidget):
 
     def _create_export_bar(self):
         w = QWidget()
-        w.setFixedHeight(int(46 * self.sf))
+        w.setProperty("panel", "subtle")
+        w.setFixedHeight(int(42 * self.sf))
         l = QHBoxLayout(w)
-        l.setContentsMargins(0, 0, 0, 0)
-        l.setSpacing(int(8 * self.sf))
-        self.btn_export_csv = QPushButton("Exportar CSV")
-        self.btn_export_spreadsheet = QPushButton("Exportar Planilha (2 abas)")
-        self.btn_export_pdf = QPushButton("Exportar PDF")
+        l.setContentsMargins(int(8 * self.sf), int(6 * self.sf), int(8 * self.sf), int(6 * self.sf))
+        l.setSpacing(int(6 * self.sf))
+        export_label = QLabel("Exportação do recorte atual")
+        self.export_label = export_label
+        export_label.setProperty("role", "helper-strong")
+        l.addWidget(export_label)
+        self.btn_export_csv = QPushButton("CSV")
+        self.btn_export_spreadsheet = QPushButton("Planilha")
+        self.btn_export_pdf = QPushButton("PDF")
         for b in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
-            b.setProperty("kind", "secondary")
+            b.setProperty("kind", "chip-quiet")
             b.setMinimumHeight(int(28 * self.sf))
             l.addWidget(b)
         l.addStretch(1)
@@ -515,7 +696,7 @@ class DataTab(QWidget):
         secondary_field_w = max(int(150 * self.sf), 110)
         aux_col_w = max(int(108 * self.sf), 90)
 
-        g = QGroupBox("Cadastro / Edição")
+        g = QGroupBox("Cadastro do processo")
         g.setObjectName("formGroup")
         l = QGridLayout(g)
         l.setContentsMargins(int(15 * self.sf), top_margin, int(15 * self.sf), int(10 * self.sf))
@@ -542,7 +723,7 @@ class DataTab(QWidget):
         self.in_oficio.setToolTip("Número do ofício ou processo principal do cadastro.")
         self.chk_sn = QCheckBox("S/N")
         self.chk_sn.setFixedWidth(aux_col_w)
-        self.chk_sn.setToolTip("Marque quando o cadastro não possuir ofício/processo definido.")
+        self.chk_sn.setToolTip("Marque quando o cadastro não possuir ofício ou processo definido.")
 
         self.in_avtec = mk_in(secondary_field_w)
         self.in_avtec.setPlaceholderText("Ex.: 107/2021")
@@ -561,7 +742,7 @@ class DataTab(QWidget):
         self.in_end_plantio.setToolTip("Resumo do endereço de plantio cadastrado para o registro.")
         self.in_end_plantio.setMinimumWidth(max(int(220 * self.sf), 170))
         self.btn_manage_plantios = QPushButton("Plantios...")
-        self.btn_manage_plantios.setProperty("kind", "secondary")
+        self.btn_manage_plantios.setProperty("kind", "chip-quiet")
         self.btn_manage_plantios.setFixedHeight(input_h)
         self.btn_manage_plantios.setToolTip("Abre o editor de plantios vinculados ao cadastro.")
         plantio_button_w = max(int(132 * self.sf), 122)
@@ -577,7 +758,7 @@ class DataTab(QWidget):
         self.plantio_actions_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.plantio_actions_layout = QHBoxLayout(self.plantio_actions_container)
         self.plantio_actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.plantio_actions_layout.setSpacing(int(10 * self.sf))
+        self.plantio_actions_layout.setSpacing(int(8 * self.sf))
         self.in_micro = QComboBox()
         self.in_micro.setEditable(True)
         self.in_micro.setFixedHeight(input_h)
@@ -665,7 +846,7 @@ class DataTab(QWidget):
             self.form_group.setMinimumHeight(target_height)
 
     def _create_map_group(self):
-        g = QGroupBox("Mapa")
+        g = QGroupBox("Mapa e geocodificação")
         l = QGridLayout(g)
         l.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         l.setHorizontalSpacing(int(8 * self.sf))
@@ -673,7 +854,7 @@ class DataTab(QWidget):
         self.btn_maps = QPushButton("Buscar Endereço")
         self.btn_maps_plantio = QPushButton("Buscar Plantio")
         self.btn_batch_geo = QPushButton("GPS em Lote")
-        self.btn_map_full = QPushButton("Mapa Tela Cheia")
+        self.btn_map_full = QPushButton("Mapa ampliado")
         self.btn_street_view = QPushButton("Street View")
         self.btn_add_layer = QPushButton("Adicionar Camada GIS")
         self.btn_add_layer.setToolTip("Adicione camadas externas ao mapa (.geojson, .json ou .kml)")
@@ -690,7 +871,9 @@ class DataTab(QWidget):
         for b in [self.btn_maps, self.btn_maps_plantio, self.btn_batch_geo, self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
             b.setMinimumHeight(int(24 * self.sf))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            b.setProperty("kind", "secondary")
+        for b in [self.btn_maps, self.btn_maps_plantio, self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
+            b.setProperty("kind", "chip-quiet")
+        self.btn_batch_geo.setProperty("kind", "secondary")
         self.btn_maps.setToolTip("Geocodifica o endereço principal e posiciona o mapa.")
         self.btn_maps_plantio.setToolTip("Geocodifica o endereço de plantio cadastrado.")
         self.btn_batch_geo.setToolTip("Atualiza coordenadas em lote para os registros filtrados.")
@@ -713,3 +896,5 @@ class DataTab(QWidget):
         text = str(message or "").strip()
         self.map_notice_label.setText(text)
         self.map_notice_label.setVisible(bool(text))
+
+

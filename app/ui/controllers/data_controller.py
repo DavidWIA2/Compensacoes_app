@@ -484,6 +484,8 @@ class DataController:
         self.window._refresh_window_chrome()
         self.window.toggle_heatmap()
         self.window.data_tab._sync_left_panel_heights()
+        if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
+            self.window.data_tab._finalize_responsive_layout()
         QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
 
     def clear_filters(self):

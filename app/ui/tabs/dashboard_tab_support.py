@@ -101,14 +101,11 @@ def build_tcra_chart_payload(
 
 
 def build_local_overview_text(report: Optional[PersistenceRecordOverviewReport]) -> str:
-    if report is None:
-        return "Resumo do cache sincronizado: indisponível para esta sessão."
-
-    if report.status == "indisponivel":
-        return "Resumo do cache sincronizado: o cache local não está disponível nesta sessão."
+    if report is None or report.status == "indisponivel":
+        return "Cache local sincronizado: indisponível nesta sessão."
 
     if report.status == "ausente":
-        return "Resumo do cache sincronizado: a sessão ainda não foi sincronizada para leitura local."
+        return "Cache local sincronizado: a sessão ainda não foi sincronizada para leitura local."
 
     lines = [
         (
@@ -132,12 +129,12 @@ def build_local_overview_text(report: Optional[PersistenceRecordOverviewReport])
 
 def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
     if status is None or status.status == "indisponivel":
-        return "Leitura operacional atual: sessão em memória."
+        return "Leitura operacional: sessão em memória."
 
     if status.uses_sqlite:
         lines = [
             (
-                f"Leitura operacional atual: cache local sincronizado | "
+                f"Leitura operacional: cache local sincronizado | "
                 f"{status.filtered_records} registro(s) no recorte"
             )
         ]
@@ -151,7 +148,7 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
 
     lines = [
         (
-            f"Leitura operacional atual: sessão em memória | "
+            f"Leitura operacional: sessão em memória | "
             f"{status.filtered_records} registro(s) no recorte"
         )
     ]
@@ -164,7 +161,7 @@ def build_tcra_summary_text(overview: Optional[TcraRecordOverview]) -> str:
     if overview is None:
         return "TCRAs: nenhum termo carregado no cache sincronizado."
     return (
-        f"TCRAs no cache sincronizado: {overview.total_count} | "
+        f"Base TCRA: {overview.total_count} | "
         f"{overview.ativos_count} ativos | "
         f"{overview.mpsp_relacionados_count} MPSP | "
         f"{overview.sem_numero_tcra_count} sem número | "
@@ -196,10 +193,7 @@ def build_dashboard_agenda_summary_text(
     metrics = dict(metrics or {})
     comp_pendentes = int(metrics.get("total_pendente", 0) or 0)
     comp_total = int(metrics.get("count_total", 0) or 0)
-    comp_volume = (
-        f"Compensações: {comp_total} registro(s) | "
-        f"{comp_pendentes} pendentes no recorte atual."
-    )
+    comp_volume = f"Compensações: {comp_total} registro(s) | {comp_pendentes} pendentes no recorte atual."
 
     if tcra_overview is None:
         tcra_volume = "TCRAs: aguardando leitura."

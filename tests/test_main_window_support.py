@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from app.ui.main_window_support import (
     apply_scaled_application_font,
     apply_window_scaling,
+    build_login_relaunch_command,
     build_runtime_bundle,
     calculate_scale_factor,
     configure_window_class_registry,
@@ -113,6 +114,14 @@ def test_apply_window_scaling_sets_window_scale_factor():
 
     assert round(scale_factor, 3) == round(1440 / 1080, 3)
     assert window.scale_factor == scale_factor
+
+
+def test_build_login_relaunch_command_uses_python_entrypoint_when_not_frozen():
+    executable, arguments, working_directory = build_login_relaunch_command()
+
+    assert executable
+    assert arguments[-1].endswith("run.py")
+    assert working_directory
 
 
 def test_configure_window_class_registry_populates_window():

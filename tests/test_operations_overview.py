@@ -176,7 +176,7 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert window.operations_tab.selected_event.event_id == "evt-1"
     assert window.operations_tab.btn_open_backup.isEnabled() is True
     assert "Resumo visível: 2 operações" in window.operations_tab.lbl_summary.text()
-    assert "Panorama técnico:" in window.operations_tab.lbl_highlights.text()
+    assert "Panorama operacional:" in window.operations_tab.lbl_highlights.text()
     assert "Sincronia remota: Supabase confirmado" in window.operations_tab.lbl_remote_sync.text()
     assert "Espelho local (SQLite): Sincronizado" in window.operations_tab.lbl_persistence.text()
     assert "Registros espelhados: 8/8" in window.operations_tab.lbl_persistence.text()
@@ -329,7 +329,7 @@ def test_operations_overview_prefers_shell_monitoring_resolvers(ui_window_factor
     assert calls == {"status": 1, "overview": 1}
     assert window.operations_tab.lbl_persistence.text().startswith("Espelho local (SQLite): Sincronizado")
     assert window.operations_tab.lbl_records_overview.text().startswith("Resumo local (SQLite): 3 registros")
-    assert window.operations_tab.lbl_highlights.text().startswith("Panorama técnico:")
+    assert window.operations_tab.lbl_highlights.text().startswith("Panorama operacional:")
     window.close()
 
 
@@ -452,17 +452,17 @@ def test_operations_tab_can_toggle_technical_details(ui_window_factory):
     window = ui_window_factory()
 
     assert window.operations_tab.technical_details_frame.isVisible() is False
-    assert window.operations_tab.btn_toggle_details.text() == "Ver Detalhes Técnicos"
+    assert window.operations_tab.btn_toggle_details.text() == "Diagnóstico técnico"
 
     window.operations_tab.btn_toggle_details.click()
 
     assert window.operations_tab.technical_details_frame.isHidden() is False
-    assert window.operations_tab.btn_toggle_details.text() == "Ocultar Detalhes Técnicos"
+    assert window.operations_tab.btn_toggle_details.text() == "Ocultar diagnóstico"
 
     window.operations_tab.btn_toggle_details.click()
 
     assert window.operations_tab.technical_details_frame.isHidden() is True
-    assert window.operations_tab.btn_toggle_details.text() == "Ver Detalhes Técnicos"
+    assert window.operations_tab.btn_toggle_details.text() == "Diagnóstico técnico"
     window.close()
 
 

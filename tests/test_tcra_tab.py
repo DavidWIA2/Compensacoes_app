@@ -152,9 +152,9 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert "termos" in tab.lbl_context.text()
     assert "Alertas" in tab.lbl_radar_summary.text()
     assert tab.lbl_import_status.isHidden() is True
-    assert tab.overview_tabs.tabText(0) == "Registro"
-    assert "Inbox (" in tab.overview_tabs.tabText(1)
-    assert "Qualidade (" in tab.overview_tabs.tabText(2)
+    assert tab.overview_tabs.tabText(0) == "Seleção"
+    assert "Inbox operacional (" in tab.overview_tabs.tabText(1)
+    assert "Qualidade cadastral (" in tab.overview_tabs.tabText(2)
     assert tab.agenda_table.rowCount() >= 1
     assert "Hoje:" in tab.lbl_agenda_summary.text()
     assert tab.overview_panel.isHidden() is True
@@ -325,7 +325,7 @@ def test_tcra_tab_overview_panel_opens_and_closes_from_summary_actions(tmp_path)
     tab.btn_summary_inbox.click()
     get_app().processEvents()
     assert tab.overview_panel.isHidden() is False
-    assert tab.lbl_overview_title.text() == "Inbox"
+    assert tab.lbl_overview_title.text() == "Inbox operacional"
 
     tab.btn_close_overview.click()
     get_app().processEvents()
@@ -334,7 +334,7 @@ def test_tcra_tab_overview_panel_opens_and_closes_from_summary_actions(tmp_path)
     tab.btn_summary_quality.click()
     get_app().processEvents()
     assert tab.overview_panel.isHidden() is False
-    assert tab.lbl_overview_title.text() == "Qualidade"
+    assert tab.lbl_overview_title.text() == "Qualidade cadastral"
 
 
 def test_tcra_tab_inbox_and_quality_expand_from_compact_preview(tmp_path):

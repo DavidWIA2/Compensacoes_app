@@ -3,6 +3,8 @@ from app.application.use_cases.persistence_monitoring import PersistenceStatusRe
 from app.ui.controllers.window_shell_support import (
     COMPENSACOES_SEARCH_PLACEHOLDER,
     TCRA_SEARCH_PLACEHOLDER,
+    build_user_identity_label_text,
+    build_user_identity_tooltip_text,
     build_window_chrome_snapshot,
 )
 
@@ -131,3 +133,20 @@ def test_window_shell_support_distinguishes_remote_authoritative_writes():
     assert "Supabase como autoridade da produção" in snapshot.write_tooltip
     assert snapshot.sync_label == "Sincronia: offline"
     assert "cache local" in snapshot.sync_tooltip.lower()
+
+
+def test_window_shell_support_builds_user_identity_text_and_tooltip():
+    access_session = type(
+        "AccessSession",
+        (),
+        {
+            "environment": "production",
+            "user_email": "david.oliveira@saocarlos.sp.gov.br",
+            "app_role": "admin",
+        },
+    )()
+
+    assert build_user_identity_label_text(access_session) == "Conta: david.oliveira"
+    tooltip = build_user_identity_tooltip_text(access_session)
+    assert "david.oliveira@saocarlos.sp.gov.br" in tooltip
+    assert "admin" in tooltip

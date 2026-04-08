@@ -90,7 +90,8 @@ def compute_preferred_right_panel_width(
     map_group_width: int | None = None,
     crud_buttons_width: int | None = None,
 ) -> int:
-    widths = [max(int(620 * max(float(scale_factor), 1.0)), 560)]
+    responsive_scale = max(float(scale_factor), 0.82)
+    widths = [max(int(620 * responsive_scale), 500)]
     if map_group_width is not None:
         widths.append(int(map_group_width))
     if crud_buttons_width is not None:

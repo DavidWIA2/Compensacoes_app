@@ -73,6 +73,19 @@ class MapController:
     def _current_form_plantios(self):
         return clone_plantios(self.window.form_plantios)
 
+    def _ensure_map_loaded(self) -> bool:
+        data_tab = getattr(self.window, "data_tab", None)
+        if data_tab is None:
+            return False
+        try:
+            data_tab.load_map()
+        except Exception as exc:
+            logger.error(f"Falha ao inicializar o mapa embutido: {exc}", exc_info=True)
+            if hasattr(data_tab, "set_map_notice"):
+                data_tab.set_map_notice("Nao foi possivel inicializar o mapa embutido nesta sessao.")
+            return False
+        return bool(getattr(data_tab, "web", None) is not None)
+
     def update_address_search_enabled(self):
         has_end = bool(self.window.data_tab.in_end.text().strip())
         has_plantio = bool(self._current_form_plantios() or self.window.data_tab.in_end_plantio.text().strip())
@@ -161,6 +174,8 @@ class MapController:
             self.window._initial_map_sync_timer.start(500)
 
     def initial_map_sync(self):
+        if not self._ensure_map_loaded():
+            return
         self.window._apply_theme_to_map()
         heatmap_points = self._current_heatmap_points()
         commands = self.map_rendering_use_cases.build_initial_sync_commands(
@@ -179,6 +194,8 @@ class MapController:
             self.run_map_js(command.script, command.context)
 
     def run_map_js(self, script: str, context: str):
+        if not self._ensure_map_loaded():
+            return
         try:
             self.window.data_tab.web.page().runJavaScript(script)
         except Exception as exc:

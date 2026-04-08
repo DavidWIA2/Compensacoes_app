@@ -2,11 +2,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
 
 from app.services.access_service import AccessEnvironment, AppAccessSession
 from app.services.supabase_admin_users_service import AdminUserRecord
-from app.ui.tabs.admin_users_tab import AdminUsersTab
+from app.ui.tabs.admin_users_tab import AdminUsersTab, ResetUserPasswordDialog
 
 
 def _app():
@@ -79,7 +79,7 @@ def test_admin_users_tab_disables_self_management_actions():
 
     assert tab.btn_deactivate.isEnabled() is False
     assert tab.btn_delete.isEnabled() is False
-    assert "próprio usuário" in tab.selection_hint.text().lower()
+    assert "própria conta" in tab.selection_hint.text().lower()
 
 
 def test_admin_users_tab_strips_default_domain_from_email_field():
@@ -137,3 +137,29 @@ def test_admin_users_tab_inputs_enable_clear_buttons_and_sorting():
     assert tab.password_input.isClearButtonEnabled() is True
     assert tab.btn_create.toolTip() != ""
     assert tab.btn_reset_password.toolTip() != ""
+
+
+def test_admin_users_tab_create_password_toggle_changes_echo_mode():
+    _app()
+    tab = AdminUsersTab(_FakeWindow(), admin_service=_FakeAdminUsersService())
+
+    assert tab.password_input.echoMode() == QLineEdit.Password
+
+    tab.password_toggle_button.click()
+
+    assert tab.password_input.echoMode() == QLineEdit.Normal
+    assert tab.password_toggle_button.text() == "Ocultar"
+
+
+def test_reset_user_password_dialog_allows_password_visibility_toggle():
+    _app()
+    dialog = ResetUserPasswordDialog("usuario@prefeitura.sp.gov.br")
+
+    assert dialog.password_input.echoMode() == QLineEdit.Password
+    assert dialog.confirm_password_input.echoMode() == QLineEdit.Password
+
+    dialog.password_toggle_button.click()
+    dialog.confirm_password_toggle_button.click()
+
+    assert dialog.password_input.echoMode() == QLineEdit.Normal
+    assert dialog.confirm_password_input.echoMode() == QLineEdit.Normal

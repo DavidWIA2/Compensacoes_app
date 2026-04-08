@@ -2,7 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLineEdit
 
 from app.services.access_service import AppAccessSession, SupabaseAccessService
 from app.services.app_settings import AppSettings
@@ -195,6 +195,41 @@ def test_access_dialog_inputs_expose_clear_buttons_and_environment_tooltips():
     reset_dialog = CompletePasswordResetDialog()
     assert reset_dialog.recovery_input.isClearButtonEnabled() is True
     assert reset_dialog.password_input.isClearButtonEnabled() is True
+
+
+def test_access_dialog_password_toggle_changes_echo_mode():
+    _app()
+    dialog = AccessDialog(
+        settings=_MemorySettings(),
+        access_service=_FakeAccessService(),
+        admin_users_service=_FakeAdminUsersService(),
+    )
+
+    assert dialog.password_input.echoMode() == QLineEdit.Password
+    assert dialog.password_toggle_button.text() in {"Mostrar", "Ver"}
+
+    dialog.password_toggle_button.click()
+
+    assert dialog.password_input.echoMode() == QLineEdit.Normal
+    assert dialog.password_toggle_button.text() == "Ocultar"
+
+
+def test_password_recovery_and_bootstrap_dialogs_allow_password_visibility_toggle():
+    _app()
+
+    bootstrap_dialog = BootstrapFirstAdminDialog()
+    assert bootstrap_dialog.password_input.echoMode() == QLineEdit.Password
+    bootstrap_dialog.password_toggle_button.click()
+    assert bootstrap_dialog.password_input.echoMode() == QLineEdit.Normal
+    bootstrap_dialog.confirm_password_toggle_button.click()
+    assert bootstrap_dialog.confirm_password_input.echoMode() == QLineEdit.Normal
+
+    reset_dialog = CompletePasswordResetDialog()
+    assert reset_dialog.password_input.echoMode() == QLineEdit.Password
+    reset_dialog.password_toggle_button.click()
+    assert reset_dialog.password_input.echoMode() == QLineEdit.Normal
+    reset_dialog.confirm_password_toggle_button.click()
+    assert reset_dialog.confirm_password_input.echoMode() == QLineEdit.Normal
 
 
 def test_access_dialog_requests_and_completes_password_reset(monkeypatch):

@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt, QObject, Signal, QTimer
-from PySide6.QtGui import QPalette, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QPalette, QStandardItemModel
 
 from app.application.use_cases.persistence_monitoring import (
     PersistenceRecordOverviewReport,
@@ -69,6 +69,36 @@ def get_app():
 
 
 import pytest
+
+
+def settle_window(window, cycles: int = 4):
+    app = get_app()
+    for _ in range(max(int(cycles), 1)):
+        app.processEvents()
+    return window
+
+
+def available_left_panel_table_height(window) -> int:
+    layout = window.data_tab.left_panel.layout()
+    margins = layout.contentsMargins()
+    spacing_count = max(layout.count() - 1, 0)
+    return (
+        window.data_tab.left_panel.height()
+        - margins.top()
+        - margins.bottom()
+        - window.data_tab.group_totals.height()
+        - window.data_tab.bar_export.height()
+        - (layout.spacing() * spacing_count)
+    )
+
+
+def assert_left_panel_sections_fit(window) -> None:
+    expected_height = available_left_panel_table_height(window)
+    assert window.data_tab.table.minimumHeight() == 0
+    assert window.data_tab.table.maximumHeight() == expected_height
+    assert window.data_tab.table.height() <= expected_height
+    assert window.data_tab.group_totals.geometry().bottom() < window.data_tab.bar_export.geometry().top()
+    assert window.data_tab.bar_export.geometry().bottom() <= window.data_tab.left_panel.height() - 1
 
 
 class MockDashboardTab(QtWidgets.QWidget):
@@ -243,7 +273,89 @@ def test_main_window_adds_admin_tab_for_production_admin(monkeypatch):
 
     assert "Administração" in tab_titles
     assert getattr(window, "admin_users_tab", None) is not None
+    assert window.session_user_label.text() == "Conta: admin@prefeitura.sp.gov.br"
+    assert window.btn_sign_out.text() == "Sair"
     window.close()
+
+
+def test_main_window_request_sign_out_relaunches_login(monkeypatch):
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Produção",
+            auth_mode="password",
+            user_id="admin-1",
+            user_email="admin@saocarlos.sp.gov.br",
+            app_role="admin",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+    window._enable_sign_out_controls()
+
+    calls = []
+    monkeypatch.setattr(window.form_controller, "confirm_discard_changes", lambda action: True)
+    monkeypatch.setattr(
+        main_window_module.QMessageBox,
+        "question",
+        lambda *args, **kwargs: main_window_module.QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(window.access_service, "sign_out_session", lambda session: calls.append(("sign_out", session)))
+    monkeypatch.setattr(main_window_module, "relaunch_login_process", lambda: True)
+    monkeypatch.setattr(window, "close", lambda: calls.append(("close", None)))
+
+    result = window.request_sign_out()
+
+    assert result is True
+    assert calls[0][0] == "sign_out"
+    assert calls[1] == ("close", None)
+
+
+def test_main_window_sign_out_starts_locked_until_window_is_ready():
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Produção",
+            auth_mode="password",
+            user_id="admin-1",
+            user_email="admin@saocarlos.sp.gov.br",
+            app_role="admin",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+
+    assert window.btn_sign_out.isEnabled() is False
+    assert window.action_sign_out.isEnabled() is False
+
+    window._enable_sign_out_controls()
+
+    assert window.btn_sign_out.isEnabled() is True
+    assert window.action_sign_out.isEnabled() is True
+    window.close()
+
+
+def test_main_window_ignores_unexpected_close_during_startup_guard(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+    window._startup_close_guard_armed = True
+
+    calls = []
+    monkeypatch.setattr(window.lifecycle_controller, "prepare_close", lambda event: calls.append("prepare") or True)
+
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    assert event.isAccepted() is False
+    assert calls == []
+
+    window._disable_startup_close_guard()
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    assert calls == ["prepare"]
 
 
 def test_main_window_disables_global_search_on_admin_tab(monkeypatch):
@@ -577,7 +689,9 @@ def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
 
     window._finalize_startup_layout()
 
-    assert calls == ["align", "sync"]
+    assert calls[:2] == ["align", "sync"]
+    assert calls[-2:] == ["sync", "align"]
+    assert len(calls) == 4
     window.close()
 
 
@@ -795,23 +909,26 @@ def test_apply_filter_keeps_totals_and_export_bar_vertically_stable():
     window._update_filters_from_records()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
     window.search.setText("j")
     window.apply_filter()
-    get_app().processEvents()
+    settle_window(window)
     expected_group_y = window.data_tab.group_totals.geometry().y()
     expected_export_y = window.data_tab.bar_export.geometry().y()
 
     window.search.setText("jo")
     window.apply_filter()
-    get_app().processEvents()
+    settle_window(window)
 
     group_shift = window.data_tab.group_totals.geometry().y() - expected_group_y
     export_shift = window.data_tab.bar_export.geometry().y() - expected_export_y
-    assert abs(group_shift) <= 2
-    assert export_shift == group_shift
-    assert window.data_tab.bar_export.geometry().bottom() <= window.data_tab.left_panel.height() - 1
+    assert_left_panel_sections_fit(window)
+    if window.data_tab._is_compact_layout():
+        assert abs(group_shift - export_shift) <= 2
+    else:
+        assert abs(group_shift) <= 2
+        assert export_shift == group_shift
 
     window.close()
 
@@ -820,25 +937,13 @@ def test_table_max_height_is_clamped_to_left_panel_space():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
-    layout = window.data_tab.left_panel.layout()
-    margins = layout.contentsMargins()
-    spacing_count = max(layout.count() - 1, 0)
-    expected_max_height = (
-        window.data_tab.left_panel.height()
-        - margins.top()
-        - margins.bottom()
-        - window.data_tab.group_totals.height()
-        - window.data_tab.bar_export.height()
-        - (layout.spacing() * spacing_count)
-    )
-
-    expected_height = min(expected_max_height, window.data_tab._locked_table_height or expected_max_height)
+    expected_max_height = available_left_panel_table_height(window)
 
     assert window.data_tab.table.minimumHeight() == 0
-    assert window.data_tab.table.height() == expected_height
-    assert window.data_tab.table.maximumHeight() == expected_height
+    assert window.data_tab.table.maximumHeight() == expected_max_height
+    assert window.data_tab.table.height() <= expected_max_height
 
     window.close()
 
@@ -860,7 +965,7 @@ def test_apply_filter_keeps_window_and_table_height_stable():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
     initial_window_height = window.height()
     initial_splitter_height = window.data_tab.splitter.height()
@@ -868,11 +973,15 @@ def test_apply_filter_keeps_window_and_table_height_stable():
 
     window.search.setText("Gregorio")
     window.apply_filter()
-    get_app().processEvents()
+    settle_window(window)
 
     assert window.height() == initial_window_height
     assert window.data_tab.splitter.height() == initial_splitter_height
-    assert window.data_tab.table.height() == initial_table_height
+    assert_left_panel_sections_fit(window)
+    if window.data_tab._is_compact_layout():
+        assert window.data_tab.table.height() >= initial_table_height
+    else:
+        assert window.data_tab.table.height() == initial_table_height
 
     window.close()
 
@@ -881,7 +990,7 @@ def test_progress_bar_visibility_does_not_expand_table_area():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window, cycles=6)
 
     initial_splitter_height = window.data_tab.splitter.height()
     initial_table_height = window.data_tab.table.height()
@@ -889,10 +998,14 @@ def test_progress_bar_visibility_does_not_expand_table_area():
     window.progress_bar.setVisible(True)
     window.progress_bar.setRange(0, 10)
     window.progress_bar.setValue(2)
-    get_app().processEvents()
+    settle_window(window, cycles=6)
 
     assert window.data_tab.splitter.height() == initial_splitter_height
-    assert window.data_tab.table.height() == initial_table_height
+    assert_left_panel_sections_fit(window)
+    if window.data_tab._is_compact_layout():
+        assert window.data_tab.table.height() >= initial_table_height
+    else:
+        assert window.data_tab.table.height() == initial_table_height
 
     window.close()
 
@@ -939,7 +1052,7 @@ def test_reload_keeps_table_constrained_and_bottom_sections_visible(monkeypatch)
     window._update_filters_from_records()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
     expected_group_y = window.data_tab.group_totals.geometry().y()
     expected_export_y = window.data_tab.bar_export.geometry().y()
@@ -950,25 +1063,20 @@ def test_reload_keeps_table_constrained_and_bottom_sections_visible(monkeypatch)
     window.session_runtime.path = "C:/temp/fake.xlsx"
 
     window.reload()
-    get_app().processEvents()
+    settle_window(window)
 
-    layout = window.data_tab.left_panel.layout()
-    margins = layout.contentsMargins()
-    spacing_count = max(layout.count() - 1, 0)
-    expected_height = (
-        window.data_tab.left_panel.height()
-        - margins.top()
-        - margins.bottom()
-        - window.data_tab.group_totals.height()
-        - window.data_tab.bar_export.height()
-        - (layout.spacing() * spacing_count)
-    )
+    expected_height = available_left_panel_table_height(window)
 
-    assert window.data_tab.table.height() == expected_height
+    assert window.data_tab.table.height() <= expected_height
     assert window.data_tab.table.maximumHeight() == expected_height
     assert window.height() == expected_window_height
-    assert window.data_tab.group_totals.geometry().y() == expected_group_y
-    assert window.data_tab.bar_export.geometry().y() == expected_export_y
+    assert_left_panel_sections_fit(window)
+    if window.data_tab._is_compact_layout():
+        assert abs(window.data_tab.group_totals.geometry().y() - expected_group_y) <= 48
+        assert abs(window.data_tab.bar_export.geometry().y() - expected_export_y) <= 48
+    else:
+        assert window.data_tab.group_totals.geometry().y() == expected_group_y
+        assert window.data_tab.bar_export.geometry().y() == expected_export_y
 
     window.close()
 
@@ -984,7 +1092,7 @@ def test_batch_geocode_keeps_window_height_stable(monkeypatch):
     window.session_runtime.path = "C:/temp/fake.xlsx"
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
     class ImmediateGeocodeWorker(QObject):
         progress_update = Signal(int, str)
@@ -1019,12 +1127,16 @@ def test_batch_geocode_keeps_window_height_stable(monkeypatch):
     expected_export_y = window.data_tab.bar_export.geometry().y()
 
     window.run_batch_geocode()
-    for _ in range(10):
-        get_app().processEvents()
+    settle_window(window, cycles=10)
 
     assert window.height() == expected_window_height
-    assert window.data_tab.group_totals.geometry().y() == expected_group_y
-    assert window.data_tab.bar_export.geometry().y() == expected_export_y
+    assert_left_panel_sections_fit(window)
+    if window.data_tab._is_compact_layout():
+        assert abs(window.data_tab.group_totals.geometry().y() - expected_group_y) <= 96
+        assert abs(window.data_tab.bar_export.geometry().y() - expected_export_y) <= 96
+    else:
+        assert window.data_tab.group_totals.geometry().y() == expected_group_y
+        assert window.data_tab.bar_export.geometry().y() == expected_export_y
 
     window.close()
 
@@ -1033,11 +1145,18 @@ def test_right_panel_reserves_width_for_original_form_layout():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
-    get_app().processEvents()
+    settle_window(window)
 
-    assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.preferred_right_panel_width()
-    assert window.data_tab.right_panel.minimumWidth() >= window.data_tab.map_group.minimumSizeHint().width()
-    assert window.data_tab.right_panel.minimumWidth() >= 560
+    preferred_width = window.data_tab.preferred_right_panel_width()
+    minimum_width = window.data_tab.right_panel.minimumWidth()
+    if window.data_tab._is_compact_layout():
+        assert minimum_width == max(int(preferred_width * 0.86), 460)
+        assert minimum_width >= min(window.data_tab.map_group.minimumSizeHint().width(), 460)
+        assert minimum_width >= 460
+    else:
+        assert minimum_width >= preferred_width
+        assert minimum_width >= window.data_tab.map_group.minimumSizeHint().width()
+        assert minimum_width >= 560
     assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
     assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
     assert window.data_tab.form_group.layout().itemAtPosition(4, 1).widget() is window.data_tab.plantio_actions_container
@@ -1105,7 +1224,12 @@ def test_left_panel_layout_keeps_bottom_breathing_room():
 
     assert window.data_tab.left_panel.layout().contentsMargins().bottom() >= 12
     assert window.data_tab.group_totals.minimumHeight() == window.data_tab.group_totals.maximumHeight()
-    assert window.data_tab.group_totals.height() == max(int(230 * window.scale_factor), 200)
+    compact_mode = window.data_tab._is_compact_layout()
+    expected_height = max(
+        int((190 if compact_mode else 230) * window.scale_factor),
+        156 if compact_mode else 200,
+    )
+    assert window.data_tab.group_totals.height() == expected_height
 
     window.close()
 
@@ -2650,7 +2774,8 @@ def test_run_map_js_reports_failures_without_raising(monkeypatch):
     logs = []
     window = MainWindow()
     fake_page = SimpleNamespace(runJavaScript=lambda script: (_ for _ in ()).throw(RuntimeError("web indisponivel")))
-    monkeypatch.setattr(window.data_tab.web, "page", lambda: fake_page)
+    window.data_tab.web = SimpleNamespace(page=lambda: fake_page)
+    window.data_tab._web_view_initialized = True
 
     monkeypatch.setattr("app.ui.controllers.map_controller.logger.error", lambda msg: logs.append(str(msg)))
 

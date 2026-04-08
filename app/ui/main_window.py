@@ -2,9 +2,9 @@
 import sys
 from typing import List, Optional, Tuple, Dict
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow,
+    QApplication, QMainWindow, QMessageBox,
 )
 
 # --- Imports do Projeto ---
@@ -45,6 +45,7 @@ from app.ui.main_window_support import (
     apply_window_scaling,
     build_runtime_bundle,
     configure_window_class_registry,
+    relaunch_login_process,
 )
 from app.ui.tabs.data_tab import DataTab
 from app.ui.tabs.dashboard_tab import DashboardTab
@@ -118,6 +119,11 @@ class MainWindow(QMainWindow):
         self._startup_layout_pending = False
         self._startup_geometry_restored = False
         self._skip_close_discard_confirmation = False
+        self._sign_out_ready = False
+        self._sign_out_activation_scheduled = False
+        self._startup_close_guard_active = True
+        self._startup_close_guard_release_scheduled = False
+        self._startup_close_guard_armed = False
 
         self.session_controller = WindowSessionController(self)
         self.navigation_controller = WindowNavigationController(self)
@@ -139,7 +145,34 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "shell_controller"):
+            self.shell_controller.apply_responsive_layout()
         self.lifecycle_controller.handle_resize()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._startup_close_guard_armed = True
+        if not self._sign_out_activation_scheduled:
+            self._sign_out_activation_scheduled = True
+            QTimer.singleShot(1200, self._enable_sign_out_controls)
+        if not self._startup_close_guard_release_scheduled:
+            self._startup_close_guard_release_scheduled = True
+            QTimer.singleShot(2500, self._disable_startup_close_guard)
+
+    def _set_sign_out_enabled(self, enabled: bool) -> None:
+        state = bool(enabled)
+        if hasattr(self, "btn_sign_out"):
+            self.btn_sign_out.setEnabled(state)
+        if hasattr(self, "action_sign_out"):
+            self.action_sign_out.setEnabled(state)
+
+    def _enable_sign_out_controls(self) -> None:
+        self._sign_out_ready = True
+        self._set_sign_out_enabled(True)
+
+    def _disable_startup_close_guard(self) -> None:
+        self._startup_close_guard_active = False
+        logger.info("Proteção de fechamento inesperado do startup liberada.")
 
     def begin_busy_operation(
         self,
@@ -161,6 +194,43 @@ class MainWindow(QMainWindow):
 
     def end_busy_operation(self, message: str = "Pronto"):
         self.job_runner.end_busy_operation(message)
+
+    def request_sign_out(self) -> bool:
+        logger.info(
+            "Solicitação de sair da conta recebida. ready=%s skip_close=%s",
+            self._sign_out_ready,
+            self._skip_close_discard_confirmation,
+        )
+        if not self._sign_out_ready:
+            if self.statusBar() is not None:
+                self.statusBar().showMessage("Aguarde a abertura completa da janela para sair da conta.")
+            return False
+
+        if not self.form_controller.confirm_discard_changes("sair da conta"):
+            return False
+
+        reply = QMessageBox.question(
+            self,
+            "Sair da conta",
+            "Deseja encerrar a sessão atual e voltar para a tela de login?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+
+        self.access_service.sign_out_session(getattr(self, "access_session", None))
+        if not relaunch_login_process():
+            QMessageBox.critical(
+                self,
+                "Não foi possível sair",
+                "O app não conseguiu reabrir a tela de login automaticamente.",
+            )
+            return False
+
+        self._skip_close_discard_confirmation = True
+        self.close()
+        return True
 
     def run_blocking_job(
         self,
@@ -687,6 +757,23 @@ class MainWindow(QMainWindow):
         return self.export_controller.get_save_path(title, filter)
 
     def closeEvent(self, event):
+        logger.info(
+            "MainWindow.closeEvent recebido. startup_guard=%s armed=%s skip_close=%s visible=%s",
+            self._startup_close_guard_active,
+            self._startup_close_guard_armed,
+            self._skip_close_discard_confirmation,
+            self.isVisible(),
+        )
+        if (
+            self._startup_close_guard_armed
+            and self._startup_close_guard_active
+            and not self._skip_close_discard_confirmation
+        ):
+            logger.warning("Fechamento ignorado durante a janela de proteção do startup.")
+            if self.statusBar() is not None:
+                self.statusBar().showMessage("Abertura ainda em andamento. Fechamento ignorado para proteger a sessão.")
+            event.ignore()
+            return
         if not self.lifecycle_controller.prepare_close(event):
             return
         super().closeEvent(event)

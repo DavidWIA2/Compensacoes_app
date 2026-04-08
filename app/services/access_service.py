@@ -464,6 +464,24 @@ class SupabaseAccessService:
         except Exception as exc:
             raise AccessAuthError(f"Não foi possível sincronizar o cache local de produção: {exc}") from exc
 
+    def sign_out_session(self, access_session: AppAccessSession | None) -> None:
+        if not isinstance(access_session, AppAccessSession):
+            return
+        if access_session.environment not in {AccessEnvironment.PRODUCTION, AccessEnvironment.DEMO}:
+            return
+
+        access_token = str(getattr(access_session, "access_token", "") or "").strip()
+        refresh_token = str(getattr(access_session, "refresh_token", "") or "").strip()
+        if not access_token or not refresh_token:
+            return
+
+        try:
+            client = self.create_authenticated_client(access_session)
+        except Exception:
+            logger.warning("Falha ao recriar a sessão Supabase durante o logout.", exc_info=True)
+            return
+        self._best_effort_sign_out(client)
+
     def _reset_demo_database(self) -> Path:
         factory = self._demo_dataset_factory
         if factory is None:

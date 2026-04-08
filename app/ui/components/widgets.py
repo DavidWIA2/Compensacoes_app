@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QSortFilterProxyModel, QObject, Slot, Signal, QEv
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QVBoxLayout, QLabel, QLineEdit, QCheckBox,
-    QHBoxLayout, QPushButton, QDialog, QDialogButtonBox
+    QHBoxLayout, QPushButton, QDialog, QDialogButtonBox, QSizePolicy
 )
 from PySide6.QtWebEngineCore import QWebEnginePage
 
@@ -174,34 +174,62 @@ class NumericSortProxy(QSortFilterProxyModel):
 
 
 class KPICard(QFrame):
-    def __init__(self, title: str, value: str, color: str):
+    def __init__(self, title: str, value: str, color: str, *, compact: bool = False):
         super().__init__()
+        self.setObjectName("KpiCard")
         self.color = color
+        self.compact = bool(compact)
         self.sf = 1.0
         # Tenta herdar o scale factor da MainWindow global
         from PySide6.QtWidgets import QApplication
         mw = next((w for w in QApplication.topLevelWidgets() if hasattr(w, "scale_factor")), None)
         if mw:
             self.sf = mw.scale_factor
-            
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(int(10*self.sf), int(10*self.sf), int(10*self.sf), int(10*self.sf))
-        self.lbl_title = QLabel(title.upper())
+        if self.compact:
+            layout.setContentsMargins(int(10*self.sf), int(6*self.sf), int(10*self.sf), int(6*self.sf))
+            layout.setSpacing(int(1 * self.sf))
+        else:
+            layout.setContentsMargins(int(10*self.sf), int(10*self.sf), int(10*self.sf), int(10*self.sf))
+        self.lbl_title = QLabel(title)
         self.lbl_value = QLabel(value)
         self.lbl_title.setObjectName("Titulo")
         self.lbl_value.setObjectName("Valor")
+        self.lbl_title.setWordWrap(True)
+        self.lbl_value.setWordWrap(False)
+        self.lbl_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         layout.addWidget(self.lbl_title)
         layout.addWidget(self.lbl_value)
-        layout.addStretch(1)
+        if not self.compact:
+            layout.addStretch(1)
 
     def update_style(self, theme: dict):
-        font_val = int(20 * self.sf)
-        font_tit = int(10 * self.sf)
-        radius = int(10 * self.sf)
+        font_val = int((14 if self.compact else 20) * self.sf)
+        font_tit = int((8 if self.compact else 10) * self.sf)
+        radius = int((9 if self.compact else 10) * self.sf)
+        border_left = int((4 if self.compact else 5) * self.sf)
         self.setStyleSheet(f"""
-            KPICard {{ background-color: {theme['kpi_bg']}; border-radius: {radius}px; border: 1px solid {theme['kpi_border']}; border-left: {int(6*self.sf)}px solid {self.color}; }}
-            QLabel#Valor {{ font-size: {font_val}px; font-weight: 800; color: {theme['text']}; border: none; }}
-            QLabel#Titulo {{ font-size: {font_tit}px; font-weight: 800; color: {theme['muted']}; border: none; }}
+            KPICard {{
+                background-color: {theme['kpi_bg']};
+                border-radius: {radius}px;
+                border: 1px solid {theme['kpi_border']};
+                border-left: {border_left}px solid {self.color};
+            }}
+            QLabel#Valor {{
+                font-size: {font_val}px;
+                font-weight: 800;
+                color: {theme['text']};
+                border: none;
+            }}
+            QLabel#Titulo {{
+                font-size: {font_tit}px;
+                font-weight: 700;
+                color: {theme['muted']};
+                border: none;
+            }}
         """)
 
     def update_value(self, new_value: str):

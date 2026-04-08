@@ -15,7 +15,7 @@ os.environ[
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QMovie, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel, QSplashScreen
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSplashScreen, QWidget
 
 from app.config import APP_BRAND_TAGLINE, APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.services.access_service import SupabaseAccessService
@@ -24,6 +24,10 @@ from app.services.tile_scheme_handler import install_tile_scheme, register_tile_
 from app.ui.components.ui_utils import build_app_icon, resource_path
 from app.ui.components.access_dialog import AccessDialog
 from app.ui.main_window import MainWindow
+from app.utils.logger import LOG_FILE, get_logger
+
+
+logger = get_logger("Startup")
 
 
 # =====================================================================
@@ -80,6 +84,26 @@ def create_startup_splash():
     return AnimatedSplashScreen(gif_path, splash_path)
 
 
+def create_startup_transition_guard() -> QWidget:
+    guard = QWidget()
+    guard.setObjectName("StartupTransitionGuard")
+    guard.setWindowFlag(Qt.Tool, True)
+    guard.setAttribute(Qt.WA_DontShowOnScreen, True)
+    guard.setAttribute(Qt.WA_ShowWithoutActivating, True)
+    guard.resize(1, 1)
+    guard.move(-10000, -10000)
+    guard.show()
+    return guard
+
+
+def release_startup_transition_guard(guard: QWidget | None) -> None:
+    if guard is None:
+        return
+    guard.hide()
+    guard.close()
+    guard.deleteLater()
+
+
 def request_app_access() -> object | None:
     settings = AppSettings()
     dialog = AccessDialog(
@@ -96,6 +120,13 @@ def request_app_access() -> object | None:
 # =====================================================================
 def main() -> int:
     app = QApplication(sys.argv)
+    if hasattr(app, "setQuitOnLastWindowClosed"):
+        app.setQuitOnLastWindowClosed(False)
+    about_to_quit = getattr(app, "aboutToQuit", None)
+    if about_to_quit is not None and hasattr(about_to_quit, "connect"):
+        about_to_quit.connect(
+            lambda: logger.warning("QApplication.aboutToQuit disparado durante a transição de login.")
+        )
     app.setOrganizationName(APP_SETTINGS_ORG)
     app.setApplicationName(APP_SETTINGS_NAME)
     app.setApplicationDisplayName(APP_NAME)
@@ -104,8 +135,10 @@ def main() -> int:
         if not app_icon.isNull():
             app.setWindowIcon(app_icon)
 
+    transition_guard = create_startup_transition_guard()
     access_session = request_app_access()
     if access_session is None:
+        release_startup_transition_guard(transition_guard)
         return 0
 
     splash = create_startup_splash()
@@ -119,17 +152,36 @@ def main() -> int:
     if splash is not None:
         splash.update_status("Carregando interface...")
 
-    window = MainWindow(access_session=access_session)
+    try:
+        window = MainWindow(access_session=access_session)
 
-    if splash is not None:
-        splash.update_status("Abrindo painel principal...")
+        if splash is not None:
+            splash.update_status("Abrindo painel principal...")
 
-    window.show()
-    if splash is not None:
-        process_events = getattr(QApplication, "processEvents", None)
-        if callable(process_events):
-            process_events()
-        splash.finish(window)
+        window.show()
+        if hasattr(app, "setQuitOnLastWindowClosed"):
+            app.setQuitOnLastWindowClosed(True)
+        release_startup_transition_guard(transition_guard)
+        if splash is not None:
+            process_events = getattr(QApplication, "processEvents", None)
+            if callable(process_events):
+                process_events()
+            splash.finish(window)
+    except Exception as exc:
+        logger.exception("Falha ao abrir a janela principal após o login.")
+        if splash is not None:
+            splash.close()
+        release_startup_transition_guard(transition_guard)
+        QMessageBox.critical(
+            None,
+            "Falha ao abrir o aplicativo",
+            (
+                "O login foi concluído, mas a janela principal não pôde ser aberta.\n\n"
+                f"Erro: {exc}\n\n"
+                f"Detalhes foram gravados em:\n{LOG_FILE}"
+            ),
+        )
+        return 1
 
     return app.exec()
 

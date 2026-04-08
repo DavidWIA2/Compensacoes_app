@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
+from PySide6.QtCore import QProcess
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -72,6 +75,24 @@ def apply_window_icon(window, icon_source: str | QIcon) -> str | QIcon:
     if icon_source and os.path.exists(icon_source):
         window.setWindowIcon(QIcon(icon_source))
     return icon_source
+
+
+def build_login_relaunch_command() -> tuple[str, list[str], str]:
+    if getattr(sys, "frozen", False):
+        executable = str(Path(sys.executable).resolve())
+        return executable, [], str(Path(executable).parent)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    executable = str(Path(sys.executable).resolve())
+    return executable, [str(repo_root / "run.py")], str(repo_root)
+
+
+def relaunch_login_process() -> bool:
+    executable, arguments, working_directory = build_login_relaunch_command()
+    result = QProcess.startDetached(executable, arguments, working_directory)
+    if isinstance(result, tuple):
+        return bool(result[0])
+    return bool(result)
 
 
 def configure_window_class_registry(

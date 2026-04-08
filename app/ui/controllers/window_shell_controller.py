@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from typing import List, Sequence
@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -44,6 +45,8 @@ from app.ui.components.widgets import ColumnsDialog
 from app.ui.controllers.window_shell_support import (
     COMPENSACOES_SEARCH_PLACEHOLDER as SUPPORT_COMPENSACOES_SEARCH_PLACEHOLDER,
     TCRA_SEARCH_PLACEHOLDER as SUPPORT_TCRA_SEARCH_PLACEHOLDER,
+    build_user_identity_label_text,
+    build_user_identity_tooltip_text,
     build_window_chrome_snapshot,
 )
 from app.utils.logger import get_logger
@@ -81,19 +84,139 @@ class WindowShellController:
         layout = QVBoxLayout(central)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        top = QHBoxLayout()
+        toolbar_frame = QFrame(central)
+        toolbar_frame.setObjectName("ShellToolbar")
+        toolbar_frame.setProperty("panel", "toolbar")
+        top = QHBoxLayout(toolbar_frame)
+        self.toolbar_layout = top
+        top.setContentsMargins(
+            int(10 * self.window.scale_factor),
+            int(8 * self.window.scale_factor),
+            int(10 * self.window.scale_factor),
+            int(8 * self.window.scale_factor),
+        )
+        top.setSpacing(int(8 * self.window.scale_factor))
 
         self.window.search = QLineEdit()
         self.window.search.setPlaceholderText(self.COMPENSACOES_SEARCH_PLACEHOLDER)
         self.window.search.setClearButtonEnabled(True)
+        self.window.search.setMinimumHeight(int(32 * self.window.scale_factor))
+        self.window.search.setToolTip("Busca global do módulo atualmente aberto.")
+
+        search_panel = QFrame(toolbar_frame)
+        search_panel.setProperty("panel", "glass")
+        search_panel_layout = QVBoxLayout(search_panel)
+        self.search_panel_layout = search_panel_layout
+        search_panel_layout.setContentsMargins(
+            int(10 * self.window.scale_factor),
+            int(6 * self.window.scale_factor),
+            int(10 * self.window.scale_factor),
+            int(6 * self.window.scale_factor),
+        )
+        search_panel_layout.setSpacing(int(3 * self.window.scale_factor))
+        search_header = QHBoxLayout()
+        search_header.setContentsMargins(0, 0, 0, 0)
+        search_header.setSpacing(int(6 * self.window.scale_factor))
+        search_caption = QLabel("Busca global")
+        search_caption.setProperty("role", "panel-caption")
+        self.window.search_context_label = QLabel("Compensações • recorte ativo")
+        self.window.search_context_label.setProperty("role", "context-chip")
+        self.window.search_context_label.setToolTip(
+            "O campo de busca acompanha automaticamente o módulo atualmente aberto."
+        )
+        search_header.addWidget(search_caption, 0)
+        search_header.addWidget(self.window.search_context_label, 0)
+        search_header.addStretch(1)
+        self.window.search_helper_label = QLabel(
+            "Use a busca superior para localizar rapidamente itens no módulo em foco."
+        )
+        self.window.search_helper_label.setProperty("role", "helper")
+        self.window.search_helper_label.setWordWrap(True)
+        search_panel_layout.addLayout(search_header)
+        search_panel_layout.addWidget(self.window.search_helper_label, 0)
+        search_panel_layout.addWidget(self.window.search, 0)
 
         self.window.btn_theme = QPushButton("Tema")
-        self.window.btn_theme.setProperty("kind", "secondary")
-        self.window.btn_theme.setFixedWidth(int(70 * self.window.scale_factor))
+        self.window.btn_theme.setProperty("kind", "ghost")
+        self.window.btn_theme.setFixedWidth(int(64 * self.window.scale_factor))
+        self.window.btn_theme.setToolTip("Alterna entre tema claro e escuro.")
 
-        top.addWidget(self.window.search, 1)
-        top.addWidget(self.window.btn_theme)
-        layout.addLayout(top)
+        self.window.session_user_label = QLabel(
+            build_user_identity_label_text(getattr(self.window, "access_session", None))
+        )
+        self.window.session_user_label.setProperty("role", "account-name")
+        self.window.session_user_label.setToolTip(
+            build_user_identity_tooltip_text(getattr(self.window, "access_session", None))
+        )
+        self.window.session_user_label.setMinimumWidth(int(160 * self.window.scale_factor))
+
+        self.window.session_role_label = QLabel(self._build_account_role_text())
+        self.window.session_role_label.setProperty("role", "context-chip")
+        self.window.session_role_label.setMinimumWidth(int(110 * self.window.scale_factor))
+
+        self.window.session_context_label = QLabel(self._build_account_context_text())
+        self.window.session_context_label.setProperty("role", "account-meta")
+        self.window.session_context_label.setWordWrap(True)
+
+        self.window.btn_sign_out = QPushButton("Sair")
+        self.window.btn_sign_out.setProperty("kind", "secondary")
+        self.window.btn_sign_out.setFixedWidth(int(72 * self.window.scale_factor))
+        self.window.btn_sign_out.setAutoDefault(False)
+        self.window.btn_sign_out.setDefault(False)
+        self.window.btn_sign_out.setFocusPolicy(Qt.ClickFocus)
+        self.window.btn_sign_out.setEnabled(False)
+        self.window.btn_sign_out.setToolTip("Encerra a sessão atual e volta para a tela de acesso.")
+
+        account_panel = QFrame(toolbar_frame)
+        account_panel.setProperty("panel", "glass")
+        account_layout = QVBoxLayout(account_panel)
+        self.account_layout = account_layout
+        account_layout.setContentsMargins(
+            int(8 * self.window.scale_factor),
+            int(6 * self.window.scale_factor),
+            int(8 * self.window.scale_factor),
+            int(6 * self.window.scale_factor),
+        )
+        account_layout.setSpacing(int(4 * self.window.scale_factor))
+        account_caption_row = QHBoxLayout()
+        account_caption_row.setContentsMargins(0, 0, 0, 0)
+        account_caption_row.setSpacing(int(6 * self.window.scale_factor))
+        account_caption = QLabel("Conta ativa")
+        account_caption.setProperty("role", "panel-caption")
+        self.window.account_environment_chip = QLabel(
+            getattr(
+                getattr(self.window, "access_session", None),
+                "environment_chip_text",
+                "Ambiente: Local",
+            )
+        )
+        self.window.account_environment_chip.setProperty("role", "context-chip")
+        self.window.account_environment_chip.setToolTip(
+            getattr(
+                getattr(self.window, "access_session", None),
+                "environment_tooltip_text",
+                "Inicialização local sem gateway de autenticação.",
+            )
+        )
+        account_caption_row.addWidget(account_caption, 0)
+        account_caption_row.addWidget(self.window.account_environment_chip, 0)
+        account_caption_row.addStretch(1)
+        account_layout.addLayout(account_caption_row)
+        account_actions_row = QHBoxLayout()
+        self.account_actions_row = account_actions_row
+        account_actions_row.setContentsMargins(0, 0, 0, 0)
+        account_actions_row.setSpacing(int(5 * self.window.scale_factor))
+        account_actions_row.addWidget(self.window.session_user_label)
+        account_actions_row.addWidget(self.window.session_role_label)
+        account_actions_row.addStretch(1)
+        account_actions_row.addWidget(self.window.btn_theme)
+        account_actions_row.addWidget(self.window.btn_sign_out)
+        account_layout.addLayout(account_actions_row)
+        account_layout.addWidget(self.window.session_context_label)
+
+        top.addWidget(search_panel, 1)
+        top.addWidget(account_panel, 0)
+        layout.addWidget(toolbar_frame)
 
         self.window.tabs = QTabWidget()
         self.window.data_tab = self.window._data_tab_cls(self.window)
@@ -118,6 +241,10 @@ class WindowShellController:
         if self.window.admin_users_tab is not None:
             self.window.tabs.addTab(self.window.admin_users_tab, "Administração")
         layout.addWidget(self.window.tabs)
+        self.window.tabs.setTabText(0, "Compensações")
+        self.window.tabs.setTabText(2, "Operações")
+        if self.window.admin_users_tab is not None:
+            self.window.tabs.setTabText(self.window.tabs.indexOf(self.window.admin_users_tab), "Administração")
 
         self.window.progress_bar = QProgressBar()
         self.window.progress_bar.setMaximumWidth(200)
@@ -135,7 +262,7 @@ class WindowShellController:
         self.window.statusBar().addPermanentWidget(self.window.progress_cancel_button)
         self.window.statusBar().addPermanentWidget(self.window.form_state_label)
 
-        self.window.session_file_label = QLabel("Fonte: local")
+        self.window.session_file_label = QLabel("Base: aguardando")
         self.window.session_file_label.setObjectName("StatusChip")
         self.window.session_file_label.setMinimumWidth(int(220 * self.window.scale_factor))
         self.window.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -163,7 +290,7 @@ class WindowShellController:
         self.window.session_write_label = QLabel("Escrita: aguardando")
         self.window.session_write_label.setObjectName("StatusChip")
 
-        self.window.session_selection_label = QLabel("Modo: novo cadastro")
+        self.window.session_selection_label = QLabel("Seleção: nova")
         self.window.session_selection_label.setObjectName("StatusChip")
 
         self.window.statusBar().addPermanentWidget(self.window.session_environment_label)
@@ -177,12 +304,105 @@ class WindowShellController:
         self.update_filters_from_records()
         self.setup_dynamic_form_options_from_records()
         self.sync_global_search_context()
+        self.refresh_window_chrome()
+        self.apply_responsive_layout()
 
     def _can_show_admin_users_tab(self) -> bool:
         access_session = getattr(self.window, "access_session", None)
         environment = str(getattr(access_session, "environment", "") or "").strip().lower()
         role = str(getattr(access_session, "app_role", "") or "").strip().lower()
         return environment == "production" and role == "admin"
+
+    def _build_account_role_text(self) -> str:
+        access_session = getattr(self.window, "access_session", None)
+        role = str(getattr(access_session, "app_role", "") or "").strip().lower()
+        if role == "admin":
+            return "Perfil: administrador"
+        if role == "viewer":
+            return "Perfil: leitura"
+        if role:
+            return "Perfil: edição"
+        environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+        if environment == "demo":
+            return "Perfil: demonstração"
+        return "Perfil: local"
+
+    def _build_account_context_text(self) -> str:
+        access_session = getattr(self.window, "access_session", None)
+        environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+        if environment == "production":
+            return "Sessão corporativa autenticada com base oficial sincronizada."
+        if environment == "demo":
+            return "Sessão isolada para treinamento e validação visual."
+        return "Sessão local ativa para contingência e uso offline."
+
+    def _update_top_shell_context(self) -> None:
+        if hasattr(self.window, "search_context_label"):
+            if self._search_context == "tcra":
+                self.window.search_context_label.setText("TCRAs • busca operacional")
+                self.window.search_helper_label.setText(
+                    "Busque processos, termos, eventos, responsáveis ou pendências do módulo TCRA."
+                )
+            elif self._search_context == "admin":
+                self.window.search_context_label.setText("Administração • busca indisponível")
+                self.window.search_helper_label.setText(
+                    "A gestão de usuários usa filtros próprios dentro da tela de administração."
+                )
+            else:
+                self.window.search_context_label.setText("Compensações • recorte ativo")
+                self.window.search_helper_label.setText(
+                    "Busque ofícios, av. tec., endereços ou microbacias diretamente pelo topo."
+                )
+
+        access_session = getattr(self.window, "access_session", None)
+        if hasattr(self.window, "session_role_label"):
+            self.window.session_role_label.setText(self._build_account_role_text())
+        if hasattr(self.window, "session_context_label"):
+            self.window.session_context_label.setText(self._build_account_context_text())
+        if hasattr(self.window, "account_environment_chip"):
+            self.window.account_environment_chip.setText(
+                getattr(access_session, "environment_chip_text", "Ambiente: Local")
+            )
+
+    def _is_compact_layout(self) -> bool:
+        current_width = self.window.width()
+        current_height = self.window.height()
+        if current_width < 900 and not self.window.isVisible():
+            current_width = 1920
+        if current_height < 640 and not self.window.isVisible():
+            current_height = 1080
+        return current_width <= 1460 or current_height <= 860
+
+    def _is_tight_layout(self) -> bool:
+        current_width = self.window.width()
+        current_height = self.window.height()
+        if current_width < 900 and not self.window.isVisible():
+            current_width = 1920
+        if current_height < 640 and not self.window.isVisible():
+            current_height = 1080
+        return current_width <= 1320 or current_height <= 780
+
+    def apply_responsive_layout(self) -> None:
+        compact_mode = self._is_compact_layout()
+        tight_mode = self._is_tight_layout()
+        if hasattr(self.window, "search_helper_label"):
+            self.window.search_helper_label.setVisible(not compact_mode)
+        if hasattr(self.window, "search_context_label"):
+            self.window.search_context_label.setVisible(not tight_mode)
+        if hasattr(self.window, "session_context_label"):
+            self.window.session_context_label.setVisible(not compact_mode)
+        if hasattr(self.window, "account_environment_chip"):
+            self.window.account_environment_chip.setVisible(not tight_mode)
+        if hasattr(self.window, "session_user_label"):
+            self.window.session_user_label.setMinimumWidth(max(int((120 if compact_mode else 160) * self.window.scale_factor), 96))
+        if hasattr(self.window, "session_role_label"):
+            self.window.session_role_label.setMinimumWidth(max(int((86 if compact_mode else 110) * self.window.scale_factor), 72))
+        if hasattr(self.window, "session_file_label"):
+            self.window.session_file_label.setMinimumWidth(max(int((140 if compact_mode else 220) * self.window.scale_factor), 116))
+        if hasattr(self.window, "btn_theme"):
+            self.window.btn_theme.setFixedWidth(max(int((54 if compact_mode else 64) * self.window.scale_factor), 46))
+        if hasattr(self.window, "btn_sign_out"):
+            self.window.btn_sign_out.setFixedWidth(max(int((60 if compact_mode else 72) * self.window.scale_factor), 52))
 
     def _resolve_session_availability(self, path: str | None = None):
         target_path = str(path if path is not None else self.current_session_path() or "").strip()
@@ -485,6 +705,10 @@ class WindowShellController:
                     "Inicialização local sem gateway de autenticação.",
                 )
             )
+        if hasattr(self.window, "session_user_label"):
+            self.window.session_user_label.setText(build_user_identity_label_text(access_session))
+            self.window.session_user_label.setToolTip(build_user_identity_tooltip_text(access_session))
+        self._update_top_shell_context()
         self.window.session_file_label.setText(snapshot.file_label)
         self.window.session_file_label.setToolTip(snapshot.file_tooltip)
         self.window.session_records_label.setText(snapshot.records_label)
@@ -495,6 +719,9 @@ class WindowShellController:
         self.window.session_write_label.setToolTip(snapshot.write_tooltip)
         self.window.session_selection_label.setText(snapshot.selection_label)
         self.window.session_selection_label.setToolTip(snapshot.selection_tooltip)
+
+    def sign_out(self):
+        return self.window.request_sign_out()
 
     def setup_menus(self):
         build_command = self.window.command_controller.build_handler
@@ -512,6 +739,13 @@ class WindowShellController:
         self.window.action_operation_history = QAction("Hist\u00f3rico de Opera\u00e7\u00f5es", self.window)
         self.window.action_operation_history.triggered.connect(build_command("show_operation_history"))
         file_menu.addAction(self.window.action_operation_history)
+
+        file_menu.addSeparator()
+
+        self.window.action_sign_out = QAction("Sair da conta", self.window)
+        self.window.action_sign_out.triggered.connect(build_command("sign_out"))
+        self.window.action_sign_out.setEnabled(False)
+        file_menu.addAction(self.window.action_sign_out)
 
         file_menu.addSeparator()
 
@@ -539,6 +773,7 @@ class WindowShellController:
         build_command = self.window.command_controller.build_handler
 
         self.window.btn_theme.clicked.connect(build_command("toggle_theme"))
+        self.window.btn_sign_out.clicked.connect(build_command("sign_out"))
 
         self.window.search.textChanged.connect(self.window.schedule_apply_filter)
         self.window.tabs.currentChanged.connect(self.window._on_tab_changed)
@@ -568,7 +803,6 @@ class WindowShellController:
         self.window.data_tab.btn_add_layer.clicked.connect(build_command("load_custom_layer"))
         self.window.data_tab.chk_heatmap.stateChanged.connect(build_command("toggle_heatmap"))
         self.window.data_tab.combo_heatmap_type.currentTextChanged.connect(build_command("toggle_heatmap"))
-        self.window.data_tab.web.loadFinished.connect(self.window._on_map_loaded)
 
         self.window.data_tab.in_oficio.textChanged.connect(self.window._validate_as_you_type)
         self.window.data_tab.in_oficio.textChanged.connect(self.window._on_form_field_changed)
@@ -614,6 +848,7 @@ class WindowShellController:
             self.window.search.clear()
             self.window.search.setPlaceholderText("Busca indisponível na administração")
             self.window.search.setEnabled(False)
+            self._update_top_shell_context()
             return
         if is_tcra_tab_active:
             if self._search_context != "tcra":
@@ -623,6 +858,7 @@ class WindowShellController:
             if tcra_tab is not None and hasattr(tcra_tab, "set_global_search_mode"):
                 tcra_tab.set_global_search_mode(True)
                 self._set_global_search_text(tcra_tab.search_input.text())
+            self._update_top_shell_context()
             return
 
         self._search_context = "compensacoes"
@@ -630,6 +866,7 @@ class WindowShellController:
         if tcra_tab is not None and hasattr(tcra_tab, "set_global_search_mode"):
             tcra_tab.set_global_search_mode(False)
         self._set_global_search_text(self._compensacoes_search_text)
+        self._update_top_shell_context()
 
     def setup_shortcuts(self):
         build_command = self.window.command_controller.build_handler
@@ -714,6 +951,8 @@ class WindowShellController:
         self.window.data_tab._sync_left_panel_heights()
         self.window.data_tab._update_form_group_height()
         self.window.data_tab._update_responsive_constraints()
+        if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
+            self.window.data_tab._finalize_responsive_layout()
 
     def apply_theme(self):
         theme = THEME_DARK if self.window.is_dark_mode else THEME_LIGHT
@@ -928,3 +1167,4 @@ class WindowShellController:
             if not self.window.data_tab.table.isColumnHidden(index):
                 attrs.append(attr)
         return attrs
+

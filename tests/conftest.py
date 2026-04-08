@@ -133,6 +133,12 @@ def cleanup_qt_widgets():
     for widget in list(app.topLevelWidgets()):
         if hasattr(widget, "form_controller"):
             widget.form_controller.confirm_discard_changes = lambda *args, **kwargs: True
+        if hasattr(widget, "_disable_startup_close_guard"):
+            widget._disable_startup_close_guard()
+        if hasattr(widget, "_startup_close_guard_armed"):
+            widget._startup_close_guard_armed = False
+        if hasattr(widget, "_skip_close_discard_confirmation"):
+            widget._skip_close_discard_confirmation = True
         widget.close()
         widget.deleteLater()
 

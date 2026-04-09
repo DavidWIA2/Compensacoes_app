@@ -6,6 +6,10 @@ import pytest
 from app.models.compensacao import Compensacao
 from app.models.plantio_item import PlantioItem
 from app.services.sqlite_mirror_service import (
+    LocalWorkspaceEntry,
+    LocalWorkspaceFilterFacets,
+    LocalWorkspaceOverview,
+    LocalWorkspaceSnapshotSummary,
     SCHEMA_VERSION,
     NamedSessionEntry,
     SessionFilterFacets,
@@ -639,3 +643,27 @@ def test_sqlite_mirror_service_ensures_singleton_database_entry(tmp_path):
     assert singleton.display_name == "Banco local"
     assert repeated.session_path == singleton.session_path
     assert repeated.display_name == "Banco local"
+
+
+def test_sqlite_mirror_service_exposes_local_workspace_wrappers(tmp_path):
+    service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
+    workspace = service.create_local_workspace("Base Operacional")
+    record = make_record(excel_row=2, uid="uid-1", av_tec="AT-1")
+
+    summary = service.sync_local_workspace_snapshot(workspace.session_path, [record])
+    fetched = service.get_local_workspace(workspace.session_path)
+    listed = service.list_local_workspaces()
+    facets = service.query_filter_facets_for_local_workspace(workspace.session_path)
+    overview = service.build_local_workspace_record_overview(workspace.session_path)
+    diagnostics = service.build_local_workspace_diagnostics(workspace.session_path)
+
+    assert isinstance(workspace, LocalWorkspaceEntry)
+    assert isinstance(summary, LocalWorkspaceSnapshotSummary)
+    assert isinstance(facets, LocalWorkspaceFilterFacets)
+    assert isinstance(overview, LocalWorkspaceOverview)
+    assert fetched is not None
+    assert fetched.display_name == "Base Operacional"
+    assert [entry.session_path for entry in listed] == [workspace.session_path]
+    assert service.get_local_workspace_display_name(workspace.session_path) == "Base Operacional"
+    assert diagnostics.session_path == workspace.session_path
+    assert [item.uid for item in service.list_records_for_local_workspace(workspace.session_path)] == ["uid-1"]

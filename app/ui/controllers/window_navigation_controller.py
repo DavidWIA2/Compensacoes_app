@@ -31,6 +31,14 @@ class WindowNavigationController:
     def is_admin_tab_active(self) -> bool:
         return self.window.tabs.currentWidget() is getattr(self.window, "admin_users_tab", None)
 
+    def update_operations_overview(self, *, force: bool = False) -> bool:
+        self.window._operations_dirty = True
+        if force or self.is_operations_tab_active():
+            self.window.operations_controller.refresh_overview()
+            self.window._operations_dirty = False
+            return True
+        return False
+
     def update_dashboard(self, metrics: Dict[str, object]):
         self.window._pending_dashboard_metrics = dict(metrics)
         if self.is_dashboard_tab_active():
@@ -72,8 +80,12 @@ class WindowNavigationController:
             if self.window._pending_dashboard_metrics is not None:
                 self.window._dashboard_dirty = False
 
-        if self.is_operations_tab_active() and not refreshed:
-            self.window.operations_controller.refresh_overview()
+        if self.is_operations_tab_active():
+            if refreshed:
+                self.window._operations_dirty = True
+            elif getattr(self.window, "_operations_dirty", True):
+                self.window.operations_controller.refresh_overview()
+                self.window._operations_dirty = False
 
         if self.is_tcra_tab_active():
             self.window.tcra_tab.handle_tab_activated()

@@ -196,9 +196,13 @@ class MapController:
             self.run_map_js(command.script, command.context)
 
     def load_microbacias_layer(self):
-        if self.window.gis:
-            command = self.map_rendering_use_cases.build_microbacias_command(self.window.gis.to_geojson_obj())
-            self.run_map_js(command.script, command.context)
+        data_tab = getattr(self.window, "data_tab", None)
+        if not self.window.gis or data_tab is None:
+            return
+        if not getattr(data_tab, "_map_loaded", False) or getattr(data_tab, "web", None) is None:
+            return
+        command = self.map_rendering_use_cases.build_microbacias_command(self.window.gis.to_geojson_obj())
+        self.run_map_js(command.script, command.context)
 
     def run_map_js(self, script: str, context: str):
         if not self._ensure_map_loaded():

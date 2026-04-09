@@ -11,9 +11,6 @@ from PySide6.QtWidgets import (
     QFormLayout, QPlainTextEdit,
     QAbstractItemView
 )
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEngineSettings
 from app.application.use_cases.import_preview_presenter import (
     ImportPreviewPresentation,
     ImportPreviewPresenter,
@@ -99,6 +96,14 @@ from app.services.plantio_service import clone_plantios
 from app.utils.logger import get_logger
 
 map_dialog_logger = get_logger("UI.MapDialog")
+
+
+def _load_map_webengine_classes():
+    from PySide6.QtWebChannel import QWebChannel
+    from PySide6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    return QWebEngineView, QWebChannel, QWebEngineSettings
 
 TCRA_EVENT_PRESETS = (
     {
@@ -1152,6 +1157,8 @@ class MapFullScreenDialog(QDialog):
 
         top_layout.addLayout(row1); top_layout.addLayout(row2)
         layout.addWidget(top_bar)
+
+        QWebEngineView, QWebChannel, QWebEngineSettings = _load_map_webengine_classes()
 
         self.web = QWebEngineView()
         self.web.setPage(DebugPage(self.web))

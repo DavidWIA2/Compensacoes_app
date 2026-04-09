@@ -122,6 +122,11 @@ SessionFilterFacets = WorkbookFilterFacets
 SessionMirrorDiagnostics = WorkbookMirrorDiagnostics
 SessionRecordSample = MirroredRecordSample
 SessionRecordOverview = WorkbookRecordOverview
+LocalWorkspaceSnapshotSummary = WorkbookSnapshotSummary
+LocalWorkspaceFilterFacets = WorkbookFilterFacets
+LocalWorkspaceDiagnostics = WorkbookMirrorDiagnostics
+LocalWorkspaceRecordSample = MirroredRecordSample
+LocalWorkspaceOverview = WorkbookRecordOverview
 
 
 @dataclass(frozen=True)
@@ -141,6 +146,9 @@ class NamedSessionEntry:
     def picker_label(self) -> str:
         suffix = f"{self.record_count} registro(s)"
         return f"{self.display_name} [{suffix}]"
+
+
+LocalWorkspaceEntry = NamedSessionEntry
 
 
 class SqliteMirrorService:
@@ -229,6 +237,24 @@ class SqliteMirrorService:
                 """,
                 (_utc_timestamp(), normalized_path),
             )
+
+    def list_local_workspaces(self, *, limit: int = 200) -> list[LocalWorkspaceEntry]:
+        return self.list_named_sessions(limit=limit)
+
+    def create_local_workspace(self, workspace_name: str) -> LocalWorkspaceEntry:
+        return self.create_named_session(workspace_name)
+
+    def get_local_workspace(self, session_path: str) -> LocalWorkspaceEntry | None:
+        return self.get_session_entry(session_path)
+
+    def touch_local_workspace(self, workspace_path: str) -> None:
+        self.touch_session(workspace_path)
+
+    def ensure_local_workspace(self) -> LocalWorkspaceEntry:
+        return self.ensure_singleton_session()
+
+    def ensure_default_local_workspace(self) -> LocalWorkspaceEntry:
+        return self.ensure_local_workspace()
 
     def ensure_singleton_session(self) -> NamedSessionEntry:
         with self._connect() as conn:
@@ -1175,12 +1201,26 @@ class SqliteMirrorService:
     ) -> SessionSnapshotSummary:
         return self.sync_workbook_snapshot(session_path, records)
 
+    def sync_local_workspace_snapshot(
+        self,
+        workspace_path: str,
+        records: Sequence[Compensacao],
+    ) -> LocalWorkspaceSnapshotSummary:
+        return self.sync_workbook_snapshot(workspace_path, records)
+
     def append_record_to_session(
         self,
         session_path: str,
         record: Compensacao,
     ) -> SessionSnapshotSummary:
         return self.append_record_to_workbook(session_path, record)
+
+    def append_record_to_local_workspace(
+        self,
+        workspace_path: str,
+        record: Compensacao,
+    ) -> LocalWorkspaceSnapshotSummary:
+        return self.append_record_to_workbook(workspace_path, record)
 
     def append_records_to_session(
         self,
@@ -1189,12 +1229,26 @@ class SqliteMirrorService:
     ) -> SessionSnapshotSummary:
         return self.append_records_to_workbook(session_path, records)
 
+    def append_records_to_local_workspace(
+        self,
+        workspace_path: str,
+        records: Sequence[Compensacao],
+    ) -> LocalWorkspaceSnapshotSummary:
+        return self.append_records_to_workbook(workspace_path, records)
+
     def update_record_in_session(
         self,
         session_path: str,
         record: Compensacao,
     ) -> SessionSnapshotSummary:
         return self.update_record_in_workbook(session_path, record)
+
+    def update_record_in_local_workspace(
+        self,
+        workspace_path: str,
+        record: Compensacao,
+    ) -> LocalWorkspaceSnapshotSummary:
+        return self.update_record_in_workbook(workspace_path, record)
 
     def delete_record_from_session(
         self,
@@ -1203,6 +1257,13 @@ class SqliteMirrorService:
     ) -> SessionSnapshotSummary:
         return self.delete_record_from_workbook(session_path, record)
 
+    def delete_record_from_local_workspace(
+        self,
+        workspace_path: str,
+        record: Compensacao,
+    ) -> LocalWorkspaceSnapshotSummary:
+        return self.delete_record_from_workbook(workspace_path, record)
+
     def list_audit_event_payloads_for_session(
         self,
         session_path: str,
@@ -1210,6 +1271,14 @@ class SqliteMirrorService:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         return self.list_audit_event_payloads_for_workbook(session_path, limit=limit)
+
+    def list_audit_event_payloads_for_local_workspace(
+        self,
+        workspace_path: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return self.list_audit_event_payloads_for_workbook(workspace_path, limit=limit)
 
     def get_session_snapshot_summary(self, session_path: str) -> SessionSnapshotSummary:
         return self.get_workbook_snapshot_summary(session_path)
@@ -1220,14 +1289,36 @@ class SqliteMirrorService:
             return entry.display_name
         return self._display_name_for_path(session_path)
 
+    def get_local_workspace_snapshot_summary(self, workspace_path: str) -> LocalWorkspaceSnapshotSummary:
+        return self.get_workbook_snapshot_summary(workspace_path)
+
+    def get_local_workspace_display_name(self, workspace_path: str) -> str:
+        entry = self.get_local_workspace(workspace_path)
+        if entry is not None:
+            return entry.display_name
+        return self._display_name_for_path(workspace_path)
+
     def list_records_for_session(self, session_path: str) -> list[Compensacao]:
         return self.list_records_for_workbook(session_path)
+
+    def list_records_for_local_workspace(self, workspace_path: str) -> list[Compensacao]:
+        return self.list_records_for_workbook(workspace_path)
 
     def find_record_by_uid_for_session(self, session_path: str, uid: str) -> Compensacao | None:
         return self.find_record_by_uid_for_workbook(session_path, uid)
 
+    def find_record_by_uid_for_local_workspace(self, workspace_path: str, uid: str) -> Compensacao | None:
+        return self.find_record_by_uid_for_workbook(workspace_path, uid)
+
     def find_record_by_excel_row_for_session(self, session_path: str, excel_row: int) -> Compensacao | None:
         return self.find_record_by_excel_row_for_workbook(session_path, excel_row)
+
+    def find_record_by_excel_row_for_local_workspace(
+        self,
+        workspace_path: str,
+        excel_row: int,
+    ) -> Compensacao | None:
+        return self.find_record_by_excel_row_for_workbook(workspace_path, excel_row)
 
     def find_duplicate_av_tec_for_session(
         self,
@@ -1242,8 +1333,24 @@ class SqliteMirrorService:
             current_uid=current_uid,
         )
 
+    def find_duplicate_av_tec_for_local_workspace(
+        self,
+        workspace_path: str,
+        *,
+        av_tec: str,
+        current_uid: str = "",
+    ) -> int | None:
+        return self.find_duplicate_av_tec_for_workbook(
+            workspace_path,
+            av_tec=av_tec,
+            current_uid=current_uid,
+        )
+
     def query_filter_facets_for_session(self, session_path: str) -> SessionFilterFacets:
         return self.query_filter_facets_for_workbook(session_path)
+
+    def query_filter_facets_for_local_workspace(self, workspace_path: str) -> LocalWorkspaceFilterFacets:
+        return self.query_filter_facets_for_workbook(workspace_path)
 
     def query_records_for_session(
         self,
@@ -1259,6 +1366,29 @@ class SqliteMirrorService:
     ) -> list[Compensacao]:
         return self.query_records_for_workbook(
             session_path,
+            search_text=search_text,
+            status=status,
+            selected_micros=selected_micros,
+            selected_eletronicos=selected_eletronicos,
+            micro_all_selected=micro_all_selected,
+            eletronico_all_selected=eletronico_all_selected,
+            selected_year=selected_year,
+        )
+
+    def query_records_for_local_workspace(
+        self,
+        workspace_path: str,
+        *,
+        search_text: str = "",
+        status: str = "Todos",
+        selected_micros: Sequence[str] = (),
+        selected_eletronicos: Sequence[str] = (),
+        micro_all_selected: bool = True,
+        eletronico_all_selected: bool = True,
+        selected_year: str = "Todos",
+    ) -> list[Compensacao]:
+        return self.query_records_for_workbook(
+            workspace_path,
             search_text=search_text,
             status=status,
             selected_micros=selected_micros,
@@ -1291,6 +1421,29 @@ class SqliteMirrorService:
             selected_year=selected_year,
         )
 
+    def query_metrics_for_local_workspace(
+        self,
+        workspace_path: str,
+        *,
+        search_text: str = "",
+        status: str = "Todos",
+        selected_micros: Sequence[str] = (),
+        selected_eletronicos: Sequence[str] = (),
+        micro_all_selected: bool = True,
+        eletronico_all_selected: bool = True,
+        selected_year: str = "Todos",
+    ) -> dict[str, object]:
+        return self.query_metrics_for_workbook(
+            workspace_path,
+            search_text=search_text,
+            status=status,
+            selected_micros=selected_micros,
+            selected_eletronicos=selected_eletronicos,
+            micro_all_selected=micro_all_selected,
+            eletronico_all_selected=eletronico_all_selected,
+            selected_year=selected_year,
+        )
+
     def build_session_diagnostics(
         self,
         session_path: str,
@@ -1304,6 +1457,19 @@ class SqliteMirrorService:
             recent_audit_limit=recent_audit_limit,
         )
 
+    def build_local_workspace_diagnostics(
+        self,
+        workspace_path: str,
+        *,
+        top_microbacias_limit: int = 10,
+        recent_audit_limit: int = 10,
+    ) -> LocalWorkspaceDiagnostics:
+        return self.build_workbook_diagnostics(
+            workspace_path,
+            top_microbacias_limit=top_microbacias_limit,
+            recent_audit_limit=recent_audit_limit,
+        )
+
     def build_session_record_overview(
         self,
         session_path: str,
@@ -1313,6 +1479,19 @@ class SqliteMirrorService:
     ) -> SessionRecordOverview:
         return self.build_workbook_record_overview(
             session_path,
+            top_microbacias_limit=top_microbacias_limit,
+            sample_limit=sample_limit,
+        )
+
+    def build_local_workspace_record_overview(
+        self,
+        workspace_path: str,
+        *,
+        top_microbacias_limit: int = 5,
+        sample_limit: int = 5,
+    ) -> LocalWorkspaceOverview:
+        return self.build_workbook_record_overview(
+            workspace_path,
             top_microbacias_limit=top_microbacias_limit,
             sample_limit=sample_limit,
         )
@@ -1712,6 +1891,16 @@ class SqliteMirrorService:
         plantio_count = int((counts_row["plantio_count"] if counts_row is not None else 0) or 0)
         if source_mtime_ns is None or source_size is None:
             source_mtime_ns, source_size = _read_workbook_file_identity(workbook_path)
+        existing_row = conn.execute(
+            "SELECT workbook_name FROM workbooks WHERE id = ?",
+            (workbook_id,),
+        ).fetchone()
+        if _is_session_path(workbook_path):
+            resolved_workbook_name = _stringify(existing_row["workbook_name"] if existing_row is not None else "")
+            if not resolved_workbook_name:
+                resolved_workbook_name = self._display_name_for_path(workbook_path)
+        else:
+            resolved_workbook_name = os.path.basename(workbook_path) or workbook_path
         conn.execute(
             """
             UPDATE workbooks
@@ -1726,7 +1915,7 @@ class SqliteMirrorService:
             WHERE id = ?
             """,
             (
-                os.path.basename(workbook_path) or workbook_path,
+                resolved_workbook_name,
                 synced_at,
                 synced_at,
                 record_count,

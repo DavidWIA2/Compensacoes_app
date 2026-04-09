@@ -26,9 +26,17 @@ class WindowLifecycleController:
         self.window._initial_map_sync_timer = QTimer(self.window)
         self.window._initial_map_sync_timer.setSingleShot(True)
 
+        self.window._post_show_fit_timer_fast = QTimer(self.window)
+        self.window._post_show_fit_timer_fast.setSingleShot(True)
+
+        self.window._post_show_fit_timer_delayed = QTimer(self.window)
+        self.window._post_show_fit_timer_delayed.setSingleShot(True)
+
     def _rewire_timers(self):
         self._reconnect_timeout(self.window._startup_window_timer, self.window._apply_startup_window_state)
         self._reconnect_timeout(self.window._initial_map_sync_timer, self.window._initial_map_sync)
+        self._reconnect_timeout(self.window._post_show_fit_timer_fast, self._fit_window_after_show)
+        self._reconnect_timeout(self.window._post_show_fit_timer_delayed, self._fit_window_after_show)
 
     @staticmethod
     def _reconnect_timeout(timer: QTimer, handler):
@@ -42,6 +50,8 @@ class WindowLifecycleController:
         if not self._timers_bound:
             self.window._startup_window_timer.timeout.connect(self.window._apply_startup_window_state)
             self.window._initial_map_sync_timer.timeout.connect(self.window._initial_map_sync)
+            self.window._post_show_fit_timer_fast.timeout.connect(self._fit_window_after_show)
+            self.window._post_show_fit_timer_delayed.timeout.connect(self._fit_window_after_show)
             self._timers_bound = True
         else:
             self._rewire_timers()
@@ -77,8 +87,8 @@ class WindowLifecycleController:
         if self._post_show_fit_scheduled:
             return
         self._post_show_fit_scheduled = True
-        QTimer.singleShot(0, self._fit_window_after_show)
-        QTimer.singleShot(180, self._fit_window_after_show)
+        self.window._post_show_fit_timer_fast.start(0)
+        self.window._post_show_fit_timer_delayed.start(180)
 
     def _fit_window_after_show(self):
         if not self.window.isVisible() or self.window.isMinimized():
@@ -123,3 +133,7 @@ class WindowLifecycleController:
     def stop_owned_timers(self):
         stop_active_timer(getattr(self.window, "_startup_window_timer", None))
         stop_active_timer(getattr(self.window, "_initial_map_sync_timer", None))
+        stop_active_timer(getattr(self.window, "_post_show_fit_timer_fast", None))
+        stop_active_timer(getattr(self.window, "_post_show_fit_timer_delayed", None))
+        stop_active_timer(getattr(self.window, "_sign_out_activation_timer", None))
+        stop_active_timer(getattr(self.window, "_startup_close_guard_timer", None))

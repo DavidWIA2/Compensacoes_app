@@ -3,10 +3,11 @@
 import os
 from typing import List, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -72,6 +73,8 @@ class WindowShellController:
         self._search_context = "compensacoes"
         self._compensacoes_search_text = ""
         self._syncing_global_search = False
+        self._secondary_status_widgets: list[QWidget] = []
+        self._tertiary_status_widgets: list[QWidget] = []
 
     def _bind_runtime_persistence_service(self) -> None:
         if isinstance(self.persistence, AuthoritativePersistenceUseCases):
@@ -102,10 +105,12 @@ class WindowShellController:
         self.window.search = QLineEdit()
         self.window.search.setPlaceholderText(self.COMPENSACOES_SEARCH_PLACEHOLDER)
         self.window.search.setClearButtonEnabled(True)
-        self.window.search.setMinimumHeight(int(32 * self.window.scale_factor))
+        self.window.search.setMinimumHeight(int(30 * self.window.scale_factor))
+        self.window.search.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.window.search.setToolTip("Busca global do módulo atualmente aberto.")
 
         search_panel = QFrame(toolbar_frame)
+        self.window.search_panel = search_panel
         search_panel.setProperty("panel", "glass")
         search_panel_layout = QVBoxLayout(search_panel)
         self.search_panel_layout = search_panel_layout
@@ -140,7 +145,9 @@ class WindowShellController:
 
         self.window.btn_theme = QPushButton("Tema")
         self.window.btn_theme.setProperty("kind", "ghost")
-        self.window.btn_theme.setFixedWidth(int(64 * self.window.scale_factor))
+        self.window.btn_theme.setMinimumWidth(int(56 * self.window.scale_factor))
+        self.window.btn_theme.setMaximumWidth(int(72 * self.window.scale_factor))
+        self.window.btn_theme.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.window.btn_theme.setToolTip("Alterna entre tema claro e escuro.")
 
         self.window.session_user_label = QLabel(
@@ -150,19 +157,26 @@ class WindowShellController:
         self.window.session_user_label.setToolTip(
             build_user_identity_tooltip_text(getattr(self.window, "access_session", None))
         )
-        self.window.session_user_label.setMinimumWidth(int(160 * self.window.scale_factor))
+        self.window.session_user_label.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Preferred)
+        self.window.session_user_label.setMinimumWidth(0)
+        self.window.session_user_label.setMaximumWidth(int(220 * self.window.scale_factor))
 
         self.window.session_role_label = QLabel(self._build_account_role_text())
         self.window.session_role_label.setProperty("role", "context-chip")
-        self.window.session_role_label.setMinimumWidth(int(110 * self.window.scale_factor))
+        self.window.session_role_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.window.session_role_label.setMinimumWidth(0)
+        self.window.session_role_label.setMaximumWidth(int(150 * self.window.scale_factor))
 
         self.window.session_context_label = QLabel(self._build_account_context_text())
         self.window.session_context_label.setProperty("role", "account-meta")
         self.window.session_context_label.setWordWrap(True)
+        self.window.session_context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         self.window.btn_sign_out = QPushButton("Sair")
         self.window.btn_sign_out.setProperty("kind", "secondary")
-        self.window.btn_sign_out.setFixedWidth(int(72 * self.window.scale_factor))
+        self.window.btn_sign_out.setMinimumWidth(int(60 * self.window.scale_factor))
+        self.window.btn_sign_out.setMaximumWidth(int(82 * self.window.scale_factor))
+        self.window.btn_sign_out.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.window.btn_sign_out.setAutoDefault(False)
         self.window.btn_sign_out.setDefault(False)
         self.window.btn_sign_out.setFocusPolicy(Qt.ClickFocus)
@@ -170,6 +184,7 @@ class WindowShellController:
         self.window.btn_sign_out.setToolTip("Encerra a sessão atual e volta para a tela de acesso.")
 
         account_panel = QFrame(toolbar_frame)
+        self.window.account_panel = account_panel
         account_panel.setProperty("panel", "glass")
         account_layout = QVBoxLayout(account_panel)
         self.account_layout = account_layout
@@ -266,7 +281,9 @@ class WindowShellController:
 
         self.window.session_file_label = QLabel("Base: aguardando")
         self.window.session_file_label.setObjectName("StatusChip")
-        self.window.session_file_label.setMinimumWidth(int(220 * self.window.scale_factor))
+        self.window.session_file_label.setMinimumWidth(0)
+        self.window.session_file_label.setMaximumWidth(int(280 * self.window.scale_factor))
+        self.window.session_file_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         self.window.session_file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         environment_chip_text = getattr(
@@ -294,6 +311,16 @@ class WindowShellController:
 
         self.window.session_selection_label = QLabel("Seleção: nova")
         self.window.session_selection_label.setObjectName("StatusChip")
+
+        self._secondary_status_widgets = [
+            self.window.session_environment_label,
+            self.window.session_write_label,
+            self.window.session_selection_label,
+        ]
+        self._tertiary_status_widgets = [
+            self.window.form_state_label,
+            self.window.session_file_label,
+        ]
 
         self.window.statusBar().addPermanentWidget(self.window.session_environment_label)
         self.window.statusBar().addPermanentWidget(self.window.session_file_label)
@@ -367,58 +394,147 @@ class WindowShellController:
             )
 
     def _is_compact_layout(self) -> bool:
-        current_width = self.window.width()
-        current_height = self.window.height()
-        screen = self.window.screen() or QApplication.instance().primaryScreen()
+        try:
+            current_width = self.window.width()
+            current_height = self.window.height()
+            is_visible = self.window.isVisible()
+            screen = self.window.screen() or QApplication.instance().primaryScreen()
+        except RuntimeError:
+            return False
         if screen is not None:
             available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
             if current_width > 0:
                 current_width = min(current_width, available.width())
             if current_height > 0:
                 current_height = min(current_height, available.height())
-        if current_width < 900 and not self.window.isVisible():
+        if current_width < 900 and not is_visible:
             current_width = available.width() if screen is not None else 1920
-        if current_height < 640 and not self.window.isVisible():
+        if current_height < 640 and not is_visible:
             current_height = available.height() if screen is not None else 1080
         return current_width <= 1460 or current_height <= 980
 
     def _is_tight_layout(self) -> bool:
-        current_width = self.window.width()
-        current_height = self.window.height()
-        screen = self.window.screen() or QApplication.instance().primaryScreen()
+        try:
+            current_width = self.window.width()
+            current_height = self.window.height()
+            is_visible = self.window.isVisible()
+            screen = self.window.screen() or QApplication.instance().primaryScreen()
+        except RuntimeError:
+            return False
         if screen is not None:
             available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
             if current_width > 0:
                 current_width = min(current_width, available.width())
             if current_height > 0:
                 current_height = min(current_height, available.height())
-        if current_width < 900 and not self.window.isVisible():
+        if current_width < 900 and not is_visible:
             current_width = available.width() if screen is not None else 1920
-        if current_height < 640 and not self.window.isVisible():
+        if current_height < 640 and not is_visible:
             current_height = available.height() if screen is not None else 1080
         return current_width <= 1320 or current_height <= 900
 
+    def _is_stacked_toolbar_layout(self) -> bool:
+        try:
+            current_width = self.window.width()
+            current_height = self.window.height()
+            is_visible = self.window.isVisible()
+            screen = self.window.screen() or QApplication.instance().primaryScreen()
+        except RuntimeError:
+            return False
+        if screen is not None:
+            available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
+            if current_width > 0:
+                current_width = min(current_width, available.width())
+            if current_height > 0:
+                current_height = min(current_height, available.height())
+        if current_width < 900 and not is_visible:
+            current_width = available.width() if screen is not None else 1920
+        if current_height < 640 and not is_visible:
+            current_height = available.height() if screen is not None else 1080
+        return current_width <= 1460 or current_height <= 900
+
     def apply_responsive_layout(self) -> None:
-        compact_mode = self._is_compact_layout()
-        tight_mode = self._is_tight_layout()
-        if hasattr(self.window, "search_helper_label"):
-            self.window.search_helper_label.setVisible(not compact_mode)
-        if hasattr(self.window, "search_context_label"):
-            self.window.search_context_label.setVisible(not tight_mode)
-        if hasattr(self.window, "session_context_label"):
-            self.window.session_context_label.setVisible(not compact_mode)
-        if hasattr(self.window, "account_environment_chip"):
-            self.window.account_environment_chip.setVisible(not tight_mode)
-        if hasattr(self.window, "session_user_label"):
-            self.window.session_user_label.setMinimumWidth(max(int((120 if compact_mode else 160) * self.window.scale_factor), 96))
-        if hasattr(self.window, "session_role_label"):
-            self.window.session_role_label.setMinimumWidth(max(int((86 if compact_mode else 110) * self.window.scale_factor), 72))
-        if hasattr(self.window, "session_file_label"):
-            self.window.session_file_label.setMinimumWidth(max(int((140 if compact_mode else 220) * self.window.scale_factor), 116))
-        if hasattr(self.window, "btn_theme"):
-            self.window.btn_theme.setFixedWidth(max(int((54 if compact_mode else 64) * self.window.scale_factor), 46))
-        if hasattr(self.window, "btn_sign_out"):
-            self.window.btn_sign_out.setFixedWidth(max(int((60 if compact_mode else 72) * self.window.scale_factor), 52))
+        try:
+            scale_factor = self.window.scale_factor
+        except RuntimeError:
+            return
+        try:
+            compact_mode = self._is_compact_layout()
+            tight_mode = self._is_tight_layout()
+            stacked_toolbar_mode = self._is_stacked_toolbar_layout()
+            if hasattr(self, "toolbar_layout"):
+                target_direction = (
+                    QBoxLayout.Direction.TopToBottom
+                    if stacked_toolbar_mode
+                    else QBoxLayout.Direction.LeftToRight
+                )
+                if self.toolbar_layout.direction() != target_direction:
+                    self.toolbar_layout.setDirection(target_direction)
+                self.toolbar_layout.setSpacing(
+                    int((6 if compact_mode else 8) * scale_factor)
+                )
+            if hasattr(self.window, "search_panel"):
+                self.window.search_panel.setSizePolicy(
+                    QSizePolicy.Expanding,
+                    QSizePolicy.Fixed,
+                )
+            if hasattr(self.window, "account_panel"):
+                self.window.account_panel.setSizePolicy(
+                    QSizePolicy.Expanding if stacked_toolbar_mode else QSizePolicy.Preferred,
+                    QSizePolicy.Fixed,
+                )
+            if hasattr(self.window, "search"):
+                self.window.search.setMinimumHeight(
+                    max(int((28 if compact_mode else 30) * scale_factor), 26)
+                )
+            if hasattr(self.window, "search_helper_label"):
+                self.window.search_helper_label.setVisible(not compact_mode)
+            if hasattr(self.window, "search_context_label"):
+                self.window.search_context_label.setVisible(not tight_mode)
+            if hasattr(self.window, "session_context_label"):
+                self.window.session_context_label.setVisible(not compact_mode)
+            if hasattr(self.window, "account_environment_chip"):
+                self.window.account_environment_chip.setVisible(not tight_mode)
+            if hasattr(self.window, "session_role_label"):
+                self.window.session_role_label.setVisible(not tight_mode)
+                self.window.session_role_label.setMaximumWidth(
+                    max(int((118 if compact_mode else 150) * scale_factor), 90)
+                )
+            if hasattr(self.window, "session_user_label"):
+                self.window.session_user_label.setMaximumWidth(
+                    max(
+                        int(
+                            (
+                                180
+                                if stacked_toolbar_mode
+                                else 150 if tight_mode else 220 if compact_mode else 260
+                            )
+                            * scale_factor
+                        ),
+                        110,
+                    )
+                )
+            if hasattr(self.window, "session_file_label"):
+                self.window.session_file_label.setMaximumWidth(
+                    max(int((180 if compact_mode else 280) * scale_factor), 132)
+                )
+            if hasattr(self.window, "btn_theme"):
+                self.window.btn_theme.setMaximumWidth(
+                    max(int((52 if tight_mode else 56 if compact_mode else 72) * scale_factor), 48)
+                )
+            if hasattr(self.window, "btn_sign_out"):
+                self.window.btn_sign_out.setMaximumWidth(
+                    max(int((58 if tight_mode else 62 if compact_mode else 82) * scale_factor), 52)
+                )
+            if hasattr(self.window, "progress_bar"):
+                self.window.progress_bar.setMaximumWidth(max(int((120 if tight_mode else 180) * scale_factor), 92))
+
+            for widget in getattr(self, "_secondary_status_widgets", []):
+                widget.setVisible(not compact_mode)
+            for widget in getattr(self, "_tertiary_status_widgets", []):
+                widget.setVisible(not tight_mode)
+        except RuntimeError:
+            return
 
     def _resolve_session_availability(self, path: str | None = None):
         target_path = str(path if path is not None else self.current_session_path() or "").strip()
@@ -970,6 +1086,7 @@ class WindowShellController:
         if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
             self.window.data_tab._finalize_responsive_layout()
         ensure_window_fits_available_geometry(self.window)
+        QTimer.singleShot(0, self.apply_responsive_layout)
 
     def apply_theme(self):
         theme = THEME_DARK if self.window.is_dark_mode else THEME_LIGHT

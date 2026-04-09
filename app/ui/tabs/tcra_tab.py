@@ -75,7 +75,9 @@ from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
 from app.ui.tabs.tcra_tab_form_support import (
     TcraFormPreviewData,
+    build_empty_form_snapshot,
     build_form_preview_data,
+    build_record_form_snapshot,
     capture_form_state_snapshot,
     issue_supports_safe_fix,
     resolve_issue_focus_field,
@@ -102,6 +104,12 @@ from app.ui.tabs.tcra_tab_workspace import (
     TcraWorkspaceSnapshot,
     build_workspace_snapshot,
 )
+from app.ui.tabs.tcra_tab_view_support import (
+    build_agenda_overview_rows,
+    build_main_table_rows,
+    build_quality_overview_rows,
+    build_selection_state,
+)
 from app.utils.logger import get_logger
 
 
@@ -127,6 +135,7 @@ class TcraTab(QWidget):
     OVERVIEW_DETAIL_HEIGHT = 232
     OVERVIEW_PREVIEW_LIMIT = 3
     FORM_DRAFT_AUTOSAVE_MS = 700
+    INITIAL_PREFETCH_DELAY_MS = 0
     AGENDA_SCOPE_LABELS = {
         scope: WORKSPACE_AGENDA_SCOPE_LABELS[scope]
         for scope in SUPPORTED_AGENDA_SCOPES
@@ -210,11 +219,14 @@ class TcraTab(QWidget):
         self._form_field_widgets: dict[str, object] = {}
         self._pending_new_form_draft = self._load_saved_form_draft()
         self._last_draft_saved_payload: dict[str, object] | None = None
+        self._records_loaded = False
+        self._initial_prefetch_pending = True
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.timeout.connect(self._save_form_draft)
         self._setup_ui()
-        self.refresh_data()
+        self._set_initial_loading_state()
+        QTimer.singleShot(self.INITIAL_PREFETCH_DELAY_MS, self._prefetch_initial_records)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -1392,8 +1404,57 @@ class TcraTab(QWidget):
             return str(getattr(runtime, "session_path", getattr(runtime, "path", "")) or "").strip()
         return "session://banco-local"
 
+    def _set_initial_loading_state(self) -> None:
+        self.lbl_context.setText("Base TCRA: aguardando carregamento sob demanda.")
+        self.lbl_results.setText("Carregando TCRAs quando o módulo entrar em foco.")
+        self.lbl_radar_summary.setText("Sem dados operacionais no momento.")
+        self.lbl_data_quality.setText("Qualidade cadastral: aguardando leitura.")
+        self.lbl_upcoming_reports.setText("Próximos relatórios: --")
+        self.lbl_agenda_summary.setText("Inbox operacional disponível ao abrir o módulo.")
+        self.lbl_quality_summary.setText("Fila de qualidade disponível ao abrir o módulo.")
+        self.btn_export_excel.setEnabled(False)
+        self.btn_export_pdf.setEnabled(False)
+        self.btn_open_selected.setEnabled(False)
+        self._set_selection_actions_visible(False)
+        self._set_import_status(self.IMPORT_STATUS_IDLE_TEXT, visible=False)
+        self._set_overview_tab_counts(inbox_count=0, quality_count=0)
+        self._mark_form_clean()
+
+    def _prefetch_initial_records(self) -> None:
+        if not self._initial_prefetch_pending or self._records_loaded:
+            return
+        if self.has_pending_form_changes():
+            return
+        if any(
+            [
+                self.in_numero_processo.text().strip(),
+                self.in_numero_tcra.text().strip(),
+                self.in_local.text().strip(),
+                self.in_endereco.text().strip(),
+                self.in_servicos.toPlainText().strip(),
+                self.in_observacoes.toPlainText().strip(),
+                self.form_eventos,
+            ]
+        ):
+            return
+        self._initial_prefetch_pending = False
+        tabs_widget = getattr(self.main_window, "tabs", None) if self.main_window is not None else None
+        if tabs_widget is not None and getattr(tabs_widget, "currentWidget", lambda: None)() is self:
+            return
+        try:
+            self._run_refresh_data()
+        except Exception:
+            logger.debug("Pré-carga silenciosa de TCRA indisponível nesta sessão.", exc_info=True)
+
     def build_dashboard_payload(self) -> tuple[object | None, tuple[TcraAgendaItem, ...]]:
-        payload = self.module_operations.build_dashboard_payload(self.all_tcras)
+        records = self.all_tcras
+        if not records and not self._records_loaded:
+            try:
+                records = list(self.module_operations.load_records(refresh_remote=False).records)
+            except Exception:
+                logger.debug("Dashboard de TCRA sem dados no carregamento preguiçoso.", exc_info=True)
+                records = []
+        payload = self.module_operations.build_dashboard_payload(records)
         return payload.overview, tuple(payload.agenda_items)
 
     def _switch_to_list_view(self):
@@ -1517,6 +1578,10 @@ class TcraTab(QWidget):
     def handle_tab_activated(self):
         if self.has_pending_form_changes():
             self._refresh_form_state()
+            return
+        self._initial_prefetch_pending = False
+        if not self._records_loaded:
+            self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid)
             return
         self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid)
 
@@ -1762,10 +1827,14 @@ class TcraTab(QWidget):
         self._populate_table(preferred_uid=preferred_uid)
 
     def refresh_data(self, *, preferred_uid: str | None = None, refresh_remote: bool = False):
+        self._run_refresh_data(preferred_uid=preferred_uid, refresh_remote=refresh_remote)
+
+    def _run_refresh_data(self, *, preferred_uid: str | None = None, refresh_remote: bool = False):
         try:
             load_result = self.module_operations.load_records(refresh_remote=refresh_remote)
             self.all_tcras = list(load_result.records)
             self.search_index = dict(load_result.search_index)
+            self._records_loaded = True
             if load_result.sync_issues:
                 logger.warning(
                     "Atualização remota de TCRA concluiu com observações: %s",
@@ -1783,6 +1852,7 @@ class TcraTab(QWidget):
             self.agenda_items = []
             self.quality_items = []
             self.search_index = {}
+            self._records_loaded = False
             self.table.setRowCount(0)
             self.agenda_table.setRowCount(0)
             self.quality_table.setRowCount(0)
@@ -2272,20 +2342,14 @@ class TcraTab(QWidget):
     def _update_operational_agenda(self, snapshot: TcraWorkspaceSnapshot):
         self.agenda_items = list(snapshot.agenda_items)
         self.agenda_table.setRowCount(len(self.agenda_items))
-        for row_index, agenda_item in enumerate(self.agenda_items):
-            row_values = [
-                agenda_item.prioridade_label,
-                agenda_item.termo_label,
-                agenda_item.local or "--",
-                agenda_item.detalhe or "--",
-            ]
-            row_color = self._agenda_row_color(agenda_item.priority_rank)
-            for column_index, value in enumerate(row_values):
-                item = QTableWidgetItem(_stringify(value) or "--")
+        for row_index, agenda_row in enumerate(build_agenda_overview_rows(self.agenda_items)):
+            row_color = self._agenda_row_color(agenda_row.rank)
+            for column_index, value in enumerate(agenda_row.values):
+                item = QTableWidgetItem(value)
                 if column_index == 0:
-                    item.setData(Qt.UserRole, agenda_item.uid)
+                    item.setData(Qt.UserRole, agenda_row.uid)
                 self._apply_item_palette(item, row_color, row_index=row_index)
-                item.setToolTip(agenda_item.detalhe or agenda_item.prioridade_label)
+                item.setToolTip(agenda_row.tooltip)
                 self.agenda_table.setItem(row_index, column_index, item)
         self.agenda_table.clearSelection()
         self.lbl_agenda_summary.setText(snapshot.agenda_summary_text)
@@ -2297,21 +2361,14 @@ class TcraTab(QWidget):
     def _update_quality_queue(self, snapshot: TcraWorkspaceSnapshot):
         self.quality_items = list(snapshot.quality_items)
         self.quality_table.setRowCount(len(self.quality_items))
-        for row_index, quality_item in enumerate(self.quality_items):
-            row_values = [
-                quality_item.severity_label,
-                quality_item.termo_label,
-                quality_item.local or "--",
-                quality_item.detalhe or "--",
-            ]
-            row_color = self._quality_row_color(quality_item.severity_rank)
-            tooltip = "\n".join(quality_item.issues) if quality_item.issues else quality_item.detalhe
-            for column_index, value in enumerate(row_values):
-                item = QTableWidgetItem(_stringify(value) or "--")
+        for row_index, quality_row in enumerate(build_quality_overview_rows(self.quality_items)):
+            row_color = self._quality_row_color(quality_row.rank)
+            for column_index, value in enumerate(quality_row.values):
+                item = QTableWidgetItem(value)
                 if column_index == 0:
-                    item.setData(Qt.UserRole, quality_item.uid)
+                    item.setData(Qt.UserRole, quality_row.uid)
                 self._apply_item_palette(item, row_color, row_index=row_index)
-                item.setToolTip(tooltip or quality_item.severity_label)
+                item.setToolTip(quality_row.tooltip)
                 self.quality_table.setItem(row_index, column_index, item)
         self.quality_table.clearSelection()
         self.lbl_quality_summary.setText(snapshot.quality_summary_text)
@@ -2344,25 +2401,13 @@ class TcraTab(QWidget):
         self.table.setRowCount(len(self.filtered_tcras))
         bold_font = QFont()
         bold_font.setBold(True)
-        for row_index, record in enumerate(self.filtered_tcras):
-            operational_status = resolve_operational_status(record, today=self.today)
-            row_items = [
-                record.numero_processo,
-                record.numero_tcra,
-                record.local,
-                operational_status,
-                _format_date(record.prazo_final),
-                _format_date(record.data_proximo_relatorio),
-                record.orgao_acompanhamento,
-                "Sim" if tcra_is_mpsp_related(record) else "Não",
-            ]
-            row_hint = self._build_row_hint(record, operational_status)
-            for column_index, value in enumerate(row_items):
-                item = QTableWidgetItem(_stringify(value) or "--")
+        for row_index, row_data in enumerate(build_main_table_rows(self.filtered_tcras, today=self.today)):
+            for column_index, value in enumerate(row_data.values):
+                item = QTableWidgetItem(value)
                 if column_index == 0:
-                    item.setData(Qt.UserRole, record.uid)
+                    item.setData(Qt.UserRole, row_data.uid)
                 if column_index == 3:
-                    badge_color, badge_foreground = self._status_badge_palette(record)
+                    badge_color, badge_foreground = self._status_badge_palette(row_data.record)
                     self._apply_item_palette(
                         item,
                         badge_color,
@@ -2371,7 +2416,7 @@ class TcraTab(QWidget):
                     )
                 else:
                     self._apply_item_palette(item, None, row_index=row_index)
-                item.setToolTip(row_hint)
+                item.setToolTip(row_data.tooltip)
                 if column_index in {3, 4, 5}:
                     item.setFont(bold_font)
                 if column_index == 3:
@@ -2600,13 +2645,19 @@ class TcraTab(QWidget):
 
         selected_rows = self._selected_table_rows()
         selected_records = self._selected_table_records()
-        self.btn_bulk_action.setEnabled(bool(selected_rows))
-        self.btn_clear_selection.setEnabled(bool(selected_rows))
-        if not selected_rows:
+        selection_state = build_selection_state(
+            filtered_records=self.filtered_tcras,
+            selected_rows=selected_rows,
+            selected_records=selected_records,
+            current_row=self.table.currentRow(),
+        )
+        self.btn_bulk_action.setEnabled(selection_state.has_selection)
+        self.btn_clear_selection.setEnabled(selection_state.has_selection)
+        if not selection_state.has_selection:
             self._bulk_selected_uids = []
             self.btn_open_selected.setEnabled(False)
             self.btn_bulk_action.setText("Ações em lote")
-            self.lbl_selection_summary.setText("Nenhum termo selecionado")
+            self.lbl_selection_summary.setText(selection_state.selection_summary)
             self._set_selection_actions_visible(False)
             self.btn_record_edit.setEnabled(False)
             self.selected_uid = ""
@@ -2616,23 +2667,16 @@ class TcraTab(QWidget):
             if not self.current_form_uid and not self.has_pending_form_changes():
                 self._clear_form(mark_clean=True)
             return
-        self._bulk_selected_uids = [record.uid for record in selected_records if record.uid]
-        selected_count = len(selected_records)
-        self.btn_bulk_action.setText(f"Ações em lote ({selected_count})" if selected_count > 1 else "Ações em lote")
-        if selected_count > 1:
-            self.lbl_selection_summary.setText(f"{selected_count} termos selecionados para ação em lote")
-        else:
-            self.lbl_selection_summary.setText("1 termo selecionado")
-        self._set_selection_actions_visible(True)
+        self._bulk_selected_uids = list(selection_state.bulk_selected_uids)
+        self.btn_bulk_action.setText(selection_state.bulk_action_text)
+        self.lbl_selection_summary.setText(selection_state.selection_summary)
+        self._set_selection_actions_visible(selection_state.show_actions)
 
-        current_row = self.table.currentRow()
-        if current_row < 0 or current_row >= len(self.filtered_tcras):
-            current_row = selected_rows[0]
-        record = self.filtered_tcras[current_row] if 0 <= current_row < len(self.filtered_tcras) else None
+        record = selection_state.primary_record
         if record is None:
             return
         self.selected_uid = record.uid
-        self.btn_open_selected.setEnabled(bool(selected_records))
+        self.btn_open_selected.setEnabled(selection_state.open_selected_enabled)
         self.btn_open_selected.setText("Editar selecionado")
         self.btn_record_edit.setEnabled(True)
         self._update_record_panel(record)
@@ -2647,27 +2691,12 @@ class TcraTab(QWidget):
         self.lbl_selection_summary.setText("1 termo selecionado")
         self._set_selection_actions_visible(True)
         self._update_record_panel(record)
-        with self._suspend_tracking():
-            self.in_numero_processo.setText(record.numero_processo)
-            self.in_numero_tcra.setText(record.numero_tcra)
-            self.in_local.setText(record.local)
-            self.in_endereco.setText(record.endereco)
-            self.in_bairro.setText(record.bairro)
-            self.in_orgao.setText(normalize_orgao_label(record.orgao_acompanhamento))
-            self.in_status.setCurrentText(normalize_status_label(record.status) or STATUS_EM_ACOMPANHAMENTO)
-            self.in_data_assinatura.setText(_format_date_text(record.data_assinatura))
-            self.in_prazo_final.setText(_format_date_text(record.prazo_final))
-            self.in_periodicidade.setText("" if record.periodicidade_relatorio_meses is None else str(record.periodicidade_relatorio_meses))
-            self.in_data_ultimo_relatorio.setText(_format_date_text(record.data_ultimo_relatorio))
-            self.in_data_proximo_relatorio.setText(_format_date_text(record.data_proximo_relatorio))
-            self.in_area_m2.setText("" if record.area_m2 is None else str(record.area_m2))
-            self.in_numero_mudas.setText("" if record.numero_mudas_previsto is None else str(record.numero_mudas_previsto))
-            self.in_responsavel.setText(record.responsavel_execucao)
-            self.chk_mpsp.setChecked(tcra_is_mpsp_related(record))
-            self.in_inquerito.setText(record.inquerito_civil)
-            self.in_servicos.setPlainText(record.servicos_exigidos)
-            self.in_observacoes.setPlainText(record.observacoes)
-        self.form_eventos = list(record.eventos)
+        record_snapshot = build_record_form_snapshot(record)
+        self._apply_form_snapshot_updates(record_snapshot)
+        self.form_eventos = restore_form_eventos_snapshot(
+            record_snapshot.get("eventos", ()),
+            parse_date=self._parse_optional_date,
+        )
         self._normalize_form_eventos()
         self._populate_events()
         self._update_live_preview()
@@ -2685,26 +2714,7 @@ class TcraTab(QWidget):
         self.lbl_selection_summary.setText("Nenhum termo selecionado")
         self._set_selection_actions_visible(bool(self._selected_table_rows()))
         self._set_record_panel_placeholder()
-        with self._suspend_tracking():
-            self.in_numero_processo.clear()
-            self.in_numero_tcra.clear()
-            self.in_local.clear()
-            self.in_endereco.clear()
-            self.in_bairro.clear()
-            self.in_orgao.clear()
-            self.in_status.setCurrentText(STATUS_EM_ACOMPANHAMENTO)
-            self.in_data_assinatura.clear()
-            self.in_prazo_final.clear()
-            self.in_periodicidade.clear()
-            self.in_data_ultimo_relatorio.clear()
-            self.in_data_proximo_relatorio.clear()
-            self.in_area_m2.clear()
-            self.in_numero_mudas.clear()
-            self.in_responsavel.clear()
-            self.chk_mpsp.setChecked(False)
-            self.in_inquerito.clear()
-            self.in_servicos.clear()
-            self.in_observacoes.clear()
+        self._apply_form_snapshot_updates(build_empty_form_snapshot(default_status=STATUS_EM_ACOMPANHAMENTO))
         self.form_eventos = []
         self._populate_events()
         self._update_live_preview()

@@ -536,7 +536,7 @@ class OperationsTab(QWidget):
 
         if not self.events:
             self.selected_event = None
-            self.details.setPlainText("Nenhuma operaÃ§Ã£o encontrada para os filtros atuais.")
+            self.details.setPlainText("Nenhuma operação encontrada para os filtros atuais.")
             self.btn_open_backup.setEnabled(False)
             return
 

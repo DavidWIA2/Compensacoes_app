@@ -5,9 +5,20 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QVBoxLayout, QLabel, QLineEdit, QCheckBox,
     QHBoxLayout, QPushButton, QDialog, QDialogButtonBox, QSizePolicy, QSplitter, QSplitterHandle
 )
-from PySide6.QtWebEngineCore import QWebEnginePage
 
 from app.services.records_service import remove_accents
+
+_QWEBENGINE_PAGE_CLS = None
+_DEBUG_PAGE_CLS = None
+
+
+def _ensure_webengine_page_cls():
+    global _QWEBENGINE_PAGE_CLS
+    if _QWEBENGINE_PAGE_CLS is None:
+        from PySide6.QtWebEngineCore import QWebEnginePage as _QWebEnginePage
+
+        _QWEBENGINE_PAGE_CLS = _QWebEnginePage
+    return _QWEBENGINE_PAGE_CLS
 
 
 def _selection_key(value: object) -> str:
@@ -31,9 +42,17 @@ class MapBridge(QObject):
             self._on_layer_changed(layer_name)
 
 
-class DebugPage(QWebEnginePage):
-    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
-        pass
+def DebugPage(parent=None):
+    global _DEBUG_PAGE_CLS
+    if _DEBUG_PAGE_CLS is None:
+        webengine_page_cls = _ensure_webengine_page_cls()
+
+        class _DebugPage(webengine_page_cls):
+            def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+                pass
+
+        _DEBUG_PAGE_CLS = _DebugPage
+    return _DEBUG_PAGE_CLS(parent)
 
 
 class CheckableComboBox(QComboBox):

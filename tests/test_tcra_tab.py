@@ -170,6 +170,21 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert tab.selection_actions_frame.isHidden() is False
 
 
+def test_tcra_tab_defers_initial_load_until_event_loop_runs(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    assert tab._records_loaded is False
+    assert tab.table.rowCount() == 0
+
+    get_app().processEvents()
+
+    assert tab._records_loaded is True
+    assert tab.table.rowCount() == 1
+
+
 def test_tcra_evento_editor_dialog_applies_presets():
     dialog = TcraEventoEditorDialog(None)
 
@@ -355,6 +370,7 @@ def test_tcra_tab_inbox_and_quality_expand_from_compact_preview(tmp_path):
     )
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
 
     assert tab.agenda_table.rowCount() == 3
     assert tab.quality_table.rowCount() == 3
@@ -385,6 +401,7 @@ def test_tcra_tab_agenda_scope_buttons_filter_work_queue(tmp_path):
         ]
     )
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
 
     assert tab.agenda_scope == tcra_tab_module.AGENDA_SCOPE_HOJE
     assert tab.agenda_table.rowCount() == 2
@@ -491,11 +508,18 @@ def test_tcra_tab_audits_event_edit_only_after_save(tmp_path, monkeypatch):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     service.replace_all([make_tcra(uid="tcra-1")])
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     audit_calls = []
+    warnings = []
 
     tab.main_window = SimpleNamespace(
         audit_service=SimpleNamespace(append_session_event=lambda **kwargs: audit_calls.append(kwargs)),
         shell_controller=SimpleNamespace(current_session_path=lambda: "session://banco-local"),
+    )
+    monkeypatch.setattr(
+        tcra_tab_module.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args[2] if len(args) > 2 else ""),
     )
 
     class EditDialog:
@@ -530,6 +554,7 @@ def test_tcra_tab_audits_event_edit_only_after_save(tmp_path, monkeypatch):
     tab.save_tcra()
     get_app().processEvents()
 
+    assert warnings == []
     assert len(audit_calls) == 1
     assert audit_calls[-1]["action"] == "TCRA_EDIT"
     assert audit_calls[-1]["metadata"]["event_change_action"] == "edit"
@@ -730,6 +755,7 @@ def test_tcra_tab_quality_selection_routes_to_editor_and_focuses_issue(tmp_path,
         ]
     )
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     focused = []
 
     monkeypatch.setattr(tab, "_focus_quality_item", lambda item: focused.append(item.issues[0]))
@@ -889,6 +915,7 @@ def test_tcra_tab_neutral_cells_keep_visible_text_when_theme_changes(tmp_path):
     )
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     tab.main_window = SimpleNamespace(is_dark_mode=True)
     tab._repaint_table_styles()
 
@@ -926,6 +953,7 @@ def test_tcra_tab_light_theme_keeps_status_badges_for_operational_states(tmp_pat
     )
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     tab.main_window = SimpleNamespace(is_dark_mode=False)
     tab._repaint_table_styles()
 
@@ -1037,6 +1065,7 @@ def test_tcra_tab_exports_excel_and_pdf_reports(tmp_path, monkeypatch):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     service.replace_all([make_tcra(uid="tcra-1"), make_tcra(uid="tcra-2", status="Cumprido", data_proximo_relatorio=None)])
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     info_messages = []
     save_paths = iter(
         [
@@ -1139,6 +1168,7 @@ def test_tcra_tab_bulk_action_updates_selected_records(tmp_path, monkeypatch):
     monkeypatch.setattr(tcra_tab_module, "TcraBulkActionDialog", BulkDialog)
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
     tab._select_alert_rows()
     get_app().processEvents()
 

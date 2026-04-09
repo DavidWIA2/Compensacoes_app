@@ -166,4 +166,8 @@ def clear_loaded_data_view(window, empty_metrics: Dict[str, object]) -> None:
     window.clear_form(force=True)
     window.statusBar().showMessage("Banco local indisponível")
     window._refresh_window_chrome()
-    window.refresh_operations_overview()
+    navigation = getattr(window, "navigation_controller", None)
+    if navigation is not None and hasattr(navigation, "update_operations_overview"):
+        navigation.update_operations_overview()
+    else:
+        window.refresh_operations_overview()

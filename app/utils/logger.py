@@ -23,9 +23,36 @@ LOG_DIR = _resolve_safe_log_dir()
 LOG_FILE = os.path.join(LOG_DIR, "app.log")
 
 
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """Gracefully skips rollover when Windows keeps the log file locked."""
+
+    def emit(self, record):
+        try:
+            if self.shouldRollover(record):
+                try:
+                    self.doRollover()
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) != 32:
+                        raise
+                    self._reopen_stream()
+            logging.FileHandler.emit(self, record)
+        except Exception:
+            self.handleError(record)
+
+    def _reopen_stream(self) -> None:
+        if self.stream:
+            try:
+                self.stream.close()
+            except OSError:
+                pass
+        self.mode = "a"
+        self.stream = self._open()
+
+
 def setup_logger():
     logger = logging.getLogger("CompensacoesApp")
     logger.setLevel(logging.DEBUG)
+    logger.propagate = False
 
     if not logger.handlers:
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -34,7 +61,13 @@ def setup_logger():
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(formatter)
 
-        file_handler = RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+        file_handler = SafeRotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+            delay=True,
+        )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
 

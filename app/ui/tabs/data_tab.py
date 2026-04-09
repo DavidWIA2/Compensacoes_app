@@ -8,10 +8,6 @@ from PySide6.QtWidgets import (
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
     QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton, QFrame,
 )
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEngineSettings
-
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
 from app.services.records_service import display_tipo_value
@@ -37,6 +33,27 @@ from app.ui.tabs.data_tab_support import (
     resolve_column_width_bounds,
     resolve_splitter_anchor_character_index,
 )
+
+QWebEngineView = None
+QWebChannel = None
+QWebEngineSettings = None
+
+
+def _ensure_webengine_classes():
+    global QWebEngineView, QWebChannel, QWebEngineSettings
+    if QWebEngineView is None:
+        from PySide6.QtWebEngineWidgets import QWebEngineView as _QWebEngineView
+
+        QWebEngineView = _QWebEngineView
+    if QWebChannel is None:
+        from PySide6.QtWebChannel import QWebChannel as _QWebChannel
+
+        QWebChannel = _QWebChannel
+    if QWebEngineSettings is None:
+        from PySide6.QtWebEngineCore import QWebEngineSettings as _QWebEngineSettings
+
+        QWebEngineSettings = _QWebEngineSettings
+    return QWebEngineView, QWebChannel, QWebEngineSettings
 
 
 class DataTab(QWidget):
@@ -294,9 +311,13 @@ class DataTab(QWidget):
         QTimer.singleShot(0, self.align_splitter_to_table_width)
 
     def _current_root_dimensions(self) -> tuple[int, int]:
-        root = self.window()
-        current_width = root.width() if root is not None and root.width() > 0 else self.width()
-        current_height = root.height() if root is not None and root.height() > 0 else self.height()
+        try:
+            root = self.window()
+            current_width = root.width() if root is not None and root.width() > 0 else self.width()
+            current_height = root.height() if root is not None and root.height() > 0 else self.height()
+            is_visible = self.isVisible()
+        except RuntimeError:
+            return 1920, 1080
 
         screen = None
         if root is not None:
@@ -312,11 +333,11 @@ class DataTab(QWidget):
             available = screen.availableGeometry() if hasattr(screen, "availableGeometry") else screen.geometry()
             available_width = available.width()
             available_height = available.height()
-            if (current_width <= 0 or current_width < 900) and not self.isVisible():
+            if (current_width <= 0 or current_width < 900) and not is_visible:
                 current_width = available_width
             elif current_width > 0:
                 current_width = min(current_width, available_width)
-            if (current_height <= 0 or current_height < 640) and not self.isVisible():
+            if (current_height <= 0 or current_height < 640) and not is_visible:
                 current_height = available_height
             elif current_height > 0:
                 current_height = min(current_height, available_height)
@@ -360,15 +381,16 @@ class DataTab(QWidget):
         self.btn_load_map = None
 
     def _create_map_web_view(self):
-        web = QWebEngineView()
+        webengine_view_cls, webchannel_cls, webengine_settings_cls = _ensure_webengine_classes()
+        web = webengine_view_cls()
         web.setMinimumHeight(int(350 * self.sf))
         web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         web.setPage(DebugPage(web))
         settings = web.page().settings()
-        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
-        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(webengine_settings_cls.LocalContentCanAccessFileUrls, True)
+        settings.setAttribute(webengine_settings_cls.LocalContentCanAccessRemoteUrls, True)
 
-        self.channel = QWebChannel(web.page())
+        self.channel = webchannel_cls(web.page())
         self.bridge = MapBridge(
             getattr(self.main_window, "_on_map_click", None) if self.main_window else None,
             getattr(self.main_window, "save_map_layer_preference", None) if self.main_window else None,
@@ -394,46 +416,49 @@ class DataTab(QWidget):
         return bool(self._web_view_initialized and self.web is not None)
 
     def _sync_left_panel_heights(self):
-        if not hasattr(self, "left_panel") or not self.left_panel:
-            return
+        try:
+            if not hasattr(self, "left_panel") or not self.left_panel:
+                return
 
-        layout = self.left_panel.layout()
-        if layout is None:
-            return
+            layout = self.left_panel.layout()
+            if layout is None:
+                return
 
-        margins = layout.contentsMargins()
-        available = self.left_panel.height() - margins.top() - margins.bottom()
-        if available <= 0:
-            return
+            margins = layout.contentsMargins()
+            available = self.left_panel.height() - margins.top() - margins.bottom()
+            if available <= 0:
+                return
 
-        fixed_children_height = 0
-        if hasattr(self, "group_totals") and self.group_totals:
-            if self.group_totals.minimumHeight() == self.group_totals.maximumHeight():
-                fixed_children_height += self.group_totals.maximumHeight()
-            else:
-                fixed_children_height += self.group_totals.height() or self.group_totals.sizeHint().height()
-        if hasattr(self, "bar_export") and self.bar_export:
-            if self.bar_export.minimumHeight() == self.bar_export.maximumHeight():
-                fixed_children_height += self.bar_export.maximumHeight()
-            else:
-                fixed_children_height += self.bar_export.height() or self.bar_export.sizeHint().height()
+            fixed_children_height = 0
+            if hasattr(self, "group_totals") and self.group_totals:
+                if self.group_totals.minimumHeight() == self.group_totals.maximumHeight():
+                    fixed_children_height += self.group_totals.maximumHeight()
+                else:
+                    fixed_children_height += self.group_totals.height() or self.group_totals.sizeHint().height()
+            if hasattr(self, "bar_export") and self.bar_export:
+                if self.bar_export.minimumHeight() == self.bar_export.maximumHeight():
+                    fixed_children_height += self.bar_export.maximumHeight()
+                else:
+                    fixed_children_height += self.bar_export.height() or self.bar_export.sizeHint().height()
 
-        spacing_count = max(layout.count() - 1, 0)
-        available_table_height = available - fixed_children_height - (layout.spacing() * spacing_count)
-        target_height = max(available_table_height, 0)
-        if self._locked_table_height is not None:
-            target_height = min(target_height, self._locked_table_height)
-            self.table.setFixedHeight(target_height)
+            spacing_count = max(layout.count() - 1, 0)
+            available_table_height = available - fixed_children_height - (layout.spacing() * spacing_count)
+            target_height = max(available_table_height, 0)
+            if self._locked_table_height is not None:
+                target_height = min(target_height, self._locked_table_height)
+                self.table.setFixedHeight(target_height)
+                self.table.updateGeometry()
+                return
+
+            # Keep the table bounded by the free space, but do not fix its height:
+            # a fixed height raises the window's minimum size after reloads and can
+            # push the totals/export area below the screen.
+            self.table.setMinimumHeight(0)
+            self.table.setMaximumHeight(target_height)
             self.table.updateGeometry()
+            layout.activate()
+        except RuntimeError:
             return
-
-        # Keep the table bounded by the free space, but do not fix its height:
-        # a fixed height raises the window's minimum size after reloads and can
-        # push the totals/export area below the screen.
-        self.table.setMinimumHeight(0)
-        self.table.setMaximumHeight(target_height)
-        self.table.updateGeometry()
-        layout.activate()
 
     def lock_table_height(self):
         current_height = self.table.height()
@@ -493,10 +518,13 @@ class DataTab(QWidget):
         )
 
     def _update_responsive_constraints(self):
-        if not hasattr(self, "right_panel"):
+        try:
+            if not hasattr(self, "right_panel"):
+                return
+            preferred_width = self.preferred_right_panel_width()
+            self.right_panel.setMinimumWidth(max(preferred_width, 520))
+        except RuntimeError:
             return
-        preferred_width = self.preferred_right_panel_width()
-        self.right_panel.setMinimumWidth(max(preferred_width, 520))
 
     def _is_compact_layout(self) -> bool:
         current_width, current_height = self._current_root_dimensions()
@@ -515,141 +543,147 @@ class DataTab(QWidget):
         return current_height <= 960
 
     def _apply_responsive_layout(self) -> None:
-        compact_mode = self._is_compact_layout()
-        tight_mode = self._is_tight_layout()
-        short_mode = self._is_short_layout()
-        very_short_mode = self._is_very_short_layout()
+        try:
+            compact_mode = self._is_compact_layout()
+            tight_mode = self._is_tight_layout()
+            short_mode = self._is_short_layout()
+            very_short_mode = self._is_very_short_layout()
 
-        self.lbl_workspace_subtitle.setVisible(not tight_mode and not very_short_mode)
-        self.lbl_workspace_helper.setVisible(not compact_mode and not short_mode)
-        self.lbl_form_context.setVisible(not compact_mode and not short_mode)
+            self.lbl_workspace_subtitle.setVisible(not tight_mode and not very_short_mode)
+            self.lbl_workspace_helper.setVisible(not compact_mode and not short_mode)
+            self.lbl_form_context.setVisible(not compact_mode and not short_mode)
 
-        filter_margin = max(int((8 if short_mode else 10) * self.sf), 6)
-        filter_spacing = max(int((4 if short_mode else 6) * self.sf), 4)
-        self.filters_host_layout.setContentsMargins(filter_margin, filter_margin, filter_margin, filter_margin)
-        self.filters_host_layout.setSpacing(filter_spacing)
-        self.filters_row.setSpacing(max(int((8 if short_mode else 12) * self.sf), 6))
-        self.filters_buttons_layout.setContentsMargins(0, int((8 if short_mode else 12) * self.sf), 0, 0)
+            filter_margin = max(int((8 if short_mode else 10) * self.sf), 6)
+            filter_spacing = max(int((4 if short_mode else 6) * self.sf), 4)
+            self.filters_host_layout.setContentsMargins(filter_margin, filter_margin, filter_margin, filter_margin)
+            self.filters_host_layout.setSpacing(filter_spacing)
+            self.filters_row.setSpacing(max(int((8 if short_mode else 12) * self.sf), 6))
+            self.filters_buttons_layout.setContentsMargins(0, int((8 if short_mode else 12) * self.sf), 0, 0)
 
-        self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar filtros")
-        self.btn_reset_sort.setText("Ordem" if compact_mode else "Restaurar ordem")
-        self.btn_columns.setText("Colunas" if compact_mode else "Exibir colunas")
-        self.btn_table_full.setText("Expandir tabela")
-        self.btn_manage_plantios.setText("Plantios" if compact_mode else "Plantios...")
+            self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar filtros")
+            self.btn_reset_sort.setText("Ordem" if compact_mode else "Restaurar ordem")
+            self.btn_columns.setText("Colunas" if compact_mode else "Exibir colunas")
+            self.btn_table_full.setText("Expandir tabela")
+            self.btn_manage_plantios.setText("Plantios" if compact_mode else "Plantios...")
 
-        self.filter_micro.setMinimumWidth(int((160 if compact_mode else 220) * self.sf))
-        self.filter_eletronico.setMinimumWidth(int((110 if compact_mode else 140) * self.sf))
-        self.filter_status.setMinimumWidth(int((108 if compact_mode else 130) * self.sf))
-        self.filter_year.setMinimumWidth(int((82 if compact_mode else 90) * self.sf))
+            self.filter_micro.setMinimumWidth(int((160 if compact_mode else 220) * self.sf))
+            self.filter_eletronico.setMinimumWidth(int((110 if compact_mode else 140) * self.sf))
+            self.filter_status.setMinimumWidth(int((108 if compact_mode else 130) * self.sf))
+            self.filter_year.setMinimumWidth(int((82 if compact_mode else 90) * self.sf))
 
-        compact_filter_button_height = 26 if short_mode else 28
-        for button in [self.btn_clear_filters, self.btn_reset_sort, self.btn_columns, self.btn_table_full]:
-            button.setMinimumHeight(max(int(compact_filter_button_height * self.sf), 24))
+            compact_filter_button_height = 26 if short_mode else 28
+            for button in [self.btn_clear_filters, self.btn_reset_sort, self.btn_columns, self.btn_table_full]:
+                button.setMinimumHeight(max(int(compact_filter_button_height * self.sf), 24))
 
-        totals_height = max(
-            int(
-                (
-                    166
-                    if very_short_mode
-                    else 174
-                    if short_mode
-                    else 190
-                    if compact_mode
-                    else 230
+            totals_height = max(
+                int(
+                    (
+                        166
+                        if very_short_mode
+                        else 174
+                        if short_mode
+                        else 190
+                        if compact_mode
+                        else 230
+                    )
+                    * self.sf
+                ),
+                148 if very_short_mode else 156 if compact_mode or short_mode else 200,
+            )
+            self.group_totals.setFixedHeight(totals_height)
+            metrics_min_height = max(
+                int(((72 if very_short_mode else 80 if short_mode else 92 if compact_mode else 120) * self.sf)),
+                68 if very_short_mode else 76,
+            )
+            self.kpi_table.setMinimumHeight(metrics_min_height)
+            self.micro_table.setMinimumHeight(metrics_min_height)
+
+            export_height = max(int(((30 if short_mode else 36 if compact_mode else 42) * self.sf)), 28)
+            self.bar_export.setFixedHeight(export_height)
+            export_button_height = max(min(export_height - 4, int(28 * self.sf)), 24)
+            export_vertical_margin = max((export_height - export_button_height) // 2, 2)
+            if hasattr(self, "export_bar_layout"):
+                self.export_bar_layout.setContentsMargins(
+                    int(8 * self.sf),
+                    export_vertical_margin,
+                    int(8 * self.sf),
+                    export_vertical_margin,
                 )
-                * self.sf
-            ),
-            148 if very_short_mode else 156 if compact_mode or short_mode else 200,
-        )
-        self.group_totals.setFixedHeight(totals_height)
-        metrics_min_height = max(
-            int(((72 if very_short_mode else 80 if short_mode else 92 if compact_mode else 120) * self.sf)),
-            68 if very_short_mode else 76,
-        )
-        self.kpi_table.setMinimumHeight(metrics_min_height)
-        self.micro_table.setMinimumHeight(metrics_min_height)
+            for button in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
+                button.setFixedHeight(export_button_height)
+            if hasattr(self, "export_label"):
+                self.export_label.setVisible(not tight_mode and not short_mode)
 
-        export_height = max(int(((30 if short_mode else 36 if compact_mode else 42) * self.sf)), 28)
-        self.bar_export.setFixedHeight(export_height)
-        export_button_height = max(min(export_height - 4, int(28 * self.sf)), 24)
-        export_vertical_margin = max((export_height - export_button_height) // 2, 2)
-        if hasattr(self, "export_bar_layout"):
-            self.export_bar_layout.setContentsMargins(
-                int(8 * self.sf),
-                export_vertical_margin,
-                int(8 * self.sf),
-                export_vertical_margin,
-            )
-        for button in [self.btn_export_csv, self.btn_export_spreadsheet, self.btn_export_pdf]:
-            button.setFixedHeight(export_button_height)
-        if hasattr(self, "export_label"):
-            self.export_label.setVisible(not tight_mode and not short_mode)
+            self.combo_heatmap_type.setMinimumWidth(max(int((120 if compact_mode else 150) * self.sf), 110))
+            placeholder_label = getattr(self, "map_placeholder_label", None)
+            if placeholder_label is not None:
+                placeholder_label.setVisible(not tight_mode)
 
-        self.combo_heatmap_type.setMinimumWidth(max(int((120 if compact_mode else 150) * self.sf), 110))
-        placeholder_label = getattr(self, "map_placeholder_label", None)
-        if placeholder_label is not None:
-            placeholder_label.setVisible(not tight_mode)
+            input_height = max(int(((25 if very_short_mode else 27 if short_mode else 30) * self.sf)), 24)
+            for widget in [
+                self.in_oficio,
+                self.in_avtec,
+                self.in_comp,
+                self.in_end,
+                self.in_end_plantio,
+                self.in_micro,
+                self.in_caixa,
+                self.btn_manage_plantios,
+                self.eletronico_cont,
+            ]:
+                widget.setFixedHeight(input_height)
 
-        input_height = max(int(((25 if very_short_mode else 27 if short_mode else 30) * self.sf)), 24)
-        for widget in [
-            self.in_oficio,
-            self.in_avtec,
-            self.in_comp,
-            self.in_end,
-            self.in_end_plantio,
-            self.in_micro,
-            self.in_caixa,
-            self.btn_manage_plantios,
-            self.eletronico_cont,
-        ]:
-            widget.setFixedHeight(input_height)
+            self.chk_sn.setFixedWidth(max(int(((96 if short_mode else 108) * self.sf)), 84))
+            form_layout = self.form_group.layout()
+            if form_layout is not None:
+                side_margin = max(int(((12 if short_mode else 15) * self.sf)), 10)
+                top_margin = max(int(((10 if very_short_mode else 12 if short_mode else 14) * self.sf)), 8)
+                bottom_margin = max(int(((8 if short_mode else 10) * self.sf)), 8)
+                form_layout.setContentsMargins(side_margin, top_margin, side_margin, bottom_margin)
+                form_layout.setHorizontalSpacing(max(int(((8 if short_mode else 10) * self.sf)), 6))
+                form_layout.setVerticalSpacing(max(int(((7 if very_short_mode else 8 if short_mode else 10) * self.sf)), 6))
+                for row_index in range(4):
+                    form_layout.setRowMinimumHeight(row_index, input_height)
 
-        self.chk_sn.setFixedWidth(max(int(((96 if short_mode else 108) * self.sf)), 84))
-        form_layout = self.form_group.layout()
-        if form_layout is not None:
-            side_margin = max(int(((12 if short_mode else 15) * self.sf)), 10)
-            top_margin = max(int(((10 if very_short_mode else 12 if short_mode else 14) * self.sf)), 8)
-            bottom_margin = max(int(((8 if short_mode else 10) * self.sf)), 8)
-            form_layout.setContentsMargins(side_margin, top_margin, side_margin, bottom_margin)
-            form_layout.setHorizontalSpacing(max(int(((8 if short_mode else 10) * self.sf)), 6))
-            form_layout.setVerticalSpacing(max(int(((7 if very_short_mode else 8 if short_mode else 10) * self.sf)), 6))
-            for row_index in range(4):
-                form_layout.setRowMinimumHeight(row_index, input_height)
+            map_layout = self.map_group.layout()
+            if map_layout is not None:
+                map_layout.setContentsMargins(
+                    max(int(((8 if short_mode else 10) * self.sf)), 6),
+                    max(int(((8 if short_mode else 10) * self.sf)), 6),
+                    max(int(((8 if short_mode else 10) * self.sf)), 6),
+                    max(int(((8 if short_mode else 10) * self.sf)), 6),
+                )
+                map_layout.setHorizontalSpacing(max(int(((6 if short_mode else 8) * self.sf)), 4))
+                map_layout.setVerticalSpacing(max(int(((4 if short_mode else 6) * self.sf)), 4))
+            map_button_height = max(int(((22 if short_mode else 24) * self.sf)), 20)
+            for button in [
+                self.btn_maps,
+                self.btn_maps_plantio,
+                self.btn_batch_geo,
+                self.btn_map_full,
+                self.btn_street_view,
+                self.btn_add_layer,
+            ]:
+                button.setMinimumHeight(map_button_height)
+            if self.has_map_web_view():
+                map_height = max(
+                    int(((200 if very_short_mode else 230 if short_mode else 350) * self.sf)),
+                    170 if very_short_mode else 205 if short_mode else 280,
+                )
+                self.web.setMinimumHeight(map_height)
 
-        map_layout = self.map_group.layout()
-        if map_layout is not None:
-            map_layout.setContentsMargins(
-                max(int(((8 if short_mode else 10) * self.sf)), 6),
-                max(int(((8 if short_mode else 10) * self.sf)), 6),
-                max(int(((8 if short_mode else 10) * self.sf)), 6),
-                max(int(((8 if short_mode else 10) * self.sf)), 6),
-            )
-            map_layout.setHorizontalSpacing(max(int(((6 if short_mode else 8) * self.sf)), 4))
-            map_layout.setVerticalSpacing(max(int(((4 if short_mode else 6) * self.sf)), 4))
-        map_button_height = max(int(((22 if short_mode else 24) * self.sf)), 20)
-        for button in [
-            self.btn_maps,
-            self.btn_maps_plantio,
-            self.btn_batch_geo,
-            self.btn_map_full,
-            self.btn_street_view,
-            self.btn_add_layer,
-        ]:
-            button.setMinimumHeight(map_button_height)
-        if self.has_map_web_view():
-            map_height = max(
-                int(((200 if very_short_mode else 230 if short_mode else 350) * self.sf)),
-                170 if very_short_mode else 205 if short_mode else 280,
-            )
-            self.web.setMinimumHeight(map_height)
-
-        self._update_form_group_height()
+            self._update_form_group_height()
+        except RuntimeError:
+            return
 
     def _finalize_responsive_layout(self) -> None:
-        self._apply_responsive_layout()
-        self._update_responsive_constraints()
-        self._sync_left_panel_heights()
-        self.align_splitter_to_table_width()
+        try:
+            self._apply_responsive_layout()
+            self._update_responsive_constraints()
+            self._sync_left_panel_heights()
+            self.align_splitter_to_table_width()
+        except RuntimeError:
+            return
 
     def _preferred_splitter_anchor_left_width(self) -> int | None:
         if not hasattr(self, "btn_table_full") or not hasattr(self, "splitter"):
@@ -687,33 +721,36 @@ class DataTab(QWidget):
         )
 
     def align_splitter_to_table_width(self):
-        if not hasattr(self, "splitter") or self.splitter.count() < 2:
-            return
+        try:
+            if not hasattr(self, "splitter") or self.splitter.count() < 2:
+                return
 
-        splitter_rect = self.splitter.contentsRect()
-        handle_total_width = self.splitter.handleWidth() * max(self.splitter.count() - 1, 0)
-        total_width = splitter_rect.width() - handle_total_width
-        if total_width <= 0:
-            total_width = sum(self.splitter.sizes())
-        if total_width <= 0:
-            return
+            splitter_rect = self.splitter.contentsRect()
+            handle_total_width = self.splitter.handleWidth() * max(self.splitter.count() - 1, 0)
+            total_width = splitter_rect.width() - handle_total_width
+            if total_width <= 0:
+                total_width = sum(self.splitter.sizes())
+            if total_width <= 0:
+                return
 
-        self._update_responsive_constraints()
-        right_min_width = self.right_panel.minimumWidth()
-        target_left_width = min(
-            max(self.preferred_left_panel_width(), 0),
-            max(total_width - right_min_width, 0),
-        )
-        sizes = compute_splitter_sizes(
-            total_width=total_width,
-            right_min_width=right_min_width,
-            preferred_left_width=target_left_width,
-            anchor_left_width=self._preferred_splitter_anchor_left_width(),
-        )
-        if sizes is None:
-            return
+            self._update_responsive_constraints()
+            right_min_width = self.right_panel.minimumWidth()
+            target_left_width = min(
+                max(self.preferred_left_panel_width(), 0),
+                max(total_width - right_min_width, 0),
+            )
+            sizes = compute_splitter_sizes(
+                total_width=total_width,
+                right_min_width=right_min_width,
+                preferred_left_width=target_left_width,
+                anchor_left_width=self._preferred_splitter_anchor_left_width(),
+            )
+            if sizes is None:
+                return
 
-        self.splitter.setSizes(list(sizes))
+            self.splitter.setSizes(list(sizes))
+        except RuntimeError:
+            return
 
     def _column_width_bounds(self, attr: str) -> tuple[int, int]:
         bounds = resolve_column_width_bounds(

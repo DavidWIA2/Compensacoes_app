@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
-import importlib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -23,6 +21,7 @@ from app.services.supabase_workspace_sync_service import (
     SupabaseWorkspaceSyncResult,
     SupabaseWorkspaceSyncService,
 )
+from app.services.supabase_client_loader import load_supabase_create_client
 from app.utils.app_paths import resolve_data_path
 from app.utils.logger import get_logger
 
@@ -360,30 +359,7 @@ class SupabaseAccessService:
 
     @staticmethod
     def _import_supabase_create_client():
-        project_root = Path(__file__).resolve().parents[2]
-        original_path = list(sys.path)
-        filtered_path: list[str] = []
-        for entry in original_path:
-            try:
-                resolved = Path(entry or ".").resolve()
-            except Exception:
-                filtered_path.append(entry)
-                continue
-            if resolved == project_root:
-                continue
-            filtered_path.append(entry)
-
-        try:
-            sys.path = filtered_path
-            sys.modules.pop("supabase", None)
-            module = importlib.import_module("supabase")
-        finally:
-            sys.path = original_path
-
-        create_client = getattr(module, "create_client", None)
-        if not callable(create_client):
-            raise ImportError("cannot import name 'create_client' from 'supabase'")
-        return create_client
+        return load_supabase_create_client()
 
     @staticmethod
     def _build_remote_session(

@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
@@ -35,6 +34,17 @@ from app.ui.tabs.dashboard_tab_support import (
     build_tcra_summary_text,
 )
 
+QWebEngineView = None
+
+
+def _ensure_webengine_view_cls():
+    global QWebEngineView
+    if QWebEngineView is None:
+        from PySide6.QtWebEngineWidgets import QWebEngineView as _QWebEngineView
+
+        QWebEngineView = _QWebEngineView
+    return QWebEngineView
+
 
 class DashboardTab(QWidget):
     def __init__(self, parent=None):
@@ -48,9 +58,9 @@ class DashboardTab(QWidget):
         self._last_record_read_status: Optional[LocalRecordReadStatus] = None
         self._last_tcra_overview: Optional[TcraRecordOverview] = None
         self._last_tcra_agenda: tuple[TcraAgendaItem, ...] = ()
-        self.comp_web: QWebEngineView | None = None
-        self.tcra_web: QWebEngineView | None = None
-        self.web: QWebEngineView | None = None
+        self.comp_web = None
+        self.tcra_web = None
+        self.web = None
         self._chart_min_height = self._resolve_chart_min_height()
         self._card_max_height = self._resolve_card_max_height()
 
@@ -442,7 +452,7 @@ class DashboardTab(QWidget):
             return
         self._ensure_dashboard_webview("compensacoes")
 
-    def _ensure_dashboard_webview(self, kind: str) -> QWebEngineView:
+    def _ensure_dashboard_webview(self, kind: str):
         current_web = self.comp_web if kind == "compensacoes" else self.tcra_web
         if current_web is not None:
             return current_web
@@ -469,8 +479,9 @@ class DashboardTab(QWidget):
             self.tcra_web = web
         return web
 
-    def _build_dashboard_webview(self, kind: str) -> QWebEngineView:
-        web = QWebEngineView()
+    def _build_dashboard_webview(self, kind: str):
+        web_cls = _ensure_webengine_view_cls()
+        web = web_cls()
         web.setMinimumHeight(self._chart_min_height)
         web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         web.setStyleSheet("background: transparent;")

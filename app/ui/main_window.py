@@ -118,12 +118,19 @@ class MainWindow(QMainWindow):
         self._startup_window_state_applied = False
         self._startup_layout_pending = False
         self._startup_geometry_restored = False
+        self._operations_dirty = True
         self._skip_close_discard_confirmation = False
         self._sign_out_ready = False
         self._sign_out_activation_scheduled = False
         self._startup_close_guard_active = True
         self._startup_close_guard_release_scheduled = False
         self._startup_close_guard_armed = False
+        self._sign_out_activation_timer = QTimer(self)
+        self._sign_out_activation_timer.setSingleShot(True)
+        self._sign_out_activation_timer.timeout.connect(self._enable_sign_out_controls)
+        self._startup_close_guard_timer = QTimer(self)
+        self._startup_close_guard_timer.setSingleShot(True)
+        self._startup_close_guard_timer.timeout.connect(self._disable_startup_close_guard)
 
         self.session_controller = WindowSessionController(self)
         self.navigation_controller = WindowNavigationController(self)
@@ -155,10 +162,10 @@ class MainWindow(QMainWindow):
         self._startup_close_guard_armed = True
         if not self._sign_out_activation_scheduled:
             self._sign_out_activation_scheduled = True
-            QTimer.singleShot(1200, self._enable_sign_out_controls)
+            self._sign_out_activation_timer.start(1200)
         if not self._startup_close_guard_release_scheduled:
             self._startup_close_guard_release_scheduled = True
-            QTimer.singleShot(2500, self._disable_startup_close_guard)
+            self._startup_close_guard_timer.start(2500)
 
     def _set_sign_out_enabled(self, enabled: bool) -> None:
         state = bool(enabled)
@@ -518,7 +525,9 @@ class MainWindow(QMainWindow):
         return self.command_controller.show_operation_history()
 
     def refresh_operations_overview(self):
-        return self.command_controller.refresh_operations_overview()
+        result = self.command_controller.refresh_operations_overview()
+        self._operations_dirty = False
+        return result
 
     def open_selected_operation_backup(self):
         return self.command_controller.open_selected_operation_backup()

@@ -7,6 +7,7 @@ from typing import Callable, Mapping, Sequence
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.tcra_records_service import (
+    STATUS_EM_ACOMPANHAMENTO,
     normalize_event_type_label,
     remove_accents,
     normalize_orgao_label,
@@ -66,7 +67,7 @@ def capture_form_state_snapshot(
         "endereco": stringify(endereco),
         "bairro": stringify(bairro),
         "orgao": stringify(orgao),
-        "status": stringify(status),
+        "status": normalize_status_label(stringify(status)) or "Em acompanhamento",
         "data_assinatura": stringify(data_assinatura),
         "prazo_final": stringify(prazo_final),
         "periodicidade": stringify(periodicidade),
@@ -91,6 +92,58 @@ def capture_form_state_snapshot(
             for evento in eventos
         ),
     }
+
+
+def build_record_form_snapshot(record: Tcra) -> dict[str, object]:
+    return capture_form_state_snapshot(
+        uid=record.uid,
+        numero_processo=record.numero_processo,
+        numero_tcra=record.numero_tcra,
+        local=record.local,
+        endereco=record.endereco,
+        bairro=record.bairro,
+        orgao=normalize_orgao_label(record.orgao_acompanhamento),
+        status=normalize_status_label(record.status) or STATUS_EM_ACOMPANHAMENTO,
+        data_assinatura=format_date_text(record.data_assinatura),
+        prazo_final=format_date_text(record.prazo_final),
+        periodicidade="" if record.periodicidade_relatorio_meses is None else str(record.periodicidade_relatorio_meses),
+        data_ultimo_relatorio=format_date_text(record.data_ultimo_relatorio),
+        data_proximo_relatorio=format_date_text(record.data_proximo_relatorio),
+        area_m2="" if record.area_m2 is None else str(record.area_m2),
+        numero_mudas="" if record.numero_mudas_previsto is None else str(record.numero_mudas_previsto),
+        responsavel=record.responsavel_execucao,
+        mpsp=remove_accents(stringify(record.mpsp_relacionado)).lower() == "sim",
+        inquerito=record.inquerito_civil,
+        servicos=record.servicos_exigidos,
+        observacoes=record.observacoes,
+        eventos=record.eventos,
+    )
+
+
+def build_empty_form_snapshot(*, default_status: str = STATUS_EM_ACOMPANHAMENTO) -> dict[str, object]:
+    return capture_form_state_snapshot(
+        uid="",
+        numero_processo="",
+        numero_tcra="",
+        local="",
+        endereco="",
+        bairro="",
+        orgao="",
+        status=default_status,
+        data_assinatura="",
+        prazo_final="",
+        periodicidade="",
+        data_ultimo_relatorio="",
+        data_proximo_relatorio="",
+        area_m2="",
+        numero_mudas="",
+        responsavel="",
+        mpsp=False,
+        inquerito="",
+        servicos="",
+        observacoes="",
+        eventos=(),
+    )
 
 
 def restore_form_eventos_snapshot(

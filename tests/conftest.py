@@ -1,5 +1,9 @@
 import gc
+import logging
 import os
+import sys
+import ctypes
+import faulthandler
 from types import SimpleNamespace
 
 import pytest
@@ -133,13 +137,13 @@ def cleanup_qt_widgets():
     for widget in list(app.topLevelWidgets()):
         if hasattr(widget, "form_controller"):
             widget.form_controller.confirm_discard_changes = lambda *args, **kwargs: True
-        if hasattr(widget, "_disable_startup_close_guard"):
-            widget._disable_startup_close_guard()
+        if hasattr(widget, "_startup_close_guard_active"):
+            widget._startup_close_guard_active = False
         if hasattr(widget, "_startup_close_guard_armed"):
             widget._startup_close_guard_armed = False
         if hasattr(widget, "_skip_close_discard_confirmation"):
             widget._skip_close_discard_confirmation = True
-        widget.close()
+        widget.hide()
         widget.deleteLater()
 
     QCoreApplication.sendPostedEvents(None, 0)
@@ -147,3 +151,34 @@ def cleanup_qt_widgets():
     QCoreApplication.sendPostedEvents(None, 0)
     app.processEvents()
     gc.collect()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    app = QApplication.instance()
+    if app:
+        for widget in list(app.topLevelWidgets()):
+            try:
+                if hasattr(widget, "form_controller"):
+                    widget.form_controller.confirm_discard_changes = lambda *args, **kwargs: True
+                if hasattr(widget, "_startup_close_guard_active"):
+                    widget._startup_close_guard_active = False
+                if hasattr(widget, "_startup_close_guard_armed"):
+                    widget._startup_close_guard_armed = False
+                if hasattr(widget, "_skip_close_discard_confirmation"):
+                    widget._skip_close_discard_confirmation = True
+                widget.hide()
+                widget.deleteLater()
+            except RuntimeError:
+                continue
+        QCoreApplication.sendPostedEvents(None, 0)
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, 0)
+        app.processEvents()
+        app.quit()
+    logging.shutdown()
+    try:
+        faulthandler.disable()
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        ctypes.windll.kernel32.ExitProcess(int(exitstatus))

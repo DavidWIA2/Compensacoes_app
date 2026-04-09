@@ -3,7 +3,9 @@ from datetime import date, datetime
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.ui.tabs.tcra_tab_form_support import (
+    build_empty_form_snapshot,
     build_form_preview_data,
+    build_record_form_snapshot,
     capture_form_state_snapshot,
     issue_supports_safe_fix,
     resolve_issue_focus_field,
@@ -93,6 +95,28 @@ def test_form_support_captures_and_restores_event_rows():
     assert len(restored) == 1
     assert restored[0].tipo_evento == "Relatório"
     assert restored[0].prazo_resultante == date(2025, 8, 1)
+
+
+def test_form_support_builds_record_and_empty_snapshots():
+    record = make_tcra(
+        uid="tcra-9",
+        numero_tcra="TCRA-9",
+        orgao_acompanhamento="CETESB",
+        responsavel_execucao="Secretaria Municipal",
+        mpsp_relacionado="Sim",
+    )
+
+    record_snapshot = build_record_form_snapshot(record)
+    empty_snapshot = build_empty_form_snapshot()
+
+    assert record_snapshot["uid"] == "tcra-9"
+    assert record_snapshot["numero_tcra"] == "TCRA-9"
+    assert record_snapshot["orgao"] == "CETESB"
+    assert record_snapshot["responsavel"] == "Secretaria Municipal"
+    assert record_snapshot["mpsp"] is True
+    assert empty_snapshot["status"] == "Em acompanhamento"
+    assert empty_snapshot["numero_processo"] == ""
+    assert empty_snapshot["eventos"] == ()
 
 
 def test_form_support_builds_preview_and_safe_fix_metadata():

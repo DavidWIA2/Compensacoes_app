@@ -12,8 +12,8 @@ from app.utils.logger import LOG_DIR
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
-from PySide6.QtWidgets import QApplication, QMessageBox
-from PySide6.QtCore import Qt, QObject, Signal, QTimer, QRect
+from PySide6.QtWidgets import QApplication, QMessageBox, QBoxLayout
+from PySide6.QtCore import Qt, QObject, Signal, QThread, QTimer, QRect
 from PySide6.QtGui import QCloseEvent, QPalette, QStandardItemModel
 
 from app.application.use_cases.persistence_monitoring import (
@@ -45,6 +45,19 @@ class MockQWebEngineView(QtWidgets.QWidget):
     def page(self): return self._page
     def load(self, url): pass
     def setUrl(self, url): pass
+
+
+class NoopUpdaterWorker(QThread):
+    update_available = Signal(str, str)
+
+    def start(self, *args, **kwargs):
+        return None
+
+    def quit(self):
+        return None
+
+    def wait(self, *args, **kwargs):
+        return True
 
 def make_record(**overrides) -> Compensacao:
     base = {
@@ -122,6 +135,7 @@ def global_mocks(monkeypatch, tmp_path):
     # Mock heavy widgets
     monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
     monkeypatch.setattr("app.ui.main_window.DashboardTab", MockDashboardTab)
+    monkeypatch.setattr(main_window_module, "UpdaterWorker", NoopUpdaterWorker)
     
     # Mock UI blocking calls
     monkeypatch.setattr(MainWindow, "_apply_theme", lambda self: None)
@@ -170,6 +184,22 @@ def test_lazy_map_loading_delays_initialization(monkeypatch):
     window.data_tab.showEvent(None)
     assert window.data_tab._map_loaded is False # It remains False because global_mock ignores it, but it proves it didn't crash
     
+    window.close()
+
+
+def test_loading_microbacias_layer_does_not_force_embedded_map_startup(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+
+    calls = []
+    window.gis = SimpleNamespace(to_geojson_obj=lambda: {"type": "FeatureCollection", "features": []})
+    monkeypatch.setattr(window.data_tab, "load_map", lambda: calls.append("load_map"))
+    window.data_tab._map_loaded = False
+    window.data_tab.web = None
+
+    window.map_controller.load_microbacias_layer()
+
+    assert calls == []
     window.close()
 
 
@@ -252,6 +282,59 @@ def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch
     assert len(window.records) == 1
     assert window.shell_controller.current_session_path() == DEFAULT_SINGLETON_SESSION_PATH
     assert window.session_environment_label.text() == "Ambiente: Produção"
+    window.close()
+
+
+def test_main_window_shell_compacts_for_1440x900_like_layout():
+    window = MainWindow()
+    window.showNormal()
+    window.resize(1320, 860)
+    get_app().processEvents()
+
+    window.shell_controller.apply_responsive_layout()
+
+    assert window.search_helper_label.isVisible() is False
+    assert window.session_context_label.isVisible() is False
+    assert window.session_role_label.isVisible() is False
+    assert window.session_write_label.isVisible() is False
+    assert window.session_selection_label.isVisible() is False
+
+    window.close()
+
+
+def test_main_window_shell_stacks_toolbar_for_1440x900_like_layout():
+    window = MainWindow()
+    window.showNormal()
+    window.resize(1320, 860)
+    get_app().processEvents()
+
+    window.shell_controller.apply_responsive_layout()
+
+    assert window.shell_controller.toolbar_layout.direction() == QBoxLayout.Direction.TopToBottom
+    window.close()
+
+
+def test_navigation_controller_defers_operations_refresh_until_tab_is_opened(monkeypatch):
+    window = MainWindow()
+    get_app().processEvents()
+
+    calls = []
+    monkeypatch.setattr(
+        window.operations_controller,
+        "refresh_overview",
+        lambda *args, **kwargs: calls.append("refresh"),
+    )
+
+    assert window.navigation_controller.is_operations_tab_active() is False
+    assert window.navigation_controller.update_operations_overview() is False
+    assert calls == []
+    assert window._operations_dirty is True
+
+    window.tabs.setCurrentWidget(window.operations_tab)
+    get_app().processEvents()
+
+    assert calls == ["refresh"]
+    assert window._operations_dirty is False
     window.close()
 
 

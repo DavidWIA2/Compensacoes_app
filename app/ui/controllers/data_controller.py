@@ -290,7 +290,10 @@ class DataController:
     def _refresh_operational_surface(self) -> None:
         if hasattr(self.window, "_refresh_window_chrome"):
             self.window._refresh_window_chrome()
-        if hasattr(self.window, "refresh_operations_overview"):
+        navigation = getattr(self.window, "navigation_controller", None)
+        if navigation is not None and hasattr(navigation, "update_operations_overview"):
+            navigation.update_operations_overview()
+        elif hasattr(self.window, "refresh_operations_overview"):
             self.window.refresh_operations_overview()
 
     def update_ui_after_load(self):
@@ -315,7 +318,11 @@ class DataController:
         QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
         self.window.data_tab.table.clearSelection()
         self.window.clear_form(force=True)
-        self.window.refresh_operations_overview()
+        navigation = getattr(self.window, "navigation_controller", None)
+        if navigation is not None and hasattr(navigation, "update_operations_overview"):
+            navigation.update_operations_overview()
+        else:
+            self.window.refresh_operations_overview()
 
     def refresh_runtime_after_mutation(
         self,
@@ -533,7 +540,11 @@ class DataController:
                 label=label,
             )
             self.reload(confirm_discard=False)
-            self.window.refresh_operations_overview()
+            navigation = getattr(self.window, "navigation_controller", None)
+            if navigation is not None and hasattr(navigation, "update_operations_overview"):
+                navigation.update_operations_overview(force=True)
+            else:
+                self.window.refresh_operations_overview()
             QMessageBox.information(self.window, "Sucesso", "Backup restaurado com sucesso!")
             logger.info(f"Rollback executado usando arquivo {selected_file}")
             return True

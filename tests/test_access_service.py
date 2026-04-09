@@ -12,6 +12,7 @@ from app.services.access_service import (
     SupabaseAccessService,
     resolve_production_access_profile,
 )
+import app.services.supabase_client_loader as supabase_client_loader
 from app.services.demo_dataset_service import reset_demo_database
 from app.services.sqlite_mirror_service import DEFAULT_SINGLETON_SESSION_PATH, SqliteMirrorService
 from app.services.supabase_workspace_sync_service import SupabaseWorkspaceSyncResult
@@ -134,9 +135,9 @@ def test_import_supabase_create_client_ignores_local_repo_namespace(tmp_path, mo
     )
 
     monkeypatch.setattr(
-        sys,
-        "path",
-        [str(Path(__file__).resolve().parents[1]), str(fake_site_packages)] + sys.path,
+        supabase_client_loader,
+        "_candidate_site_paths",
+        lambda: [str(fake_site_packages)],
     )
     sys.modules.pop("supabase", None)
 

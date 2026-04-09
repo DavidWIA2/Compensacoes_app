@@ -108,7 +108,7 @@ def _build_agenda_summary(
 ) -> str:
     scope_label = AGENDA_SCOPE_LABELS.get(agenda_scope, "Trabalho")
     if not agenda_items:
-        return f"Janela {scope_label}: nenhuma pendencia no recorte atual."
+        return f"Janela {scope_label}: nenhuma pendência no recorte atual."
     highlights = ", ".join(f"{item.prioridade_label}: {item.termo_label}" for item in agenda_items[:2])
     return f"{scope_label}: {len(agenda_items)} item(ns) | mostrando {shown_count} | {highlights}"
 
@@ -119,13 +119,13 @@ def _build_quality_summary(
     shown_count: int,
 ) -> str:
     if not quality_items:
-        return "Nenhuma pendencia cadastral no recorte atual."
+        return "Nenhuma pendência cadastral no recorte atual."
     critical_count = sum(1 for item in quality_items if item.severity_rank == 0)
     cadastro_count = len(quality_items) - critical_count
     highlights = ", ".join(f"{item.severity_label}: {item.termo_label}" for item in quality_items[:2])
     return (
         f"Qualidade: {len(quality_items)} item(ns) | mostrando {shown_count} | "
-        f"{critical_count} criticos | {cadastro_count} cadastrais | {highlights}"
+        f"{critical_count} críticos | {cadastro_count} cadastrais | {highlights}"
     )
 
 
@@ -168,14 +168,8 @@ def build_workspace_snapshot(
     base_quality_items = tuple(build_quality_queue(base_filtered_records, today=today, limit=0))
     agenda_all_items = tuple(build_work_agenda(filtered_records, scope=agenda_scope, today=today, limit=0))
     quality_all_items = tuple(build_quality_queue(filtered_records, today=today, limit=0))
-    if agenda_expanded or len(agenda_all_items) <= preview_limit:
-        agenda_items = agenda_all_items
-    else:
-        agenda_items = agenda_all_items[:preview_limit]
-    if quality_expanded or len(quality_all_items) <= preview_limit:
-        quality_items = quality_all_items
-    else:
-        quality_items = quality_all_items[:preview_limit]
+    agenda_items = agenda_all_items if agenda_expanded or len(agenda_all_items) <= preview_limit else agenda_all_items[:preview_limit]
+    quality_items = quality_all_items if quality_expanded or len(quality_all_items) <= preview_limit else quality_all_items[:preview_limit]
 
     upcoming_records = tuple(record for record in base_filtered_records if tcra_has_report_due_soon(record, today=today))
     upcoming_count = len(upcoming_records)
@@ -200,21 +194,17 @@ def build_workspace_snapshot(
             f"{base_metrics['count_alertas']} alertas | {overview.mpsp_relacionados_count} MPSP"
         )
         radar_summary_text = (
-            f"Alertas {base_metrics['count_alertas']} | Revisoes {len(base_quality_items)} | "
+            f"Alertas {base_metrics['count_alertas']} | Revisões {len(base_quality_items)} | "
             f"Relatórios pendentes {base_metrics['count_relatorio_pendente']} | "
             f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d {upcoming_count}"
         )
         data_quality_text = (
-            f"Qualidade: {base_metrics['count_sem_numero_tcra']} sem numero | "
-            f"{base_metrics['count_sem_responsavel']} sem responsavel | "
-            f"{base_metrics['count_sem_orgao']} sem orgao"
+            f"Qualidade: {base_metrics['count_sem_numero_tcra']} sem número | "
+            f"{base_metrics['count_sem_responsavel']} sem responsável | "
+            f"{base_metrics['count_sem_orgao']} sem órgão"
         )
 
-    upcoming_button_text = (
-        f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d ({upcoming_count})"
-        if upcoming_count
-        else f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d"
-    )
+    upcoming_button_text = f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d ({upcoming_count})" if upcoming_count else f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d"
 
     return TcraWorkspaceSnapshot(
         base_filtered_records=base_filtered_records,

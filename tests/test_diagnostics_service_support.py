@@ -38,6 +38,7 @@ def test_build_window_session_snapshot_handles_probe_failures():
     assert snapshot["workbook_runtime_loaded"] is False
     assert snapshot["selected_uid"] == "uid-1"
     assert snapshot["local_record_read"]["strategy"] == "sqlite_query"
+    assert snapshot["record_integrity"].issue_count == 0
     assert len(warnings) == 2
 
 

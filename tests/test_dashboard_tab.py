@@ -65,6 +65,17 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
         session_records=12,
         filtered_records=6,
     )
+    integrity_report = type(
+        "IntegrityReport",
+        (),
+        {
+            "issue_count": 1,
+            "error_count": 0,
+            "warning_count": 1,
+            "affected_records_count": 1,
+            "issues": (type("Issue", (), {"message": "Coordenadas ausentes"})(),),
+        },
+    )()
 
     tab.update_dashboard(
         {
@@ -76,6 +87,7 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
         False,
         ["Gregorio", "Medeiros"],
         report,
+        integrity_report,
         read_status,
     )
 
@@ -83,10 +95,14 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     assert "Cache local sincronizado: 12 registro(s)" in text
     assert "Qualidade dos dados: 2 sem microbacia | 5 sem coordenadas" in text
     assert "Top microbacias: Gregorio: 7 | Medeiros: 5" in text
+    assert "Integridade cadastral" in tab.lbl_record_integrity.text()
+    assert "Coordenadas ausentes" in tab.lbl_record_integrity.text()
     assert "cache local sincronizado" in tab.lbl_read_source.text()
     assert "6 registro(s) no recorte" in tab.lbl_read_source.text()
     assert tab.card_total.maximumHeight() > 0
     assert "12 processo(s)" in tab.lbl_comp_summary.text()
+    assert "integridade com 1 alerta(s)" in tab.lbl_panel_context.text()
+    assert tab.btn_export_diagnostics.text() == "Exportar diagnóstico"
 
     tab.btn_toggle_comp_details.click()
     assert tab.compensation_details_panel.isHidden() is False

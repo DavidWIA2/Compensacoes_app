@@ -36,7 +36,7 @@ from app.services.sqlite_mirror_service_support import (
 
 logger = get_logger("Persistence.SQLite")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DB_NAME = "compensacoes.db"
 SESSION_SCHEME = "session://"
 DEFAULT_SINGLETON_SESSION_PATH = f"{SESSION_SCHEME}banco-local"
@@ -389,6 +389,9 @@ class SqliteMirrorService:
                 current_version = 3
             if current_version == 3:
                 self._migrate_v3_to_v4(conn)
+                current_version = 4
+            if current_version == 4:
+                self._migrate_v4_to_v5(conn)
             conn.execute(
                 """
                 INSERT INTO meta (key, value)
@@ -1586,7 +1589,8 @@ class SqliteMirrorService:
                     latitude_plantio,
                     longitude_plantio,
                     latitude,
-                    longitude
+                    longitude,
+                    updated_at
                 FROM records
                 WHERE {where_clause}
                 ORDER BY excel_row ASC
@@ -1651,6 +1655,7 @@ class SqliteMirrorService:
                 longitude_plantio=_stringify(row["longitude_plantio"]),
                 latitude=_stringify(row["latitude"]),
                 longitude=_stringify(row["longitude"]),
+                updated_at=_stringify(row["updated_at"]) if "updated_at" in row.keys() else "",
                 plantios=plantios_by_record.get(int(row["id"] or 0), []),
             )
             for row in record_rows
@@ -1679,9 +1684,10 @@ class SqliteMirrorService:
                 longitude_plantio,
                 latitude,
                 longitude,
+                updated_at,
                 search_blob_norm,
                 synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
     def _record_insert_params(
@@ -1711,6 +1717,7 @@ class SqliteMirrorService:
             _stringify(record.longitude_plantio),
             _stringify(record.latitude),
             _stringify(record.longitude),
+            _stringify(record.updated_at),
             build_search_blob(record),
             synced_at,
         )
@@ -1800,6 +1807,7 @@ class SqliteMirrorService:
                 longitude_plantio = ?,
                 latitude = ?,
                 longitude = ?,
+                updated_at = ?,
                 search_blob_norm = ?,
                 synced_at = ?
             WHERE id = ?
@@ -1823,6 +1831,7 @@ class SqliteMirrorService:
                 _stringify(record.longitude_plantio),
                 _stringify(record.latitude),
                 _stringify(record.longitude),
+                _stringify(record.updated_at),
                 build_search_blob(record),
                 synced_at,
                 record_id,
@@ -2002,6 +2011,7 @@ class SqliteMirrorService:
                 longitude_plantio TEXT NOT NULL DEFAULT '',
                 latitude TEXT NOT NULL DEFAULT '',
                 longitude TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT '',
                 search_blob_norm TEXT NOT NULL DEFAULT '',
                 synced_at TEXT NOT NULL,
                 FOREIGN KEY (workbook_id) REFERENCES workbooks(id) ON DELETE CASCADE,
@@ -2162,6 +2172,10 @@ class SqliteMirrorService:
                 (source_mtime_ns, source_size, workbook_id),
             )
 
+    def _migrate_v4_to_v5(self, conn: sqlite3.Connection) -> None:
+        logger.info("[SQLITE] Migrando espelho local do schema v4 para v5.")
+        conn.execute("ALTER TABLE records ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''")
+
     @staticmethod
     def _display_name_for_path(workbook_path: str) -> str:
         return _display_name_for_path_helper(workbook_path, session_scheme=SESSION_SCHEME)
@@ -2192,7 +2206,15 @@ class SqliteMirrorService:
             workbook_id = int(workbook_row["id"] or 0)
             if workbook_id <= 0:
                 continue
-            record_rows = self._fetch_record_rows(conn, workbook_id=workbook_id)
+            record_rows = conn.execute(
+                """
+                SELECT *
+                FROM records
+                WHERE workbook_id = ?
+                ORDER BY excel_row ASC
+                """,
+                (workbook_id,),
+            ).fetchall()
             for row in record_rows:
                 record = self._materialize_records(conn, [row])[0]
                 conn.execute(

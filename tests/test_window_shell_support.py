@@ -65,6 +65,15 @@ def test_window_shell_support_builds_professional_window_chrome_snapshot():
             expected_records=4,
             expected_audit_events=0,
         ),
+        record_integrity_report=type(
+            "IntegrityReport",
+            (),
+            {
+                "issue_count": 2,
+                "error_count": 1,
+                "warning_count": 1,
+            },
+        )(),
         total_records=4,
         filtered_records=2,
         search_text="Gregorio",
@@ -78,7 +87,7 @@ def test_window_shell_support_builds_professional_window_chrome_snapshot():
     assert snapshot.sync_label == "Sincronia: Supabase ok"
     assert "Base oficial" in snapshot.sync_tooltip
     assert snapshot.records_label == "Registros: 2 de 4"
-    assert snapshot.records_tooltip == "Busca atual: Gregorio"
+    assert snapshot.records_tooltip == "Busca atual: Gregorio\nIntegridade: 1 erro(s) e 1 alerta(s)."
     assert snapshot.write_label == "Escrita: SQLite -> espelho"
     assert "Última mutação: import" in snapshot.write_tooltip
     assert "Identidade final reconciliada após gravação." in snapshot.write_tooltip
@@ -133,6 +142,7 @@ def test_window_shell_support_distinguishes_remote_authoritative_writes():
     assert "Supabase como autoridade da produção" in snapshot.write_tooltip
     assert snapshot.sync_label == "Sincronia: offline"
     assert "cache local" in snapshot.sync_tooltip.lower()
+    assert snapshot.records_tooltip == "Resumo do recorte atualmente visivel na tela."
 
 
 def test_window_shell_support_builds_user_identity_text_and_tooltip():

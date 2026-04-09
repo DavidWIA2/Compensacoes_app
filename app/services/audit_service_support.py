@@ -74,6 +74,7 @@ def serialize_record(record: Compensacao) -> dict[str, Any]:
         "longitude_plantio": record.longitude_plantio,
         "latitude": record.latitude,
         "longitude": record.longitude,
+        "updated_at": record.updated_at,
         "plantios": [serialize_plantio(item) for item in record.plantios],
     }
 

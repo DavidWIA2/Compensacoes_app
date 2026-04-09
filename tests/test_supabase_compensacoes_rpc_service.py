@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from app.models.compensacao import Compensacao
 from app.models.plantio_item import PlantioItem
 from app.services.supabase_compensacoes_rpc_service import (
+    SupabaseCompensacoesConflictError,
     SupabaseCompensacoesRpcError,
     SupabaseCompensacoesRpcService,
 )
@@ -43,6 +44,7 @@ def _make_record() -> Compensacao:
         latitude="-22.00",
         longitude="-47.89",
         uid="uid-123",
+        updated_at="2026-04-09T12:00:00+00:00",
         plantios=[
             PlantioItem(
                 sequence=1,
@@ -64,6 +66,7 @@ def test_save_record_calls_rpc_with_serialized_payload():
                 "uid": "uid-123",
                 "record_id": 10,
                 "excel_row": 12,
+                "updated_at": "2026-04-09T12:05:00+00:00",
                 "record_count": 329,
                 "plantio_count": 1,
                 "audit_event_id": "evt-1",
@@ -77,6 +80,7 @@ def test_save_record_calls_rpc_with_serialized_payload():
         record=_make_record(),
         action="SAVE",
         summary="Atualizacao remota",
+        expected_updated_at="2026-04-09T12:00:00+00:00",
         metadata={"origin": "pytest"},
     )
 
@@ -84,9 +88,12 @@ def test_save_record_calls_rpc_with_serialized_payload():
     assert function_name == service.SAVE_FUNCTION
     assert params["p_workbook_path"] == "session://banco-local"
     assert params["p_record"]["uid"] == "uid-123"
+    assert params["p_record"]["updated_at"] == "2026-04-09T12:00:00+00:00"
     assert params["p_record"]["plantios"][0]["endereco"] == "Praca A"
+    assert params["p_expected_updated_at"] == "2026-04-09T12:00:00+00:00"
     assert params["p_after"]["uid"] == "uid-123"
     assert result.uid == "uid-123"
+    assert result.updated_at == "2026-04-09T12:05:00+00:00"
     assert result.record_count == 329
     assert result.plantio_count == 1
 
@@ -98,6 +105,7 @@ def test_delete_record_calls_rpc_with_uid_and_audit_payload():
             service.DELETE_FUNCTION: {
                 "workbook_path": "session://banco-local",
                 "uid": "uid-123",
+                "updated_at": "2026-04-09T12:05:00+00:00",
                 "record_count": 328,
                 "plantio_count": 0,
                 "audit_event_id": "evt-2",
@@ -111,15 +119,18 @@ def test_delete_record_calls_rpc_with_uid_and_audit_payload():
         uid="uid-123",
         action="DELETE",
         summary="Exclusao remota",
+        expected_updated_at="2026-04-09T12:00:00+00:00",
         before={"uid": "uid-123"},
     )
 
     function_name, params = client.calls[0]
     assert function_name == service.DELETE_FUNCTION
     assert params["p_uid"] == "uid-123"
+    assert params["p_expected_updated_at"] == "2026-04-09T12:00:00+00:00"
     assert params["p_before"] == {"uid": "uid-123"}
     assert result.operation == "delete"
     assert result.audit_event_id == "evt-2"
+    assert result.updated_at == "2026-04-09T12:05:00+00:00"
 
 
 def test_replace_records_calls_rpc_with_batch_payload_and_summary_sample():
@@ -174,3 +185,31 @@ def test_rpc_service_rejects_invalid_payload():
         assert "payload invalido" in str(exc)
     else:
         raise AssertionError("Era esperado erro para payload RPC invalido.")
+
+
+def test_rpc_service_maps_conflict_errors_to_specific_exception():
+    service = SupabaseCompensacoesRpcService()
+
+    class _ConflictClient:
+        def rpc(self, _function_name, params=None):
+            class _BrokenQuery:
+                def execute(self_inner):
+                    raise RuntimeError(
+                        "compensacao_record_conflict: o registro remoto foi alterado por outra sessao."
+                    )
+
+            return _BrokenQuery()
+
+    try:
+        service.save_record(
+            _ConflictClient(),
+            workbook_path="session://banco-local",
+            record=_make_record(),
+            action="SAVE",
+            summary="Atualizacao remota",
+            expected_updated_at="2026-04-09T12:00:00+00:00",
+        )
+    except SupabaseCompensacoesConflictError as exc:
+        assert "outra sessao" in str(exc).lower()
+    else:
+        raise AssertionError("Era esperado conflito especifico para versao remota divergente.")

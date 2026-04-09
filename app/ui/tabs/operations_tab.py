@@ -39,6 +39,7 @@ from app.ui.tabs.operations_tab_support import (
     build_mutation_sync_text,
     build_persistence_status_text,
     build_read_source_text,
+    build_record_integrity_text,
     build_record_overview_text,
     build_remote_sync_text,
     build_runtime_overview_texts,
@@ -161,6 +162,11 @@ class OperationsTab(QWidget):
         self.lbl_records_overview.setObjectName("FormStateLabel")
         technical_layout.addWidget(self.lbl_records_overview)
 
+        self.lbl_record_integrity = QLabel("Integridade da base: aguardando validacao estrutural dos registros.")
+        self.lbl_record_integrity.setWordWrap(True)
+        self.lbl_record_integrity.setObjectName("FormStateLabel")
+        technical_layout.addWidget(self.lbl_record_integrity)
+
         self.lbl_session_source = QLabel("Sessão carregada: aguardando leitura inicial da sessão.")
         self.lbl_session_source.setWordWrap(True)
         self.lbl_session_source.setObjectName("FormStateLabel")
@@ -238,6 +244,12 @@ class OperationsTab(QWidget):
         actions_layout.setSpacing(int(6 * self.sf))
         self.btn_refresh = QPushButton("Atualizar")
         self.btn_refresh.setProperty("kind", "ghost")
+        self.btn_export_diagnostics = QPushButton("Exportar diagnóstico")
+        self.btn_export_diagnostics.setProperty("kind", "chip-quiet")
+        self.btn_export_diagnostics.setMinimumHeight(int(28 * self.sf))
+        self.btn_export_diagnostics.setToolTip(
+            "Exporta um diagnóstico técnico da sessão, da sincronia e da integridade da base."
+        )
         self.btn_sync_production = QPushButton("Sincronizar produção")
         self.btn_sync_production.setProperty("kind", "primary")
         self.btn_history = QPushButton("Histórico completo")
@@ -255,6 +267,7 @@ class OperationsTab(QWidget):
         self.btn_refresh.setMinimumHeight(int(28 * self.sf))
         self.btn_sync_production.setMinimumHeight(int(28 * self.sf))
         actions_layout.addWidget(self.btn_refresh)
+        actions_layout.addWidget(self.btn_export_diagnostics)
         actions_layout.addWidget(self.btn_sync_production)
         actions_layout.addStretch(1)
         for button in [
@@ -383,6 +396,7 @@ class OperationsTab(QWidget):
         self.lbl_remote_sync.setText("Sincronia remota: nenhuma sessão ativa.")
         self.lbl_persistence.setText("Espelho local (SQLite): nenhuma sessão ativa.")
         self.lbl_records_overview.setText("Resumo local (SQLite): nenhuma sessão ativa.")
+        self.lbl_record_integrity.setText("Integridade da base: nenhuma sessão ativa.")
         self.lbl_session_source.setText("Sessão carregada: nenhuma sessão ativa.")
         self.lbl_authoritative_write.setText("Escrita autoritativa: nenhuma sessão ativa.")
         self.lbl_mutation_sync.setText("Escrita local (SQLite): nenhuma sessão ativa.")
@@ -408,6 +422,7 @@ class OperationsTab(QWidget):
         access_session: object | None = None,
         persistence_report: Optional[PersistenceStatusReport] = None,
         record_overview_report: Optional[PersistenceRecordOverviewReport] = None,
+        record_integrity_report: object | None = None,
         remote_sync_status: object | None = None,
         session_source_status: object | None = None,
         authoritative_write_status: object | None = None,
@@ -427,6 +442,7 @@ class OperationsTab(QWidget):
                 persistence_report=persistence_report,
                 session_source_status=session_source_status,
                 authoritative_write_status=authoritative_write_status,
+                record_integrity_report=record_integrity_report,
                 record_read_status=record_read_status,
             )
         )
@@ -439,6 +455,7 @@ class OperationsTab(QWidget):
         )
         self.lbl_persistence.setText(build_persistence_status_text(persistence_report))
         self.lbl_records_overview.setText(build_record_overview_text(record_overview_report))
+        self.lbl_record_integrity.setText(build_record_integrity_text(record_integrity_report))
         self.lbl_session_source.setText(build_session_source_text(session_source_status))
         self.lbl_authoritative_write.setText(build_authoritative_write_text(authoritative_write_status))
         self.lbl_mutation_sync.setText(build_mutation_sync_text(mutation_sync_status))

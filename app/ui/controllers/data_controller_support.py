@@ -135,6 +135,7 @@ def reset_authoritative_runtime_state(window) -> None:
     window._remote_snapshot_refresh_status = None
     window._filtered_metrics = None
     window._persistence_status_report = None
+    window._record_integrity_report = None
 
 
 def clear_loaded_data_view(window, empty_metrics: Dict[str, object]) -> None:
@@ -149,6 +150,7 @@ def clear_loaded_data_view(window, empty_metrics: Dict[str, object]) -> None:
     window._remote_snapshot_refresh_status = None
     window._filtered_metrics = None
     window._persistence_status_report = None
+    window._record_integrity_report = None
 
     window.data_tab.table.clearSelection()
     window.data_tab.table_model.update_data([])
@@ -158,6 +160,7 @@ def clear_loaded_data_view(window, empty_metrics: Dict[str, object]) -> None:
         window.is_dark_mode,
         [],
         window._dashboard_record_overview,
+        window._record_integrity_report,
         window._local_record_read_status,
     )
     window.data_tab.lbl_results.setText("0 registros")

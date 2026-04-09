@@ -1122,10 +1122,13 @@ class AuthoritativePersistenceUseCases:
         finalized_record = deepcopy(record)
         remote_uid = str(getattr(remote_result, "uid", "") or "").strip()
         remote_excel_row = int(getattr(remote_result, "excel_row", 0) or 0)
+        remote_updated_at = str(getattr(remote_result, "updated_at", "") or "").strip()
         if remote_uid:
             finalized_record.uid = remote_uid
         if remote_excel_row > 0:
             finalized_record.excel_row = remote_excel_row
+        if remote_updated_at:
+            finalized_record.updated_at = remote_updated_at
         return finalized_record
 
     def _execute_coordinated_import(
@@ -1231,6 +1234,7 @@ class AuthoritativePersistenceUseCases:
                     action="edit",
                     summary=f"Registro alterado: {record.av_tec or record.oficio_processo}",
                     backup_path=backup_path,
+                    expected_updated_at=str(getattr(before_record, "updated_at", "") or "").strip(),
                     metadata={"authority": "supabase_remote", "environment": "production"},
                     before=serialize_record(before_record) if before_record is not None else None,
                     after=serialize_record(record),
@@ -1278,6 +1282,7 @@ class AuthoritativePersistenceUseCases:
                     action="delete",
                     summary=f"Registro excluido: {deleted_record.av_tec or deleted_record.oficio_processo}",
                     backup_path=backup_path,
+                    expected_updated_at=str(getattr(deleted_record, "updated_at", "") or "").strip(),
                     metadata={"authority": "supabase_remote", "environment": "production"},
                     before=serialize_record(deleted_record),
                 ),

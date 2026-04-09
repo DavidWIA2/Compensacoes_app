@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QToolButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
     QMenu,
@@ -63,16 +64,15 @@ from app.services.tcra_records_service import (
     build_filter_facets,
     normalize_orgao_label,
     normalize_status_label,
-    resolve_operational_status,
     tcra_has_prazo_vencido,
     tcra_has_relatorio_pendente,
-    tcra_is_mpsp_related,
 )
 from app.services.tcra_sqlite_service import TcraSqliteService
 from app.ui.components.date_input import DatePickerLineEdit
 from app.ui.components.dialogs import TCRA_EVENT_PRESETS, TcraBulkActionDialog, TcraEventoEditorDialog, TcraImportPreviewDialog
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
+from app.ui.controllers.window_layout_support import schedule_window_fit
 from app.ui.tabs.tcra_tab_form_support import (
     TcraFormPreviewData,
     build_empty_form_snapshot,
@@ -235,6 +235,8 @@ class TcraTab(QWidget):
 
         self.workspace_tabs = QTabWidget(self)
         self.workspace_tabs.setDocumentMode(True)
+        self.workspace_tabs.setMinimumHeight(0)
+        self.workspace_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.list_page = QWidget(self)
         self.list_page_layout = QVBoxLayout(self.list_page)
         self.list_page_layout.setContentsMargins(0, 0, 0, 0)
@@ -686,10 +688,18 @@ class TcraTab(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        self.table.setMinimumHeight(0)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.list_content_layout.addWidget(self.table, 1)
 
         self.list_splitter = QSplitter(Qt.Horizontal, self)
         self.list_splitter.setChildrenCollapsible(False)
+        self.list_splitter.setMinimumHeight(0)
+        self.list_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.list_content.setMinimumHeight(0)
+        self.list_content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.overview_panel.setMinimumHeight(0)
+        self.overview_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         self.list_splitter.addWidget(self.list_content)
         self.list_splitter.addWidget(self.overview_panel)
         self.list_splitter.setStretchFactor(0, 7)
@@ -987,6 +997,8 @@ class TcraTab(QWidget):
         self.form_scroll = QScrollArea(self)
         self.form_scroll.setWidgetResizable(True)
         self.form_scroll.setFrameShape(QFrame.NoFrame)
+        self.form_scroll.setMinimumHeight(0)
+        self.form_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.form_scroll.setWidget(self.form_group)
         form_page_layout.addWidget(self.form_scroll)
 
@@ -1089,6 +1101,10 @@ class TcraTab(QWidget):
 
         self.editor_splitter = QSplitter(Qt.Vertical, self)
         self.editor_splitter.setChildrenCollapsible(False)
+        self.editor_splitter.setMinimumHeight(0)
+        self.editor_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.editor_tabs.setMinimumHeight(0)
+        self.editor_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.editor_splitter.addWidget(self.form_scroll)
         self.editor_tabs.addTab(preview_page, "Síntese")
         self.editor_tabs.addTab(events_page, "Eventos")
@@ -1575,15 +1591,24 @@ class TcraTab(QWidget):
             "event_change_type": _stringify(self._pending_event_audit.get("event_type")),
         }
 
-    def handle_tab_activated(self):
+    def handle_tab_activated(self, *, schedule_fit: bool = True):
         if self.has_pending_form_changes():
             self._refresh_form_state()
+            if schedule_fit:
+                self._schedule_window_fit()
             return
         self._initial_prefetch_pending = False
         if not self._records_loaded:
             self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid)
+            if schedule_fit:
+                self._schedule_window_fit()
             return
         self.refresh_data(preferred_uid=self.current_form_uid or self.selected_uid)
+        if schedule_fit:
+            self._schedule_window_fit()
+
+    def _schedule_window_fit(self) -> None:
+        schedule_window_fit(self.main_window)
 
     def _set_quick_filter_mode(self, mode: str):
         normalized_mode = mode if mode in self.quick_filter_buttons else QUICK_FILTER_ALL

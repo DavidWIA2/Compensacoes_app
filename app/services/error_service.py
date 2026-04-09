@@ -4,7 +4,10 @@ import requests
 
 from app.services.access_service import AccessAuthError
 from app.services.excel_service import WorkbookModifiedExternallyError
-from app.services.supabase_compensacoes_rpc_service import SupabaseCompensacoesRpcError
+from app.services.supabase_compensacoes_rpc_service import (
+    SupabaseCompensacoesConflictError,
+    SupabaseCompensacoesRpcError,
+)
 
 
 def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[str, str]:
@@ -28,8 +31,14 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
 
     if isinstance(exc, AccessAuthError):
         return (
-            "Sessão de Produção",
-            "Não foi possível concluir a operação porque a sessão autenticada do Supabase não está válida. Entre novamente em Produção e tente de novo.",
+            "Sessao de Producao",
+            "Nao foi possivel concluir a operacao porque a sessao autenticada do Supabase nao esta valida. Entre novamente em Producao e tente de novo.",
+        )
+
+    if isinstance(exc, SupabaseCompensacoesConflictError):
+        return (
+            "Conflito de Edicao",
+            "Este registro foi alterado na base oficial por outra sessao. Recarregue a base sincronizada e tente novamente.",
         )
 
     if isinstance(exc, SupabaseCompensacoesRpcError):
@@ -41,7 +50,7 @@ def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[s
     if isinstance(exc, requests.exceptions.Timeout):
         return (
             "Tempo Esgotado",
-            f"Não foi possível {action} porque a operação demorou demais. Tente novamente.",
+            f"Nao foi possivel {action} porque a operacao demorou demais. Tente novamente.",
         )
 
     if isinstance(exc, requests.exceptions.ConnectionError):

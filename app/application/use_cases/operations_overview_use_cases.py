@@ -18,6 +18,7 @@ class OperationsOverviewSnapshot:
     overview: AuditOverview
     persistence_report: PersistenceStatusReport | None
     record_overview_report: PersistenceRecordOverviewReport | None
+    record_integrity_report: object | None = None
     access_session: object | None = None
     remote_sync_status: object | None = None
     session_source_status: object | None = None
@@ -110,6 +111,7 @@ class OperationsOverviewUseCases:
         session_source_status: object | None = None,
         authoritative_write_status: object | None = None,
         mutation_sync_status: object | None = None,
+        record_integrity_report: object | None = None,
         record_read_status: LocalRecordReadStatus | None = None,
         limit: int = 100,
     ) -> OperationsOverviewSnapshot | None:
@@ -137,6 +139,7 @@ class OperationsOverviewUseCases:
             overview=overview,
             persistence_report=persistence_report,
             record_overview_report=record_overview_report,
+            record_integrity_report=record_integrity_report,
             access_session=access_session,
             remote_sync_status=remote_sync_status,
             session_source_status=session_source_status,

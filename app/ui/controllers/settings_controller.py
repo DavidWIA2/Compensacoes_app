@@ -7,11 +7,11 @@ from app.ui.controllers.settings_support import (
     build_loaded_window_settings_state,
     coerce_recent_files,
     collapse_recent_files_for_single_database_mode,
-    ensure_window_fits_available_geometry,
     is_named_session_path,
     normalize_session_path,
     resolve_preferred_directory,
 )
+from app.ui.controllers.window_layout_support import fit_window_to_available_geometry
 
 
 class SettingsController:
@@ -135,7 +135,11 @@ class SettingsController:
         if not self.window._startup_geometry_restored:
             state |= Qt.WindowMaximized
         self.window.setWindowState(state)
-        ensure_window_fits_available_geometry(self.window)
+        fit_window_to_available_geometry(
+            self.window,
+            include_active_tab=False,
+            finalize_active_tab=False,
+        )
         self.window._startup_layout_pending = True
         QTimer.singleShot(0, self.window._finalize_startup_layout)
         QTimer.singleShot(150, self.window._finalize_startup_layout)

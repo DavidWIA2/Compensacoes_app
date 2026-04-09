@@ -28,6 +28,7 @@ def make_record(**overrides) -> Compensacao:
         "latitude": "",
         "longitude": "",
         "uid": "test-uid-123",
+        "updated_at": "",
     }
     base.update(overrides)
     return Compensacao(**base)
@@ -210,8 +211,17 @@ class FakeMonitoringPersistence:
 
 class FakeRemoteCompensacoesRpcService:
     def __init__(self, *, save_result=None, delete_result=None, replace_result=None):
-        self.save_result = save_result or SimpleNamespace(uid="remote-uid", excel_row=9, record_count=2)
-        self.delete_result = delete_result or SimpleNamespace(uid="remote-uid", record_count=0)
+        self.save_result = save_result or SimpleNamespace(
+            uid="remote-uid",
+            excel_row=9,
+            updated_at="2026-04-09T12:05:00+00:00",
+            record_count=2,
+        )
+        self.delete_result = delete_result or SimpleNamespace(
+            uid="remote-uid",
+            updated_at="2026-04-09T12:05:00+00:00",
+            record_count=0,
+        )
         self.replace_result = replace_result or SimpleNamespace(record_count=0, imported_count=0)
         self.save_calls = []
         self.delete_calls = []
@@ -596,13 +606,28 @@ def test_execute_edit_falls_back_to_local_cache_sync_when_remote_refresh_fails()
     workbook = FakeWorkbook()
     workbook.path = "session://banco-local"
     audit = FakeAuditTrail()
-    existing = make_record(uid="base-uid", excel_row=8, av_tec="AT-BASE")
-    updated = make_record(uid="base-uid", excel_row=8, av_tec="AT-EDIT")
+    existing = make_record(
+        uid="base-uid",
+        excel_row=8,
+        av_tec="AT-BASE",
+        updated_at="2026-04-09T12:00:00+00:00",
+    )
+    updated = make_record(
+        uid="base-uid",
+        excel_row=8,
+        av_tec="AT-EDIT",
+        updated_at="2026-04-09T12:00:00+00:00",
+    )
     persistence = FakeSnapshotPersistence(snapshot_records=[existing], synced_at="2026-03-31T12:00:00+00:00")
     remote_sync = FakeRemoteSyncService(persistence, synced_records=[updated], fail=True)
     access_service = FakeAccessService(sync_service=remote_sync)
     remote_rpc = FakeRemoteCompensacoesRpcService(
-        save_result=SimpleNamespace(uid="base-uid", excel_row=8, record_count=1)
+        save_result=SimpleNamespace(
+            uid="base-uid",
+            excel_row=8,
+            updated_at="2026-04-09T12:05:00+00:00",
+            record_count=1,
+        )
     )
     service = AuthoritativePersistenceUseCases(
         workbook,
@@ -621,10 +646,12 @@ def test_execute_edit_falls_back_to_local_cache_sync_when_remote_refresh_fails()
     )
 
     assert len(remote_rpc.save_calls) == 1
+    assert remote_rpc.save_calls[0]["expected_updated_at"] == "2026-04-09T12:00:00+00:00"
     assert result.write_status.status == "remote_authoritative"
     assert result.status.strategy == "snapshot_rebuild"
     assert "cache local" in " | ".join(result.write_status.issues).lower()
     assert persistence.snapshot_records[0].av_tec == "AT-EDIT"
+    assert persistence.snapshot_records[0].updated_at == "2026-04-09T12:05:00+00:00"
 
 
 def test_execute_delete_keeps_local_authority_outside_production():
@@ -650,3 +677,44 @@ def test_execute_delete_keeps_local_authority_outside_production():
 
     assert result.write_status.status == "sqlite_authoritative"
     assert remote_rpc.delete_calls == []
+
+
+def test_execute_delete_passes_expected_updated_at_in_production():
+    workbook = FakeWorkbook()
+    workbook.path = "session://banco-local"
+    audit = FakeAuditTrail()
+    existing = make_record(
+        uid="base-uid",
+        excel_row=8,
+        av_tec="AT-BASE",
+        updated_at="2026-04-09T12:00:00+00:00",
+    )
+    persistence = FakeSnapshotPersistence(snapshot_records=[], synced_at="2026-03-31T12:00:00+00:00")
+    remote_sync = FakeRemoteSyncService(persistence, synced_records=[])
+    access_service = FakeAccessService(sync_service=remote_sync)
+    remote_rpc = FakeRemoteCompensacoesRpcService(
+        delete_result=SimpleNamespace(
+            uid="base-uid",
+            updated_at="2026-04-09T12:00:00+00:00",
+            record_count=0,
+        )
+    )
+    service = AuthoritativePersistenceUseCases(
+        workbook,
+        audit,
+        persistence,
+        loader_factory=lambda: workbook,
+        access_service=access_service,
+        remote_compensacoes_service=remote_rpc,
+    )
+    service.access_session = make_production_session()
+
+    result = service.execute_delete(
+        existing,
+        authoritative_records=[existing],
+    )
+
+    assert len(remote_rpc.delete_calls) == 1
+    assert remote_rpc.delete_calls[0]["expected_updated_at"] == "2026-04-09T12:00:00+00:00"
+    assert result.write_status.status == "remote_authoritative"
+    assert result.status.strategy == "remote_snapshot_refresh"

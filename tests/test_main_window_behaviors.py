@@ -119,6 +119,7 @@ class MockDashboardTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.btn_export_pdf = QtWidgets.QPushButton("Export PDF")
+        self.btn_export_diagnostics = QtWidgets.QPushButton("Export Diagnostics")
     def update_dashboard(self, *args, **kwargs): pass
     def apply_theme(self, theme): pass
     def export_images(self): return "pie.png", "bar.png"
@@ -478,7 +479,11 @@ def test_main_window_tcra_tab_disables_global_search_and_refreshes_on_activation
     get_app().processEvents()
     calls = []
 
-    monkeypatch.setattr(window.tcra_tab, "handle_tab_activated", lambda: calls.append("refresh"))
+    monkeypatch.setattr(
+        window.tcra_tab,
+        "handle_tab_activated",
+        lambda *args, **kwargs: calls.append(("refresh", kwargs)),
+    )
 
     assert window.search.isEnabled() is True
     assert "ofício" in window.search.placeholderText().lower()
@@ -486,7 +491,7 @@ def test_main_window_tcra_tab_disables_global_search_and_refreshes_on_activation
     window.tabs.setCurrentWidget(window.tcra_tab)
     get_app().processEvents()
 
-    assert calls == ["refresh"]
+    assert calls == [("refresh", {"schedule_fit": False})]
     assert window.search.isEnabled() is True
     assert "buscar tcra" in window.search.placeholderText().lower()
     assert window.tcra_tab.search_input.isHidden() is True
@@ -497,6 +502,48 @@ def test_main_window_tcra_tab_disables_global_search_and_refreshes_on_activation
     assert window.search.isEnabled() is True
     assert "ofício" in window.search.placeholderText().lower()
     assert window.tcra_tab.search_input.isHidden() is False
+    window.close()
+
+
+def test_main_window_non_tcra_tab_change_reapplies_window_fit(monkeypatch):
+    import app.ui.controllers.window_navigation_controller as nav_module
+
+    window = MainWindow()
+    get_app().processEvents()
+    calls = []
+
+    monkeypatch.setattr(
+        window.navigation_controller,
+        "_refresh_official_cache_if_needed",
+        lambda: calls.append(("refresh-official", None)) or False,
+    )
+    monkeypatch.setattr(
+        window.navigation_controller,
+        "_render_dashboard",
+        lambda metrics=None: calls.append(("render-dashboard", metrics)),
+    )
+    monkeypatch.setattr(
+        nav_module,
+        "apply_window_responsive_layout",
+        lambda target, **kwargs: calls.append(("responsive", target, kwargs)) or True,
+    )
+    monkeypatch.setattr(
+        nav_module,
+        "schedule_window_fit",
+        lambda target, **kwargs: calls.append(("fit", target, kwargs)) or True,
+    )
+
+    window._dashboard_dirty = False
+    window.tabs.setCurrentWidget(window.dash_tab)
+    get_app().processEvents()
+
+    assert (
+        "responsive",
+        window,
+        {"include_active_tab": False, "finalize_active_tab": False},
+    ) in calls
+    assert ("refresh-official", None) in calls
+    assert ("fit", window, {}) in calls
     window.close()
 
 
@@ -766,10 +813,13 @@ def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
 
 
 def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
+    import app.ui.controllers.window_shell_controller as shell_module
+
     window = MainWindow()
     calls = []
     monkeypatch.setattr(window.data_tab, "align_splitter_to_table_width", lambda: calls.append("align"))
     monkeypatch.setattr(window.data_tab, "_sync_left_panel_heights", lambda: calls.append("sync"))
+    monkeypatch.setattr(shell_module, "fit_window_to_available_geometry", lambda target: True)
 
     window._finalize_startup_layout()
 
@@ -1521,9 +1571,10 @@ def test_apply_filter_defers_dashboard_update_until_panel_tab(monkeypatch):
     window.tabs.setCurrentWidget(window.dash_tab)
 
     assert len(calls) == 1
-    assert len(calls[0]) == 5
+    assert len(calls[0]) == 6
     assert calls[0][3] == window._dashboard_record_overview
-    assert calls[0][4] == window._local_record_read_status
+    assert calls[0][4] == window._record_integrity_report
+    assert calls[0][5] == window._local_record_read_status
     assert window._dashboard_dirty is False
     window.close()
 

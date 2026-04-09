@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+from app.ui.controllers.window_layout_support import (
+    apply_window_responsive_layout,
+    schedule_window_fit,
+)
 from app.ui.tabs.dashboard_tab_support import build_dashboard_micro_palette_keys
 
 
@@ -61,15 +65,24 @@ class WindowNavigationController:
             self.window.is_dark_mode,
             build_dashboard_micro_palette_keys(payload, record_overview),
             record_overview,
+            getattr(self.window, "_record_integrity_report", None),
             self.window._local_record_read_status,
         )
         if hasattr(self.window.dash_tab, "update_tcra_overview") and hasattr(self.window, "tcra_tab"):
             tcra_overview, tcra_agenda = self.window.tcra_tab.build_dashboard_payload()
             self.window.dash_tab.update_tcra_overview(tcra_overview, tcra_agenda)
 
+    def _schedule_window_fit(self) -> None:
+        schedule_window_fit(self.window)
+
     def on_tab_changed(self, _index: int):
         if hasattr(self.window, "shell_controller"):
             self.window.shell_controller.sync_global_search_context()
+        apply_window_responsive_layout(
+            self.window,
+            include_active_tab=False,
+            finalize_active_tab=False,
+        )
 
         refreshed = False
         if self.is_dashboard_tab_active() or self.is_operations_tab_active() or self.is_tcra_tab_active():
@@ -88,7 +101,9 @@ class WindowNavigationController:
                 self.window._operations_dirty = False
 
         if self.is_tcra_tab_active():
-            self.window.tcra_tab.handle_tab_activated()
+            self.window.tcra_tab.handle_tab_activated(schedule_fit=False)
 
         if self.is_admin_tab_active() and getattr(self.window, "admin_users_tab", None) is not None:
             self.window.admin_users_tab.handle_tab_activated()
+
+        self._schedule_window_fit()

@@ -185,6 +185,26 @@ def test_tcra_tab_defers_initial_load_until_event_loop_runs(tmp_path):
     assert tab.table.rowCount() == 1
 
 
+def test_tcra_tab_handle_tab_activated_schedules_window_fit(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    main_window = SimpleNamespace()
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    tab.main_window = main_window
+    calls = []
+
+    monkeypatch.setattr(tab, "refresh_data", lambda preferred_uid=None, refresh_remote=False: calls.append(("refresh", preferred_uid, refresh_remote)))
+    monkeypatch.setattr(
+        tcra_tab_module,
+        "schedule_window_fit",
+        lambda window: calls.append(("fit", window)) or True,
+    )
+
+    tab.handle_tab_activated()
+
+    assert calls[0] == ("refresh", "", False)
+    assert calls[1] == ("fit", main_window)
+
+
 def test_tcra_evento_editor_dialog_applies_presets():
     dialog = TcraEventoEditorDialog(None)
 
@@ -253,6 +273,22 @@ def test_tcra_tab_uses_calendar_date_inputs_in_form(tmp_path):
     assert isinstance(tab.in_prazo_final, DatePickerLineEdit)
     assert isinstance(tab.in_data_ultimo_relatorio, DatePickerLineEdit)
     assert isinstance(tab.in_data_proximo_relatorio, DatePickerLineEdit)
+
+
+def test_tcra_tab_main_vertical_containers_do_not_force_window_height(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    assert tab.workspace_tabs.minimumHeight() == 0
+    assert tab.workspace_tabs.sizePolicy().verticalPolicy().name == "Ignored"
+    assert tab.list_splitter.minimumHeight() == 0
+    assert tab.list_splitter.sizePolicy().verticalPolicy().name == "Ignored"
+    assert tab.form_scroll.minimumHeight() == 0
+    assert tab.form_scroll.sizePolicy().verticalPolicy().name == "Ignored"
+    assert tab.editor_splitter.minimumHeight() == 0
+    assert tab.editor_splitter.sizePolicy().verticalPolicy().name == "Ignored"
+    assert tab.editor_tabs.minimumHeight() == 0
+    assert tab.editor_tabs.sizePolicy().verticalPolicy().name == "Ignored"
 
 
 def test_tcra_tab_exposes_clearable_inputs_placeholders_and_tooltips(tmp_path):

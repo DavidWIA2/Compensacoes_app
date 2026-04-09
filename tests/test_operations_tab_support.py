@@ -13,6 +13,7 @@ from app.ui.tabs.operations_tab_support import (
     build_mutation_sync_text,
     build_persistence_status_text,
     build_read_source_text,
+    build_record_integrity_text,
     build_record_overview_text,
     build_remote_sync_text,
     build_runtime_overview_texts,
@@ -94,6 +95,7 @@ def test_operations_tab_support_builds_overview_and_persistence_texts():
         remote_sync_status=type("RemoteStatus", (), {"status": "refreshed"})(),
         persistence_report=persistence_report,
         session_source_status=session_status,
+        record_integrity_report=type("IntegrityReport", (), {"issue_count": 0, "error_count": 0})(),
         record_read_status=type("ReadStatus", (), {"uses_sqlite": True, "issues": ()})(),
         authoritative_write_status=type("WriteStatus", (), {"status": "remote_authoritative", "issues": ()})(),
     )
@@ -120,6 +122,7 @@ def test_operations_tab_support_builds_overview_and_persistence_texts():
     assert "Sessão: snapshot local" in highlights
     assert "Leitura: cache local" in highlights
     assert "Escrita oficial: Supabase" in highlights
+    assert "Base: valida" in highlights
 
 
 def test_operations_tab_support_builds_write_and_runtime_texts():
@@ -257,3 +260,32 @@ def test_operations_tab_support_describes_remote_sync_failures():
     assert "falha na última tentativa" in text.lower()
     assert "cache local" in text.lower()
     assert "timeout" in text
+
+
+def test_operations_tab_support_describes_record_integrity_issues():
+    report = type(
+        "IntegrityReport",
+        (),
+        {
+            "issue_count": 3,
+            "error_count": 1,
+            "warning_count": 2,
+            "analyzed_records": 10,
+            "affected_records_count": 2,
+            "summary": "Base com pendencias estruturais.",
+            "issues": (
+                type("Issue", (), {"message": "UID duplicado"})(),
+                type("Issue", (), {"message": "Latitude invalida"})(),
+            ),
+        },
+    )()
+
+    text = build_record_integrity_text(report)
+    highlights = build_status_highlights_text(
+        access_session=type("AccessSession", (), {"environment": "production"})(),
+        record_integrity_report=report,
+    )
+
+    assert "1 erro(s) e 2 alerta(s)" in text
+    assert "UID duplicado" in text
+    assert "Base: inconsistencias" in highlights

@@ -21,4 +21,5 @@ class Compensacao:
     latitude: Optional[str] = ""
     longitude: Optional[str] = ""
     uid: str = ""
+    updated_at: str = ""
     plantios: List[PlantioItem] = field(default_factory=list)

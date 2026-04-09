@@ -194,6 +194,7 @@ def build_form_record(
         compensado="SIM" if compensado_checked else "",
         eletronico=storage_tipo_value(eletronico_value),
         uid=selected_record.uid if selected_record else "",
+        updated_at=selected_record.updated_at if selected_record else "",
         plantios=list(plantios),
     )
     return sync_legacy_plantio_fields(record)

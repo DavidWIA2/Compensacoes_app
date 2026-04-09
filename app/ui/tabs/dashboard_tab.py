@@ -26,8 +26,10 @@ from app.ui.tabs.dashboard_tab_support import (
     DashboardExportContext,
     build_compensation_chart_payload,
     build_dashboard_agenda_summary_text,
+    build_dashboard_context_text,
     build_local_overview_text,
     build_read_source_text,
+    build_record_integrity_overview_text,
     build_tcra_agenda_text,
     build_tcra_chart_payload,
     build_tcra_dashboard_export_context,
@@ -56,6 +58,7 @@ class DashboardTab(QWidget):
         self._last_metrics: Dict | None = None
         self._last_record_overview: Optional[PersistenceRecordOverviewReport] = None
         self._last_record_read_status: Optional[LocalRecordReadStatus] = None
+        self._last_record_integrity_report: object | None = None
         self._last_tcra_overview: Optional[TcraRecordOverview] = None
         self._last_tcra_agenda: tuple[TcraAgendaItem, ...] = ()
         self.comp_web = None
@@ -98,6 +101,13 @@ class DashboardTab(QWidget):
         self.btn_export_pdf = QPushButton("Exportar painel (PDF)")
         self.btn_export_pdf.setProperty("kind", "ghost")
         self.btn_export_pdf.setMinimumHeight(int(26 * self.sf))
+        self.btn_export_diagnostics = QPushButton("Exportar diagnóstico")
+        self.btn_export_diagnostics.setProperty("kind", "chip-quiet")
+        self.btn_export_diagnostics.setMinimumHeight(int(24 * self.sf))
+        self.btn_export_diagnostics.setToolTip(
+            "Exporta um diagnóstico da sessão com ambiente, cache e integridade dos registros."
+        )
+        hero_actions.addWidget(self.btn_export_diagnostics, 0, Qt.AlignRight)
         hero_actions.addWidget(self.btn_export_pdf, 0, Qt.AlignRight)
         hero_layout.addLayout(hero_actions, 0)
         layout.addWidget(hero_frame)
@@ -279,6 +289,12 @@ class DashboardTab(QWidget):
         self._configure_compact_info_label(self.lbl_local_overview, max_height=int(34 * self.sf))
         details_layout.addWidget(self.lbl_local_overview)
 
+        self.lbl_record_integrity = QLabel(
+            "Integridade cadastral: aguardando validacao estrutural da base."
+        )
+        self._configure_compact_info_label(self.lbl_record_integrity, max_height=int(40 * self.sf))
+        details_layout.addWidget(self.lbl_record_integrity)
+
         self.lbl_read_source = QLabel(
             "Leitura operacional atual: aguardando aplicação dos filtros."
         )
@@ -396,6 +412,7 @@ class DashboardTab(QWidget):
         self.lbl_comp_summary.setMaximumHeight(max(int((22 if short_mode else 26) * self.sf), 20))
         self.lbl_tcra_summary.setMaximumHeight(max(int((24 if short_mode else 28) * self.sf), 22))
         self.lbl_local_overview.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
+        self.lbl_record_integrity.setMaximumHeight(max(int((34 if short_mode else 40) * self.sf), 26))
         self.lbl_read_source.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
         self.lbl_agenda_summary.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
         self.lbl_tcra_agenda.setMaximumHeight(max(int((24 if short_mode else 30) * self.sf), 22))
@@ -511,10 +528,12 @@ class DashboardTab(QWidget):
         is_dark: bool,
         micro_palette_keys: List[str],
         record_overview: Optional[PersistenceRecordOverviewReport] = None,
+        record_integrity_report: object | None = None,
         record_read_status: Optional[LocalRecordReadStatus] = None,
     ):
         self._last_metrics = dict(m)
         self._last_record_overview = record_overview
+        self._last_record_integrity_report = record_integrity_report
         self._last_record_read_status = record_read_status
 
         self.card_total.update_value(f"{m['total_geral']:,.0f}".replace(",", "."))
@@ -522,7 +541,11 @@ class DashboardTab(QWidget):
         self.card_comp.update_value(f"{m['total_compensado']:,.0f}".replace(",", "."))
         self.card_records.update_value(f"{m['count_total']}")
         self._refresh_compensation_summary()
+        self.lbl_panel_context.setText(
+            build_dashboard_context_text(m, record_read_status, record_integrity_report)
+        )
         self.lbl_local_overview.setText(build_local_overview_text(record_overview))
+        self.lbl_record_integrity.setText(build_record_integrity_overview_text(record_integrity_report))
         self.lbl_read_source.setText(build_read_source_text(record_read_status))
 
         payload = build_compensation_chart_payload(

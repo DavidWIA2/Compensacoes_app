@@ -23,7 +23,10 @@ from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
 from app.ui.components.ui_utils import msg_confirm, resource_path
 from app.ui.components.workers import GeocodeWorker
-from app.ui.controllers.settings_support import ensure_window_fits_available_geometry
+from app.ui.controllers.window_layout_support import (
+    apply_widget_responsive_layout,
+    schedule_window_fit,
+)
 from app.utils.logger import get_logger
 
 
@@ -173,11 +176,8 @@ class MapController:
     def on_map_loaded(self, ok):
         if ok:
             data_tab = getattr(self.window, "data_tab", None)
-            if data_tab is not None and hasattr(data_tab, "_finalize_responsive_layout"):
-                QTimer.singleShot(0, data_tab._finalize_responsive_layout)
-                QTimer.singleShot(150, data_tab._finalize_responsive_layout)
-            QTimer.singleShot(0, lambda: ensure_window_fits_available_geometry(self.window))
-            QTimer.singleShot(250, lambda: ensure_window_fits_available_geometry(self.window))
+            apply_widget_responsive_layout(data_tab, finalize=True)
+            schedule_window_fit(self.window, delays=(0, 250))
             self.window._initial_map_sync_timer.start(500)
 
     def initial_map_sync(self):

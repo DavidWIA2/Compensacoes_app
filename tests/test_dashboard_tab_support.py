@@ -4,9 +4,11 @@ from app.services.tcra_records_service import TcraAgendaItem, TcraRecordOverview
 from app.ui.tabs.dashboard_tab_support import (
     build_compensation_chart_payload,
     build_dashboard_agenda_summary_text,
+    build_dashboard_context_text,
     build_dashboard_micro_palette_keys,
     build_local_overview_text,
     build_read_source_text,
+    build_record_integrity_overview_text,
     build_tcra_chart_payload,
     build_tcra_dashboard_export_context,
     build_tcra_agenda_text,
@@ -40,6 +42,23 @@ def test_dashboard_tab_support_builds_local_overview_and_read_source_texts():
 
     overview_text = build_local_overview_text(report)
     read_text = build_read_source_text(read_status)
+    integrity_text = build_record_integrity_overview_text(
+        {
+            "issue_count": 2,
+            "error_count": 1,
+            "warning_count": 1,
+            "affected_records_count": 2,
+            "issues": (
+                {"message": "UID duplicado"},
+                {"message": "Coordenadas ausentes"},
+            ),
+        }
+    )
+    context_text = build_dashboard_context_text(
+        {"count_total": 12},
+        read_status,
+        {"issue_count": 1, "error_count": 0, "warning_count": 1},
+    )
 
     assert "Cache local sincronizado: 12 registro(s)" in overview_text
     assert "Qualidade dos dados: 2 sem microbacia | 5 sem coordenadas" in overview_text
@@ -47,6 +66,11 @@ def test_dashboard_tab_support_builds_local_overview_and_read_source_texts():
     assert "cache local sincronizado" in read_text
     assert "6 registro(s) no recorte" in read_text
     assert "consulta indexada no cache" in read_text
+    assert "1 erro(s), 1 alerta(s) em 2 registro(s)" in integrity_text
+    assert "Exemplos: UID duplicado | Coordenadas ausentes" in integrity_text
+    assert "Recorte ativo: 12 processo(s)" in context_text
+    assert "integridade com 1 alerta(s)" in context_text
+    assert "leitura por cache local" in context_text
 
 
 def test_dashboard_tab_support_builds_tcra_agenda_summary_and_palette_keys():

@@ -21,6 +21,12 @@ class RuntimeOverviewTextPayload:
     cancel_enabled: bool
 
 
+def _payload_value(payload: object | None, key: str, default: object) -> object:
+    if isinstance(payload, dict):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
 def build_status_highlights_text(
     *,
     access_session: object | None = None,
@@ -28,6 +34,7 @@ def build_status_highlights_text(
     persistence_report: Optional[PersistenceStatusReport] = None,
     session_source_status: object | None = None,
     authoritative_write_status: object | None = None,
+    record_integrity_report: object | None = None,
     record_read_status: Optional[LocalRecordReadStatus] = None,
 ) -> str:
     chips: list[str] = []
@@ -83,6 +90,16 @@ def build_status_highlights_text(
         }
         chips.append(write_map.get(write_status, "Escrita: aguardando"))
 
+    if record_integrity_report is not None:
+        issue_count = int(_payload_value(record_integrity_report, "issue_count", 0) or 0)
+        error_count = int(_payload_value(record_integrity_report, "error_count", 0) or 0)
+        if issue_count == 0:
+            chips.append("Base: valida")
+        elif error_count > 0:
+            chips.append("Base: inconsistencias")
+        else:
+            chips.append("Base: alertas")
+
     issues: list[str] = []
     if remote_sync_status is not None:
         issues.extend(str(item) for item in getattr(remote_sync_status, "issues", ()) or ())
@@ -90,6 +107,8 @@ def build_status_highlights_text(
         issues.extend(str(item) for item in getattr(persistence_report, "issues", ()) or ())
     if authoritative_write_status is not None:
         issues.extend(str(item) for item in getattr(authoritative_write_status, "issues", ()) or ())
+    if record_integrity_report is not None and int(_payload_value(record_integrity_report, "issue_count", 0) or 0) > 0:
+        issues.append("integridade da base com pendencias")
     if record_read_status is not None:
         issues.extend(str(item) for item in getattr(record_read_status, "issues", ()) or ())
     if issues:
@@ -279,6 +298,43 @@ def build_record_overview_text(report: Optional[PersistenceRecordOverviewReport]
         lines.append(
             "Amostra do espelho: "
             + " | ".join(format_sample_record(sample) for sample in report.sample_records)
+        )
+    return "\n".join(lines)
+
+
+def build_record_integrity_text(report: object | None) -> str:
+    if report is None:
+        return "Integridade da base: aguardando validacao estrutural dos registros."
+
+    issue_count = int(_payload_value(report, "issue_count", 0) or 0)
+    error_count = int(_payload_value(report, "error_count", 0) or 0)
+    warning_count = int(_payload_value(report, "warning_count", 0) or 0)
+    analyzed_records = int(_payload_value(report, "analyzed_records", 0) or 0)
+    affected_records = int(_payload_value(report, "affected_records_count", 0) or 0)
+    summary = str(_payload_value(report, "summary", "") or "").strip()
+    issues = tuple(_payload_value(report, "issues", ()) or ())
+
+    if issue_count == 0:
+        return (
+            "Integridade da base: nenhuma inconsistencia estrutural detectada.\n"
+            f"Registros analisados: {analyzed_records}"
+        )
+
+    lines = [
+        (
+            f"Integridade da base: {error_count} erro(s) e {warning_count} alerta(s) "
+            f"em {affected_records} registro(s)."
+        )
+    ]
+    if summary:
+        lines.append(summary)
+    if issues:
+        lines.append(
+            "Exemplos: "
+            + " | ".join(
+                str(issue.get("message", issue)) if isinstance(issue, dict) else str(getattr(issue, "message", issue))
+                for issue in issues[:3]
+            )
         )
     return "\n".join(lines)
 

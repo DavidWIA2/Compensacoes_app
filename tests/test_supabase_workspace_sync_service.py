@@ -79,6 +79,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "longitude_plantio": "-47.90",
                     "latitude": "-22.00",
                     "longitude": "-47.89",
+                    "updated_at": "2026-04-09T12:00:00+00:00",
                 },
                 {
                     "id": 12,
@@ -97,6 +98,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "longitude_plantio": "",
                     "latitude": "",
                     "longitude": "",
+                    "updated_at": "2026-04-09T12:05:00+00:00",
                 },
             ],
             "plantios": [
@@ -180,6 +182,7 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
     assert isinstance(records[0], Compensacao)
     assert records[0].endereco == "Extensão da Rua A"
     assert records[0].microbacia == "Gregório"
+    assert records[0].updated_at == "2026-04-09T12:00:00+00:00"
     assert records[0].plantios[0].endereco == "Praça A"
     assert len(records[0].plantios) == 1
     assert len(records[1].plantios) == 1

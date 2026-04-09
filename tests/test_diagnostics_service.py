@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
+from app.models.compensacao import Compensacao
 from app.services.diagnostics_service import (
     build_diagnostics_snapshot,
     default_diagnostics_filename,
@@ -17,29 +18,55 @@ def test_default_diagnostics_filename_uses_expected_prefix():
 
 
 def test_build_diagnostics_snapshot_includes_window_session_data():
+    records = [
+        Compensacao(
+            excel_row=2,
+            oficio_processo="206/2021",
+            eletronico="Oficio",
+            caixa="",
+            av_tec="107/2021",
+            compensacao="1",
+            endereco="Rua A",
+            microbacia="Gregorio",
+            compensado="NAO",
+            uid="uid-1",
+        ),
+        Compensacao(
+            excel_row=3,
+            oficio_processo="207/2021",
+            eletronico="Oficio",
+            caixa="",
+            av_tec="107/2021",
+            compensacao="1",
+            endereco="Rua B",
+            microbacia="Gregorio",
+            compensado="NAO",
+            uid="uid-2",
+        ),
+    ]
     window = SimpleNamespace(
         session_runtime=SimpleNamespace(
             path="C:/dados/base.xlsx",
             has_materialized_workbook=lambda: False,
         ),
-        records=[1, 2, 3],
+        records=records,
         filtered_records=[1],
         selected=SimpleNamespace(uid="uid-1"),
         recent_files=["a.xlsx", "b.xlsx"],
         is_dark_mode=True,
         last_marker_coords=(-22.01, -47.89),
         settings_controller=SimpleNamespace(current_map_layer=lambda: "Mapa Claro"),
-        _local_session_source_status={"source": "sqlite", "strategy": "sqlite_snapshot", "filtered_records": 3},
+        _local_session_source_status={"source": "sqlite", "strategy": "sqlite_snapshot", "filtered_records": 2},
         _local_filter_facets_status={"source": "sqlite", "micro_count": 2, "year_count": 1},
-        _local_mutation_sync_status={"status": "sqlite", "operation": "edit", "record_count": 3},
+        _local_mutation_sync_status={"status": "sqlite", "operation": "edit", "record_count": 2},
         _local_record_read_status=LocalRecordReadStatus(
             status="sqlite",
             source="sqlite",
             strategy="sqlite_query",
             workbook_path="C:/dados/base.xlsx",
             synced_at="2026-03-31T12:00:00+00:00",
-            mirrored_records=3,
-            session_records=3,
+            mirrored_records=2,
+            session_records=2,
             filtered_records=1,
         ),
     )
@@ -51,7 +78,7 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
     assert snapshot["session"]["session_path"] == "C:/dados/base.xlsx"
     assert snapshot["session"]["workbook_runtime_loaded"] is False
     assert snapshot["session"]["session_runtime_materialized"] is False
-    assert snapshot["session"]["records_total"] == 3
+    assert snapshot["session"]["records_total"] == 2
     assert snapshot["session"]["filtered_total"] == 1
     assert snapshot["session"]["selected_uid"] == "uid-1"
     assert snapshot["session"]["map_layer"] == "Mapa Claro"
@@ -61,6 +88,8 @@ def test_build_diagnostics_snapshot_includes_window_session_data():
     assert snapshot["session"]["local_mutation_sync"]["operation"] == "edit"
     assert snapshot["session"]["local_record_read"]["source"] == "sqlite"
     assert snapshot["session"]["local_record_read"]["filtered_records"] == 1
+    assert snapshot["session"]["record_integrity"]["issue_count"] == 1
+    assert snapshot["session"]["record_integrity"]["error_count"] == 1
 
 
 def test_build_diagnostics_snapshot_includes_persistence_data():

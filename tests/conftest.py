@@ -36,6 +36,7 @@ class MockDashboardTab(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.btn_export_pdf = QtWidgets.QPushButton("Export PDF")
+        self.btn_export_diagnostics = QtWidgets.QPushButton("Export Diagnostics")
 
     def update_dashboard(self, *args, **kwargs):
         return None

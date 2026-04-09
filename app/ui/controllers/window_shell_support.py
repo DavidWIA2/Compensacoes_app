@@ -198,6 +198,43 @@ def build_records_tooltip_text(search_text: str) -> str:
     return "Resumo do recorte atualmente visível na tela."
 
 
+def _payload_value(payload: object | None, key: str, default: object) -> object:
+    if isinstance(payload, dict):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
+def build_integrity_tooltip_text(record_integrity_report: object | None) -> str:
+    if record_integrity_report is None:
+        return ""
+
+    issue_count = int(_payload_value(record_integrity_report, "issue_count", 0) or 0)
+    if issue_count <= 0:
+        return ""
+
+    return (
+        "Integridade: "
+        f"{int(_payload_value(record_integrity_report, 'error_count', 0) or 0)} erro(s) e "
+        f"{int(_payload_value(record_integrity_report, 'warning_count', 0) or 0)} alerta(s)."
+    )
+
+
+def build_records_tooltip_text(
+    search_text: str,
+    record_integrity_report: object | None = None,
+) -> str:
+    normalized_search = str(search_text or "").strip()
+    lines = [
+        f"Busca atual: {normalized_search}"
+        if normalized_search
+        else "Resumo do recorte atualmente visivel na tela."
+    ]
+    integrity_text = build_integrity_tooltip_text(record_integrity_report)
+    if integrity_text:
+        lines.append(integrity_text)
+    return "\n".join(lines)
+
+
 def _selected_summary(selected: object | None) -> str:
     if selected is None:
         return ""
@@ -315,6 +352,7 @@ def build_window_chrome_snapshot(
     access_session: object | None = None,
     remote_sync_status: object | None = None,
     persistence_report: object | None = None,
+    record_integrity_report: object | None = None,
     total_records: int,
     filtered_records: int,
     search_text: str,
@@ -362,7 +400,10 @@ def build_window_chrome_snapshot(
             persistence_report=persistence_report,
         ),
         records_label=build_records_label_text(total_records, filtered_records),
-        records_tooltip=build_records_tooltip_text(search_text),
+        records_tooltip=build_records_tooltip_text(
+            search_text,
+            record_integrity_report=record_integrity_report,
+        ),
         write_label=build_write_label_text(write_status, has_active_session=has_active_session),
         write_tooltip=build_write_tooltip_text(write_status, has_active_session=has_active_session),
         selection_label=build_selection_label_text(selected),

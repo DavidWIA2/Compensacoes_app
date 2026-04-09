@@ -19,6 +19,7 @@ from app.models.compensacao import Compensacao
 from app.services.access_service import AccessEnvironment
 from app.services.error_service import friendly_error_message
 from app.services.gis_service import GisService
+from app.services.record_integrity_service import build_record_integrity_report
 from app.services.records_service import (
     build_record_search_index,
     compute_metrics,
@@ -296,6 +297,9 @@ class DataController:
         elif hasattr(self.window, "refresh_operations_overview"):
             self.window.refresh_operations_overview()
 
+    def _refresh_record_integrity_report(self) -> None:
+        self.window._record_integrity_report = build_record_integrity_report(self.window.records)
+
     def update_ui_after_load(self):
         self._apply_loaded_runtime_state(self.window.records, sync_snapshot=True)
 
@@ -306,6 +310,7 @@ class DataController:
         sync_snapshot: bool,
     ) -> None:
         self.window.records = list(records)
+        self._refresh_record_integrity_report()
         self.window._record_search_index = build_record_search_index(self.window.records)
         self.window._update_filters_from_records()
         self.window._setup_dynamic_form_options_from_records()

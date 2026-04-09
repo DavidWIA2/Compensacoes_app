@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import app.ui.controllers.window_navigation_controller as nav_module
 from app.ui.controllers.window_navigation_controller import WindowNavigationController
 
 
@@ -32,9 +33,12 @@ def test_window_navigation_controller_renders_tcra_overview_when_available():
     assert tcra_calls == [("tcra-overview", ("agenda-1", "agenda-2"))]
 
 
-def test_window_navigation_controller_refreshes_official_cache_before_operations_tab():
+def test_window_navigation_controller_refreshes_official_cache_before_operations_tab(monkeypatch):
     sync_calls = []
     operations_calls = []
+
+    monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
+    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
 
     operations_tab = object()
     window = SimpleNamespace(
@@ -56,8 +60,11 @@ def test_window_navigation_controller_refreshes_official_cache_before_operations
     assert operations_calls == []
 
 
-def test_window_navigation_controller_keeps_regular_operations_refresh_when_cache_not_refreshed():
+def test_window_navigation_controller_keeps_regular_operations_refresh_when_cache_not_refreshed(monkeypatch):
     calls = []
+
+    monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
+    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
 
     operations_tab = object()
     window = SimpleNamespace(
@@ -78,8 +85,11 @@ def test_window_navigation_controller_keeps_regular_operations_refresh_when_cach
     assert calls == ["search", ("refresh", False), "operations"]
 
 
-def test_window_navigation_controller_refreshes_admin_tab_when_activated():
+def test_window_navigation_controller_refreshes_admin_tab_when_activated(monkeypatch):
     calls = []
+
+    monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
+    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
 
     admin_tab = SimpleNamespace(handle_tab_activated=lambda: calls.append("admin"))
     window = SimpleNamespace(

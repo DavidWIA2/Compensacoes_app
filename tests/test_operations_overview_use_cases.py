@@ -97,6 +97,7 @@ def test_operations_overview_use_cases_prefers_shell_resolvers():
         audit_service=AuditServiceStub(),
         expected_records=3,
         shell_controller=ShellControllerStub(),
+        record_integrity_report={"issue_count": 1},
         session_source_status=session_status,
         record_read_status=session_status,
         limit=50,
@@ -108,5 +109,6 @@ def test_operations_overview_use_cases_prefers_shell_resolvers():
     assert snapshot.overview.total_events == 1
     assert snapshot.persistence_report is not None
     assert snapshot.record_overview_report is not None
+    assert snapshot.record_integrity_report == {"issue_count": 1}
     assert snapshot.record_read_status is session_status
     assert calls == {"status": 1, "overview": 1}

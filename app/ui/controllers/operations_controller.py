@@ -57,6 +57,7 @@ class OperationsController:
             session_source_status=getattr(self.window, "_local_session_source_status", None),
             authoritative_write_status=getattr(self.window, "_authoritative_write_status", None),
             mutation_sync_status=getattr(self.window, "_local_mutation_sync_status", None),
+            record_integrity_report=getattr(self.window, "_record_integrity_report", None),
             record_read_status=getattr(self.window, "_local_record_read_status", None),
             limit=limit,
         )
@@ -72,6 +73,7 @@ class OperationsController:
             access_session=snapshot.access_session,
             persistence_report=snapshot.persistence_report,
             record_overview_report=snapshot.record_overview_report,
+            record_integrity_report=snapshot.record_integrity_report,
             remote_sync_status=snapshot.remote_sync_status,
             session_source_status=snapshot.session_source_status,
             authoritative_write_status=snapshot.authoritative_write_status,

@@ -24,6 +24,7 @@ def make_record(
     excel_row: int,
     uid: str,
     av_tec: str,
+    updated_at: str = "",
     plantios: list[PlantioItem] | None = None,
 ) -> Compensacao:
     return Compensacao(
@@ -42,6 +43,7 @@ def make_record(
         latitude="",
         longitude="",
         uid=uid,
+        updated_at=updated_at,
         plantios=list(plantios or []),
     )
 
@@ -73,7 +75,7 @@ def test_sqlite_mirror_service_initializes_schema(tmp_path):
     assert {"meta", "workbooks", "records", "plantios", "audit_events"}.issubset(tables)
     assert int(schema_version) == SCHEMA_VERSION
     assert {"source_mtime_ns", "source_size"}.issubset(workbook_columns)
-    assert {"oficio_year", "tipo_key", "microbacia_key", "search_blob_norm"}.issubset(record_columns)
+    assert {"oficio_year", "tipo_key", "microbacia_key", "search_blob_norm", "updated_at"}.issubset(record_columns)
 
 
 def test_sync_workbook_snapshot_persists_records_and_plantios(tmp_path):
@@ -254,6 +256,7 @@ def test_list_records_for_workbook_reconstructs_records_and_plantios(tmp_path):
             excel_row=2,
             uid="uid-1",
             av_tec="AT-1",
+            updated_at="2026-04-09T12:00:00+00:00",
             plantios=[
                 PlantioItem(sequence=1, endereco="Area 1", qtd_mudas="10", latitude="-22.0", longitude="-47.0"),
             ],
@@ -270,6 +273,7 @@ def test_list_records_for_workbook_reconstructs_records_and_plantios(tmp_path):
     assert mirrored[0].eletronico == "Eletrônico"
     assert mirrored[0].plantios[0].endereco == "Area 1"
     assert mirrored[0].plantios[0].qtd_mudas == "10"
+    assert mirrored[0].updated_at == "2026-04-09T12:00:00+00:00"
 
 
 def test_incremental_record_mutations_update_sqlite_without_rebuilding_snapshot(tmp_path):
@@ -572,7 +576,7 @@ def test_sqlite_mirror_service_migrates_v2_schema_and_backfills_query_columns(tm
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT oficio_year, tipo_key, microbacia_key, search_blob_norm FROM records WHERE uid = 'uid-1'"
+            "SELECT oficio_year, tipo_key, microbacia_key, search_blob_norm, updated_at FROM records WHERE uid = 'uid-1'"
         ).fetchone()
         workbook_row = conn.execute(
             "SELECT source_mtime_ns, source_size FROM workbooks WHERE id = 1"
@@ -582,6 +586,7 @@ def test_sqlite_mirror_service_migrates_v2_schema_and_backfills_query_columns(tm
     assert row[1] == "ELETRONICO"
     assert row[2] == "GREGORIO"
     assert "abc/2026" in row[3]
+    assert isinstance(row[4], str)
     assert int(workbook_row[0]) > 0
     assert int(workbook_row[1]) == (tmp_path / "base.xlsx").stat().st_size
     filtered = service.query_records_for_workbook(

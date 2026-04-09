@@ -1,7 +1,10 @@
 from app.services.access_service import AccessAuthError
 from app.services.error_service import friendly_error_message
 from app.services.excel_service import WorkbookModifiedExternallyError
-from app.services.supabase_compensacoes_rpc_service import SupabaseCompensacoesRpcError
+from app.services.supabase_compensacoes_rpc_service import (
+    SupabaseCompensacoesConflictError,
+    SupabaseCompensacoesRpcError,
+)
 
 
 class FakeConnectionError(Exception):
@@ -46,7 +49,7 @@ def test_friendly_error_message_fallback():
 def test_friendly_error_message_handles_access_auth_error():
     title, msg = friendly_error_message(AccessAuthError("tokens invalidos"), "salvar")
 
-    assert title == "Sessão de Produção"
+    assert title == "Sessao de Producao"
     assert "supabase" in msg.lower()
 
 
@@ -55,3 +58,13 @@ def test_friendly_error_message_handles_supabase_rpc_error():
 
     assert title == "Falha na Base Oficial"
     assert "rpc offline" in msg.lower()
+
+
+def test_friendly_error_message_handles_supabase_conflict_error():
+    title, msg = friendly_error_message(
+        SupabaseCompensacoesConflictError("registro remoto alterado"),
+        "salvar",
+    )
+
+    assert title == "Conflito de Edicao"
+    assert "recarregue" in msg.lower()

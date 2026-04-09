@@ -7,6 +7,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, cast
 
+from app.services.record_integrity_service import build_record_integrity_report
+
 
 def serialize_diagnostics_payload(value: Any) -> Any:
     if is_dataclass(value):
@@ -109,6 +111,7 @@ def build_window_session_snapshot(
     session_runtime = getattr(window, "session_runtime", None)
     session_path = getattr(session_runtime, "session_path", getattr(session_runtime, "path", "")) or ""
     workbook_runtime_loaded = resolve_runtime_materialization(window, logger=logger)
+    integrity_report = getattr(window, "_record_integrity_report", None) or build_record_integrity_report(records)
 
     return {
         "session_path": session_path,
@@ -125,6 +128,7 @@ def build_window_session_snapshot(
         "local_filter_facets": serializer(getattr(window, "_local_filter_facets_status", None)),
         "local_mutation_sync": serializer(getattr(window, "_local_mutation_sync_status", None)),
         "local_record_read": serializer(getattr(window, "_local_record_read_status", None)),
+        "record_integrity": serializer(integrity_report),
     }
 
 

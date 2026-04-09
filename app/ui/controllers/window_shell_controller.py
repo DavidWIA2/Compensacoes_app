@@ -50,7 +50,10 @@ from app.ui.controllers.window_shell_support import (
     build_user_identity_tooltip_text,
     build_window_chrome_snapshot,
 )
-from app.ui.controllers.settings_support import ensure_window_fits_available_geometry
+from app.ui.controllers.window_layout_support import (
+    apply_window_responsive_layout,
+    fit_window_to_available_geometry,
+)
 from app.utils.logger import get_logger
 
 
@@ -334,7 +337,7 @@ class WindowShellController:
         self.setup_dynamic_form_options_from_records()
         self.sync_global_search_context()
         self.refresh_window_chrome()
-        self.apply_responsive_layout()
+        apply_window_responsive_layout(self.window)
 
     def _can_show_admin_users_tab(self) -> bool:
         access_session = getattr(self.window, "access_session", None)
@@ -812,6 +815,7 @@ class WindowShellController:
             access_session=getattr(self.window, "access_session", None),
             remote_sync_status=getattr(self.window, "_remote_snapshot_refresh_status", None),
             persistence_report=getattr(self.window, "_persistence_status_report", None),
+            record_integrity_report=getattr(self.window, "_record_integrity_report", None),
             total_records=self.resolved_total_records(),
             filtered_records=self.resolved_filtered_records(),
             search_text=self.window.search.text(),
@@ -954,9 +958,11 @@ class WindowShellController:
         self.window.data_tab.btn_export_csv.clicked.connect(build_command("export_csv_clicked"))
         self.window.data_tab.btn_export_spreadsheet.clicked.connect(build_command("export_spreadsheet_clicked"))
         self.window.data_tab.btn_export_pdf.clicked.connect(build_command("export_pdf_clicked"))
+        self.window.dash_tab.btn_export_diagnostics.clicked.connect(build_command("export_diagnostics"))
         self.window.dash_tab.btn_export_pdf.clicked.connect(build_command("export_dashboard_pdf_clicked"))
 
         self.window.operations_tab.btn_refresh.clicked.connect(build_command("refresh_operations_overview"))
+        self.window.operations_tab.btn_export_diagnostics.clicked.connect(build_command("export_diagnostics"))
         self.window.operations_tab.btn_sync_production.clicked.connect(build_command("refresh_production_snapshot"))
         self.window.operations_tab.btn_history.clicked.connect(build_command("show_operation_history"))
         self.window.operations_tab.btn_rollback.clicked.connect(build_command("show_rollback_dialog"))
@@ -1085,8 +1091,7 @@ class WindowShellController:
         self.window.data_tab._update_responsive_constraints()
         if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
             self.window.data_tab._finalize_responsive_layout()
-        ensure_window_fits_available_geometry(self.window)
-        QTimer.singleShot(0, self.apply_responsive_layout)
+        fit_window_to_available_geometry(self.window)
 
     def apply_theme(self):
         theme = THEME_DARK if self.window.is_dark_mode else THEME_LIGHT

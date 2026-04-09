@@ -18,6 +18,7 @@ class SupabaseCompensacoesRpcResult:
     uid: str = ""
     record_id: int = 0
     excel_row: int = 0
+    updated_at: str = ""
     record_count: int = 0
     plantio_count: int = 0
     imported_count: int = 0
@@ -25,6 +26,10 @@ class SupabaseCompensacoesRpcResult:
 
 
 class SupabaseCompensacoesRpcError(RuntimeError):
+    pass
+
+
+class SupabaseCompensacoesConflictError(SupabaseCompensacoesRpcError):
     pass
 
 
@@ -42,6 +47,7 @@ class SupabaseCompensacoesRpcService:
         action: str,
         summary: str,
         backup_path: str = "",
+        expected_updated_at: str = "",
         metadata: Mapping[str, object] | None = None,
         before: Mapping[str, object] | None = None,
         after: Mapping[str, object] | None = None,
@@ -55,6 +61,7 @@ class SupabaseCompensacoesRpcService:
                 "p_action": str(action or "").strip(),
                 "p_summary": str(summary or "").strip(),
                 "p_backup_path": str(backup_path or "").strip(),
+                "p_expected_updated_at": str(expected_updated_at or "").strip(),
                 "p_metadata": self._json_object(metadata),
                 "p_before": self._json_object(before) if before is not None else None,
                 "p_after": self._json_object(after) if after is not None else serialize_record(record),
@@ -71,6 +78,7 @@ class SupabaseCompensacoesRpcService:
         action: str,
         summary: str,
         backup_path: str = "",
+        expected_updated_at: str = "",
         metadata: Mapping[str, object] | None = None,
         before: Mapping[str, object] | None = None,
     ) -> SupabaseCompensacoesRpcResult:
@@ -83,6 +91,7 @@ class SupabaseCompensacoesRpcService:
                 "p_action": str(action or "").strip(),
                 "p_summary": str(summary or "").strip(),
                 "p_backup_path": str(backup_path or "").strip(),
+                "p_expected_updated_at": str(expected_updated_at or "").strip(),
                 "p_metadata": self._json_object(metadata),
                 "p_before": self._json_object(before) if before is not None else None,
             },
@@ -139,9 +148,7 @@ class SupabaseCompensacoesRpcService:
         try:
             response = client.rpc(function_name, params=dict(params)).execute()
         except Exception as exc:
-            raise SupabaseCompensacoesRpcError(
-                f"Falha ao executar a funcao remota '{function_name}': {exc}"
-            ) from exc
+            raise self._map_rpc_exception(function_name, exc) from exc
 
         payload = getattr(response, "data", None)
         if not isinstance(payload, dict):
@@ -151,6 +158,19 @@ class SupabaseCompensacoesRpcService:
         return dict(payload)
 
     @staticmethod
+    def _map_rpc_exception(function_name: str, exc: Exception) -> SupabaseCompensacoesRpcError:
+        message = str(exc or "").strip()
+        normalized_message = message.lower()
+        if "compensacao_record_conflict:" in normalized_message:
+            friendly_message = message.split(":", 1)[1].strip() if ":" in message else message
+            return SupabaseCompensacoesConflictError(
+                friendly_message or "Registro remoto desatualizado."
+            )
+        return SupabaseCompensacoesRpcError(
+            f"Falha ao executar a funcao remota '{function_name}': {message}"
+        )
+
+    @staticmethod
     def _build_result(operation: str, payload: Mapping[str, object]) -> SupabaseCompensacoesRpcResult:
         return SupabaseCompensacoesRpcResult(
             operation=operation,
@@ -158,6 +178,7 @@ class SupabaseCompensacoesRpcService:
             uid=str(payload.get("uid", "") or ""),
             record_id=int(payload.get("record_id") or 0),
             excel_row=int(payload.get("excel_row") or 0),
+            updated_at=str(payload.get("updated_at", "") or ""),
             record_count=int(payload.get("record_count") or 0),
             plantio_count=int(payload.get("plantio_count") or 0),
             imported_count=int(payload.get("imported_count") or 0),

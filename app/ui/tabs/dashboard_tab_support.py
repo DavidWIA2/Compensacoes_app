@@ -22,6 +22,12 @@ class DashboardExportContext:
     filter_summary: str
 
 
+def _payload_value(payload: object | None, key: str, default: object) -> object:
+    if isinstance(payload, dict):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
 def _extend_unique_labels(target: list[str], labels: Iterable[object]) -> None:
     for label in labels:
         normalized_label = str(label or "").strip()
@@ -125,6 +131,64 @@ def build_local_overview_text(report: Optional[PersistenceRecordOverviewReport])
             + " | ".join(f"{label}: {count}" for label, count in report.top_microbacias)
         )
     return "\n".join(lines)
+
+
+def build_record_integrity_overview_text(report: object | None) -> str:
+    if report is None:
+        return "Integridade cadastral: aguardando validacao estrutural da base."
+
+    issue_count = int(_payload_value(report, "issue_count", 0) or 0)
+    error_count = int(_payload_value(report, "error_count", 0) or 0)
+    warning_count = int(_payload_value(report, "warning_count", 0) or 0)
+    affected_records = int(_payload_value(report, "affected_records_count", 0) or 0)
+    issues = tuple(_payload_value(report, "issues", ()) or ())
+
+    if issue_count == 0:
+        return "Integridade cadastral: base validada sem inconsistencias estruturais."
+
+    lines = [
+        (
+            f"Integridade cadastral: {error_count} erro(s), {warning_count} alerta(s) "
+            f"em {affected_records} registro(s)."
+        )
+    ]
+    if issues:
+        preview = " | ".join(
+            str(issue.get("message", issue)) if isinstance(issue, dict) else str(getattr(issue, "message", issue))
+            for issue in issues[:2]
+        )
+        lines.append("Exemplos: " + preview)
+    return "\n".join(lines)
+
+
+def build_dashboard_context_text(
+    metrics: Optional[Dict[str, object]],
+    record_read_status: Optional[LocalRecordReadStatus],
+    record_integrity_report: object | None,
+) -> str:
+    metrics = dict(metrics or {})
+    total_records = int(metrics.get("count_total", 0) or 0)
+    if total_records <= 0:
+        return "Base sincronizada pronta para leitura."
+
+    if record_read_status is None or record_read_status.status == "indisponivel":
+        read_mode = "leitura em memoria"
+    elif record_read_status.uses_sqlite:
+        read_mode = "leitura por cache local"
+    else:
+        read_mode = "leitura em memoria"
+
+    issue_count = int(_payload_value(record_integrity_report, "issue_count", 0) or 0)
+    error_count = int(_payload_value(record_integrity_report, "error_count", 0) or 0)
+    warning_count = int(_payload_value(record_integrity_report, "warning_count", 0) or 0)
+    if issue_count <= 0:
+        quality_text = "integridade validada"
+    elif error_count > 0:
+        quality_text = f"integridade com {error_count} erro(s) e {warning_count} alerta(s)"
+    else:
+        quality_text = f"integridade com {warning_count} alerta(s)"
+
+    return f"Recorte ativo: {total_records} processo(s) | {quality_text} | {read_mode}."
 
 
 def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:

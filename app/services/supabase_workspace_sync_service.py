@@ -204,6 +204,7 @@ class SupabaseWorkspaceSyncService:
                     latitude=repair_mojibake_text(row.get("latitude", "")),
                     longitude=repair_mojibake_text(row.get("longitude", "")),
                     uid=repair_mojibake_text(row.get("uid", "")),
+                    updated_at=repair_mojibake_text(row.get("updated_at", "")),
                     plantios=sorted(
                         plantios_by_record_id.get(record_id, []),
                         key=lambda item: int(item.sequence or 0),

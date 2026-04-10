@@ -3,6 +3,7 @@
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
+    collect_submodules,
     copy_metadata
 )
 import importlib.util
@@ -45,6 +46,13 @@ def safe_collect_dynamic_libs(modname: str):
 def safe_copy_metadata(distname: str):
     try:
         return _normalize_pairs(copy_metadata(distname))
+    except Exception:
+        return []
+
+
+def safe_collect_submodules(modname: str):
+    try:
+        return list(collect_submodules(modname))
     except Exception:
         return []
 
@@ -94,6 +102,24 @@ if has_module('pyogrio'):
     binaries += safe_collect_dynamic_libs('pyogrio')
     hiddenimports += collect_submodules('pyogrio')
     hiddenimports += ['pyogrio._err', 'pyogrio._geometry', 'pyogrio._io', 'pyogrio._ogr']
+
+
+# --------------------------------------------------------------------
+# Supabase stack
+# --------------------------------------------------------------------
+for package_name, metadata_name in (
+    ('supabase', 'supabase'),
+    ('postgrest', 'postgrest'),
+    ('supabase_auth', 'supabase_auth'),
+    ('realtime', 'realtime'),
+    ('storage3', 'storage3'),
+    ('supabase_functions', 'supabase_functions'),
+):
+    if has_module(package_name):
+        datas += safe_collect_data_files(package_name)
+        datas += safe_copy_metadata(metadata_name)
+        hiddenimports += safe_collect_submodules(package_name)
+        hiddenimports += [package_name]
 
 
 # --------------------------------------------------------------------

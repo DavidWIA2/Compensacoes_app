@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import importlib
 import sys
 
 import pytest
@@ -115,6 +116,12 @@ class _FakeRecoveryClient:
         return _FakeProfileQuery(self._profile_data)
 
 
+def _mark_supabase_dependency_available(service: SupabaseAccessService) -> None:
+    service._has_supabase_dependency = lambda: True  # type: ignore[method-assign]
+    service._supabase_dependency_checked = True
+    service._supabase_dependency_error = ""
+
+
 def test_resolve_production_access_profile_uses_default_project():
     profile = resolve_production_access_profile()
 
@@ -139,6 +146,7 @@ def test_import_supabase_create_client_ignores_local_repo_namespace(tmp_path, mo
         "_candidate_site_paths",
         lambda: [str(fake_site_packages)],
     )
+    monkeypatch.setattr(importlib, "import_module", lambda name: (_ for _ in ()).throw(ImportError(name)))
     sys.modules.pop("supabase", None)
 
     create_client = SupabaseAccessService._import_supabase_create_client()
@@ -148,6 +156,67 @@ def test_import_supabase_create_client_ignores_local_repo_namespace(tmp_path, mo
         "url": "https://example.supabase.co",
         "key": "sb_publishable_test",
     }
+
+
+def test_import_supabase_create_client_supports_frozen_bundle(monkeypatch):
+    fake_module = SimpleNamespace(
+        create_client=lambda url, key: {
+            "url": url,
+            "key": key,
+            "mode": "frozen",
+        }
+    )
+
+    monkeypatch.setattr(supabase_client_loader.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(importlib, "import_module", lambda name: fake_module if name == "supabase" else None)
+
+    create_client = SupabaseAccessService._import_supabase_create_client()
+
+    assert create_client("https://example.supabase.co", "sb_publishable_test") == {
+        "url": "https://example.supabase.co",
+        "key": "sb_publishable_test",
+        "mode": "frozen",
+    }
+
+
+def test_production_sign_in_available_returns_false_when_supabase_dependency_is_missing(monkeypatch):
+    service = SupabaseAccessService()
+
+    monkeypatch.setattr(
+        service,
+        "_import_supabase_create_client",
+        lambda: (_ for _ in ()).throw(ImportError("missing supabase")),
+    )
+
+    assert service.can_sign_in_production() is True
+    assert service.production_sign_in_available() is False
+    assert "cliente oficial do Supabase" in service.production_sign_in_unavailability_reason()
+
+
+def test_sign_in_production_surfaces_dependency_message_when_supabase_is_missing(monkeypatch):
+    service = SupabaseAccessService()
+
+    monkeypatch.setattr(
+        service,
+        "_import_supabase_create_client",
+        lambda: (_ for _ in ()).throw(ImportError("missing supabase")),
+    )
+
+    with pytest.raises(AccessAuthError, match="cliente oficial do Supabase"):
+        service.sign_in_production(email="analista", password="senha-segura")
+
+
+def test_request_password_reset_surfaces_dependency_message_when_supabase_is_missing(monkeypatch):
+    service = SupabaseAccessService()
+
+    monkeypatch.setattr(
+        service,
+        "_import_supabase_create_client",
+        lambda: (_ for _ in ()).throw(ImportError("missing supabase")),
+    )
+
+    with pytest.raises(AccessAuthError, match="cliente oficial do Supabase"):
+        service.request_password_reset(email="analista")
 
 
 def test_sign_in_production_requires_email_and_password():
@@ -175,6 +244,7 @@ def test_sign_in_production_builds_remote_session_from_supabase_response():
             sync_authenticated_client=lambda client: sync_result
         )
     )
+    _mark_supabase_dependency_available(service)
     fake_response = SimpleNamespace(
         user=SimpleNamespace(
             id="user-123",
@@ -232,6 +302,7 @@ def test_sign_in_production_accepts_only_corporate_local_part():
             sync_authenticated_client=lambda client: sync_result
         )
     )
+    _mark_supabase_dependency_available(service)
     fake_response = SimpleNamespace(
         user=SimpleNamespace(
             id="user-123",
@@ -273,6 +344,7 @@ def test_request_password_reset_requires_corporate_email():
 
 def test_request_password_reset_appends_default_domain_and_requests_otp():
     service = SupabaseAccessService()
+    _mark_supabase_dependency_available(service)
     fake_auth = _FakeRecoveryAuth()
 
     service._create_client = lambda profile: SimpleNamespace(auth=fake_auth)  # type: ignore[method-assign]
@@ -312,6 +384,7 @@ def test_build_password_reset_verification_payload_accepts_session_fragment():
 
 def test_complete_password_reset_verifies_otp_updates_password_and_signs_out():
     service = SupabaseAccessService()
+    _mark_supabase_dependency_available(service)
     fake_client = _FakeRecoveryClient(
         profile_data={
             "id": "user-123",
@@ -363,6 +436,7 @@ def test_sign_in_production_preserves_authorized_profile_role():
             sync_authenticated_client=lambda client: sync_result
         )
     )
+    _mark_supabase_dependency_available(service)
     fake_response = SimpleNamespace(
         user=SimpleNamespace(
             id="user-123",
@@ -399,6 +473,7 @@ def test_sign_in_production_blocks_inactive_profile_and_signs_out():
             sync_authenticated_client=lambda client: None
         )
     )
+    _mark_supabase_dependency_available(service)
     fake_response = SimpleNamespace(
         user=SimpleNamespace(
             id="user-123",

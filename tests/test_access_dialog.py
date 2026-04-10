@@ -91,6 +91,17 @@ class _FakeAdminUsersService:
         return object()
 
 
+class _MissingSupabaseAccessService(_FakeAccessService):
+    def can_sign_in_production(self):
+        return False
+
+    def production_sign_in_unavailability_reason(self):
+        return (
+            "Esta instalação foi gerada sem o cliente oficial do Supabase. "
+            "Use a demonstração local ou reinstale a release corrigida."
+        )
+
+
 def test_access_dialog_shows_bootstrap_button_when_first_admin_is_allowed():
     _app()
     dialog = AccessDialog(
@@ -100,6 +111,19 @@ def test_access_dialog_shows_bootstrap_button_when_first_admin_is_allowed():
     )
 
     assert dialog.bootstrap_button.isHidden() is False
+
+
+def test_access_dialog_explains_missing_supabase_dependency_without_enabling_login():
+    _app()
+    dialog = AccessDialog(
+        settings=_MemorySettings(),
+        access_service=_MissingSupabaseAccessService(),
+        admin_users_service=_FakeAdminUsersService(),
+    )
+
+    assert dialog.production_button.isEnabled() is False
+    assert dialog.password_input.isEnabled() is False
+    assert "cliente oficial do Supabase" in dialog.production_status.text()
 
 
 def test_access_dialog_bootstrap_flow_authenticates_new_admin(monkeypatch):

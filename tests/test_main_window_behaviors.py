@@ -1303,6 +1303,44 @@ def test_export_bar_buttons_fit_inside_bar_height():
     window.close()
 
 
+def test_batch_geocode_defers_worker_cleanup_until_thread_finishes(monkeypatch):
+    window = MainWindow()
+
+    class DeferredCleanupWorker(QObject):
+        progress_update = Signal(int, str)
+        finished_process = Signal(object)
+        finished = Signal()
+
+        def __init__(self, records):
+            super().__init__()
+            self.records = records
+            self._running = True
+
+        def isRunning(self):
+            return self._running
+
+    monkeypatch.setattr("app.ui.controllers.map_controller.GeocodeWorker", DeferredCleanupWorker)
+    monkeypatch.setattr(window.map_controller, "persist_batch_geocode_results", lambda _results: 1)
+    monkeypatch.setattr(window, "reload", lambda: None)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
+
+    spec = window.map_controller._build_batch_geocode_job_spec(
+        [make_record(uid="u-thread", endereco="Rua Thread")]
+    )
+    worker = spec.worker
+    window.map_controller._track_geocode_worker(worker)
+
+    worker.finished_process.emit({2: {"main": (-22.0, -47.0)}})
+
+    assert window.geo_worker is worker
+
+    worker._running = False
+    worker.finished.emit()
+
+    assert window.geo_worker is None
+    window.close()
+
+
 def test_crud_bar_has_padding_and_secondary_edge_actions():
     window = MainWindow()
     window.resize(1600, 900)

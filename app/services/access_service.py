@@ -187,9 +187,27 @@ class SupabaseAccessService:
         )
         self._demo_dataset_factory = demo_dataset_factory
         self.production_sync_service = production_sync_service or SupabaseWorkspaceSyncService()
+        self._supabase_dependency_checked = False
+        self._supabase_dependency_error = ""
 
     def can_sign_in_production(self) -> bool:
         return self.production_profile.is_configured and self.production_profile.allow_password
+
+    def production_sign_in_available(self) -> bool:
+        return (
+            self.production_profile.is_configured
+            and self.production_profile.allow_password
+            and self._has_supabase_dependency()
+        )
+
+    def production_sign_in_unavailability_reason(self) -> str:
+        if not self.production_profile.is_configured or not self.production_profile.allow_password:
+            return "A autenticação da produção oficial ainda não está configurada nesta instalação."
+        if not self._has_supabase_dependency():
+            return self._supabase_dependency_error or (
+                "A dependência 'supabase' não está disponível nesta instalação."
+            )
+        return ""
 
     def can_open_demo(self) -> bool:
         return True
@@ -204,7 +222,10 @@ class SupabaseAccessService:
         normalized_password = str(password or "")
         if not normalized_email or not normalized_password:
             raise AccessAuthError("Informe email e senha para entrar em produção.")
-        if not self.can_sign_in_production():
+        if not self.production_sign_in_available():
+            message = self.production_sign_in_unavailability_reason()
+            if message:
+                raise AccessAuthError(message)
             raise AccessAuthError("A autenticação de produção ainda não está configurada.")
 
         try:
@@ -256,13 +277,16 @@ class SupabaseAccessService:
         )
 
     def can_request_password_reset(self) -> bool:
-        return self.can_sign_in_production()
+        return self.production_sign_in_available()
 
     def request_password_reset(self, *, email: str) -> str:
         normalized_email = normalize_corporate_email(email)
         if not normalized_email:
             raise AccessAuthError("Informe seu email corporativo para recuperar a senha.")
         if not self.can_request_password_reset():
+            message = self.production_sign_in_unavailability_reason()
+            if message:
+                raise AccessAuthError(message)
             raise AccessAuthError("A recuperação de senha ainda não está configurada neste app.")
 
         try:
@@ -299,6 +323,11 @@ class SupabaseAccessService:
             raise AccessAuthError("Cole o link ou o código recebido no email corporativo.")
         if len(normalized_password) < 8:
             raise AccessAuthError("A nova senha precisa ter pelo menos 8 caracteres.")
+        if not self._has_supabase_dependency():
+            message = self.production_sign_in_unavailability_reason()
+            if message:
+                raise AccessAuthError(message)
+            raise AccessAuthError("A dependencia 'supabase' nao esta disponivel nesta instalacao.")
 
         try:
             client = self._create_client(self.production_profile)
@@ -387,6 +416,21 @@ class SupabaseAccessService:
             ) from exc
 
         return create_client(profile.url, profile.publishable_key)
+
+    def _has_supabase_dependency(self) -> bool:
+        if self._supabase_dependency_checked:
+            return not bool(self._supabase_dependency_error)
+        self._supabase_dependency_checked = True
+        try:
+            self._import_supabase_create_client()
+        except ImportError:
+            self._supabase_dependency_error = (
+                "Esta instalação foi gerada sem o cliente oficial do Supabase. "
+                "Use a demonstração local ou reinstale a release corrigida."
+            )
+            return False
+        self._supabase_dependency_error = ""
+        return True
 
     @staticmethod
     def _import_supabase_create_client():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.machinery
 import importlib.util
 import site
@@ -67,6 +68,21 @@ def _module_is_external(module: ModuleType) -> bool:
 
 
 def load_supabase_create_client():
+    original_module = sys.modules.get("supabase")
+
+    try:
+        module = importlib.import_module("supabase")
+    except Exception:
+        module = None
+    else:
+        create_client = getattr(module, "create_client", None)
+        if callable(create_client) and (getattr(sys, "frozen", False) or _module_is_external(module)):
+            return create_client
+        if original_module is not None:
+            sys.modules["supabase"] = original_module
+        else:
+            sys.modules.pop("supabase", None)
+
     existing = sys.modules.get("supabase")
     create_client = getattr(existing, "create_client", None) if existing is not None else None
     if existing is not None and callable(create_client) and _module_is_external(existing):

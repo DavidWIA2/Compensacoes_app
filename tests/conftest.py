@@ -127,19 +127,26 @@ def ui_window_factory(ui_test_env):
 
 @pytest.fixture(autouse=True)
 def cleanup_qt_widgets():
+    app = QApplication.instance()
+    existing_widgets = set(app.topLevelWidgets()) if app else set()
+
     yield
 
     app = QApplication.instance()
     if not app:
         return
 
-    _cleanup_qt_app(app)
+    _cleanup_qt_app(app, exclude=existing_widgets)
 
 
 def pytest_sessionfinish(session, exitstatus):
     app = QApplication.instance()
     if app:
-        _cleanup_qt_app(app)
+        try:
+            app.closeAllWindows()
+        except Exception:
+            pass
+        _drain_qt_events(app)
         app.quit()
     logging.shutdown()
     faulthandler.disable()
@@ -147,8 +154,11 @@ def pytest_sessionfinish(session, exitstatus):
     sys.stderr.flush()
 
 
-def _cleanup_qt_app(app: QApplication) -> None:
+def _cleanup_qt_app(app: QApplication, exclude=None) -> None:
+    excluded_widgets = set(exclude or ())
     for widget in list(app.topLevelWidgets()):
+        if widget in excluded_widgets:
+            continue
         _force_close_widget(widget)
 
     _drain_qt_events(app)

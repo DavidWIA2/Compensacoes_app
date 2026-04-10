@@ -385,6 +385,17 @@ class MapController:
         self.window.update_busy_operation(current, message)
 
     def _clear_geocode_worker(self):
+        worker = self.window.geo_worker
+        if worker is not None:
+            finished_signal = getattr(worker, "finished", None)
+            worker_still_running = False
+            if hasattr(worker, "isRunning"):
+                try:
+                    worker_still_running = bool(worker.isRunning())
+                except Exception:
+                    worker_still_running = False
+            if worker_still_running and hasattr(finished_signal, "connect"):
+                return
         self.window.release_background_worker(BATCH_GEOCODE_JOB_NAME)
         self.window.geo_worker = None
 
@@ -427,6 +438,12 @@ class MapController:
             build_disconnect_callback(worker.progress_update, self._on_batch_geocode_progress),
             build_disconnect_callback(worker.finished_process, self.on_geocode_finished),
         ]
+        finished_signal = getattr(worker, "finished", None)
+        if finished_signal is not None and hasattr(finished_signal, "connect"):
+            finished_signal.connect(self._clear_geocode_worker)
+            disconnect_callbacks.append(
+                build_disconnect_callback(finished_signal, self._clear_geocode_worker)
+            )
         if hasattr(worker, "cancelled_process"):
             worker.cancelled_process.connect(self.on_geocode_cancelled)
             disconnect_callbacks.append(

@@ -1005,7 +1005,24 @@ class AccessDialog(QDialog):
         if last_access_email:
             self.email_input.setText(display_corporate_email_local_part(last_access_email))
 
-        if self.access_service.can_sign_in_production():
+        production_reason_resolver = getattr(
+            self.access_service,
+            "production_sign_in_unavailability_reason",
+            None,
+        )
+        production_unavailability_reason = (
+            production_reason_resolver()
+            if callable(production_reason_resolver)
+            else "A autenticação da produção oficial ainda não está configurada nesta instalação."
+        )
+
+        production_available_resolver = getattr(
+            self.access_service,
+            "production_sign_in_available",
+            self.access_service.can_sign_in_production,
+        )
+
+        if production_available_resolver():
             self.production_status.setText(
                 "Produção oficial pronta para autenticação com email corporativo e sincronização da base protegida."
             )
@@ -1023,6 +1040,9 @@ class AccessDialog(QDialog):
             self.production_button.setEnabled(False)
             self.forgot_password_button.setEnabled(False)
             self.password_toggle_button.setEnabled(False)
+
+        if not production_available_resolver():
+            self.production_status.setText(production_unavailability_reason)
 
         demo_label_resolver = getattr(self.access_service, "demo_entry_label", None)
         demo_hint = demo_label_resolver() if callable(demo_label_resolver) else "Demonstração"
@@ -1064,13 +1084,31 @@ class AccessDialog(QDialog):
         while QApplication.overrideCursor() is not None:
             QApplication.restoreOverrideCursor()
 
+        production_reason_resolver = getattr(
+            self.access_service,
+            "production_sign_in_unavailability_reason",
+            None,
+        )
+        production_unavailability_reason = (
+            production_reason_resolver()
+            if callable(production_reason_resolver)
+            else "A autenticação da produção oficial ainda não está configurada nesta instalação."
+        )
+
         self.cancel_button.setEnabled(True)
-        production_available = self.access_service.can_sign_in_production()
+        production_available_resolver = getattr(
+            self.access_service,
+            "production_sign_in_available",
+            self.access_service.can_sign_in_production,
+        )
+        production_available = production_available_resolver()
         self.email_input.setEnabled(production_available)
         self.password_input.setEnabled(production_available)
         self.production_button.setEnabled(production_available)
         self.forgot_password_button.setEnabled(production_available)
         self.password_toggle_button.setEnabled(production_available)
+        if not production_available:
+            self.production_status.setText(production_unavailability_reason)
         can_open_demo = getattr(self.access_service, "can_open_demo", lambda: True)
         self.demo_button.setEnabled(bool(can_open_demo()))
         self._apply_bootstrap_availability()
@@ -1083,7 +1121,12 @@ class AccessDialog(QDialog):
         self._apply_responsive_layout()
 
     def _apply_bootstrap_availability(self) -> None:
-        if not self.access_service.can_sign_in_production() or self.admin_users_service is None:
+        production_available_resolver = getattr(
+            self.access_service,
+            "production_sign_in_available",
+            self.access_service.can_sign_in_production,
+        )
+        if not production_available_resolver() or self.admin_users_service is None:
             self.bootstrap_button.hide()
             return
 

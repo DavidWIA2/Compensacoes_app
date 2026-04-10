@@ -1,3 +1,3 @@
 """Pacote principal do aplicativo."""
 
-__version__ = "1.1.7-beta.2"
+__version__ = "1.1.7-beta.3"

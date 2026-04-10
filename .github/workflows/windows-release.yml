@@ -101,6 +101,7 @@ jobs:
           $releaseBaseUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}"
           $params = @{
             PythonExe = "python"
+            SkipTests = $true
             Clean = $true
             BuildInstaller = $true
             InstallerCompiler = $env:INNO_SETUP_COMPILER

@@ -36,7 +36,9 @@ from app.ui.tabs.operations_tab_support import (
     build_authoritative_write_text,
     build_backup_status_text,
     build_context_text,
+    build_event_details_text,
     build_mutation_sync_text,
+    build_no_results_details_text,
     build_persistence_status_text,
     build_read_source_text,
     build_record_integrity_text,
@@ -112,7 +114,7 @@ class OperationsTab(QWidget):
         self.lbl_context.setProperty("role", "page-subtitle")
         overview_layout.addWidget(self.lbl_context)
 
-        self.lbl_summary = QLabel("Nenhuma movimentação operacional relevante por enquanto.")
+        self.lbl_summary = QLabel("Foco do dia: nenhuma movimentação operacional relevante por enquanto.")
         self.lbl_summary.setWordWrap(True)
         self.lbl_summary.setObjectName("FormStateLabel")
         overview_layout.addWidget(self.lbl_summary)
@@ -122,7 +124,7 @@ class OperationsTab(QWidget):
         self.lbl_highlights = QLabel("Panorama operacional: aguardando sessão.")
         self.lbl_highlights.setWordWrap(True)
         self.lbl_highlights.setObjectName("FormStateLabel")
-        self.btn_toggle_details = QPushButton("Diagnóstico técnico")
+        self.btn_toggle_details = QPushButton("Ver diagnóstico técnico")
         self.btn_toggle_details.setProperty("kind", "chip-quiet")
         self.btn_toggle_details.setCheckable(True)
         self.btn_toggle_details.setMinimumHeight(int(24 * self.sf))
@@ -137,9 +139,9 @@ class OperationsTab(QWidget):
         technical_layout = QVBoxLayout(self.technical_details_frame)
         technical_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         technical_layout.setSpacing(int(5 * self.sf))
-        technical_title = QLabel("Leitura técnica detalhada")
+        technical_title = QLabel("Diagnóstico detalhado")
         technical_title.setProperty("role", "sidebar-title")
-        technical_hint = QLabel("Informações de sincronia, leitura, escrita autoritativa e jobs do runtime.")
+        technical_hint = QLabel("Use este bloco quando precisar validar sincronia, escrita, leitura e jobs do runtime.")
         technical_hint.setProperty("role", "sidebar-helper")
         technical_hint.setWordWrap(True)
         technical_layout.addWidget(technical_title)
@@ -162,7 +164,7 @@ class OperationsTab(QWidget):
         self.lbl_records_overview.setObjectName("FormStateLabel")
         technical_layout.addWidget(self.lbl_records_overview)
 
-        self.lbl_record_integrity = QLabel("Integridade da base: aguardando validacao estrutural dos registros.")
+        self.lbl_record_integrity = QLabel("Integridade da base: aguardando validação estrutural dos registros.")
         self.lbl_record_integrity.setWordWrap(True)
         self.lbl_record_integrity.setObjectName("FormStateLabel")
         technical_layout.addWidget(self.lbl_record_integrity)
@@ -211,7 +213,7 @@ class OperationsTab(QWidget):
         toolbar_container.setContentsMargins(int(10 * self.sf), int(9 * self.sf), int(10 * self.sf), int(9 * self.sf))
         toolbar_container.setSpacing(int(5 * self.sf))
         self.toolbar_hint = QLabel(
-            "Filtre o histórico do recorte atual, sincronize a produção e acesse recursos de restauração quando necessário."
+            "Filtre o histórico do recorte atual, sincronize a produção e acesse restaurações quando precisar agir."
         )
         self.toolbar_hint.setProperty("role", "helper")
         self.toolbar_hint.setWordWrap(True)
@@ -252,8 +254,8 @@ class OperationsTab(QWidget):
         )
         self.btn_sync_production = QPushButton("Sincronizar produção")
         self.btn_sync_production.setProperty("kind", "primary")
-        self.btn_history = QPushButton("Histórico completo")
-        self.btn_rollback = QPushButton("Restaurar snapshot")
+        self.btn_history = QPushButton("Abrir histórico")
+        self.btn_rollback = QPushButton("Restaurar ponto")
         self.btn_open_backup = QPushButton("Abrir backup")
         self.btn_cancel_runtime = QPushButton("Interromper job")
         for button in [
@@ -288,9 +290,9 @@ class OperationsTab(QWidget):
         table_panel_layout = QVBoxLayout(table_panel)
         table_panel_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         table_panel_layout.setSpacing(int(6 * self.sf))
-        table_title = QLabel("Histórico de operações")
+        table_title = QLabel("Linha do tempo operacional")
         table_title.setProperty("role", "section-title")
-        table_hint = QLabel("Selecione uma linha para revisar o resumo, o payload e a disponibilidade de backup.")
+        table_hint = QLabel("Selecione uma operação para revisar o resumo, o backup disponível e os detalhes da ação.")
         table_hint.setProperty("role", "helper")
         table_hint.setWordWrap(True)
         table_panel_layout.addWidget(table_title)
@@ -316,9 +318,9 @@ class OperationsTab(QWidget):
         details_layout = QVBoxLayout(details_frame)
         details_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         details_layout.setSpacing(int(6 * self.sf))
-        self.lbl_details_title = QLabel("Detalhes da operação")
+        self.lbl_details_title = QLabel("Painel da operação")
         self.lbl_details_title.setProperty("role", "section-title")
-        details_hint = QLabel("Use esta área para validar a ação registrada, o backup e os dados antes de restaurar.")
+        details_hint = QLabel("Use esta área para validar a ação registrada e decidir quando restaurar ou exportar.")
         details_hint.setProperty("role", "helper")
         details_hint.setWordWrap(True)
         self.details = QPlainTextEdit(self)
@@ -372,7 +374,7 @@ class OperationsTab(QWidget):
         self.technical_details_frame.setVisible(visible)
         self.btn_toggle_details.setChecked(visible)
         self.btn_toggle_details.setText(
-            "Ocultar diagnóstico" if visible else "Diagnóstico técnico"
+            "Ocultar diagnóstico" if visible else "Ver diagnóstico técnico"
         )
 
     def _toggle_technical_details(self, checked: bool) -> None:
@@ -391,16 +393,16 @@ class OperationsTab(QWidget):
         self.card_backups.update_value("0")
         self.card_latest.update_value("--")
         self.lbl_context.setText(message)
-        self.lbl_summary.setText("Sem dados operacionais no momento.")
-        self.lbl_highlights.setText("Panorama técnico: nenhuma sessão ativa.")
-        self.lbl_remote_sync.setText("Sincronia remota: nenhuma sessão ativa.")
-        self.lbl_persistence.setText("Espelho local (SQLite): nenhuma sessão ativa.")
-        self.lbl_records_overview.setText("Resumo local (SQLite): nenhuma sessão ativa.")
-        self.lbl_record_integrity.setText("Integridade da base: nenhuma sessão ativa.")
-        self.lbl_session_source.setText("Sessão carregada: nenhuma sessão ativa.")
-        self.lbl_authoritative_write.setText("Escrita autoritativa: nenhuma sessão ativa.")
-        self.lbl_mutation_sync.setText("Escrita local (SQLite): nenhuma sessão ativa.")
-        self.lbl_read_source.setText("Leitura operacional atual: nenhuma sessão ativa.")
+        self.lbl_summary.setText("Sem dados operacionais por enquanto. Abra uma base para acompanhar a rotina do sistema.")
+        self.lbl_highlights.setText("Panorama operacional: nenhuma base ativa nesta sessão.")
+        self.lbl_remote_sync.setText("Sincronia remota: indisponível enquanto não houver uma base ativa.")
+        self.lbl_persistence.setText("Espelho local (SQLite): indisponível enquanto não houver uma base ativa.")
+        self.lbl_records_overview.setText("Resumo local (SQLite): carregue uma base para ver indicadores do espelho.")
+        self.lbl_record_integrity.setText("Integridade da base: a validação estrutural aparece após a leitura inicial.")
+        self.lbl_session_source.setText("Sessão carregada: nenhuma base ativa nesta sessão.")
+        self.lbl_authoritative_write.setText("Escrita autoritativa: ainda não houve operações nesta sessão.")
+        self.lbl_mutation_sync.setText("Escrita local (SQLite): ainda não houve operações nesta sessão.")
+        self.lbl_read_source.setText("Leitura operacional atual: carregue uma base para ativar filtros e consultas.")
         self.clear_runtime_overview()
         self.lbl_visible.setText(build_visible_counter_text(0, 0))
         self.filter_action.blockSignals(True)
@@ -410,7 +412,7 @@ class OperationsTab(QWidget):
         self.filter_backup.setCurrentText("Todos")
         self.search_input.clear()
         self.table.setRowCount(0)
-        self.details.clear()
+        self.details.setPlainText(build_event_details_text(None))
         self.btn_open_backup.setEnabled(False)
         self.btn_sync_production.setEnabled(False)
 
@@ -553,7 +555,7 @@ class OperationsTab(QWidget):
 
         if not self.events:
             self.selected_event = None
-            self.details.setPlainText("Nenhuma operação encontrada para os filtros atuais.")
+            self.details.setPlainText(build_no_results_details_text())
             self.btn_open_backup.setEnabled(False)
             return
 
@@ -591,21 +593,10 @@ class OperationsTab(QWidget):
         event = self._current_event()
         self.selected_event = event
         if event is None:
-            self.details.clear()
+            self.details.setPlainText(build_event_details_text(None))
             self.btn_open_backup.setEnabled(False)
             return
 
-        payload = {
-            "event_id": getattr(event, "event_id", ""),
-            "timestamp": getattr(event, "timestamp", ""),
-            "action": getattr(event, "action", ""),
-            "summary": getattr(event, "summary", ""),
-            "backup_path": getattr(event, "backup_path", ""),
-            "backup_available": audit_backup_available(event),
-            "metadata": getattr(event, "metadata", {}),
-            "before": getattr(event, "before", None),
-            "after": getattr(event, "after", None),
-        }
-        self.details.setPlainText(json.dumps(payload, ensure_ascii=False, indent=2))
+        self.details.setPlainText(build_event_details_text(event))
         self.btn_open_backup.setEnabled(audit_backup_available(event))
 

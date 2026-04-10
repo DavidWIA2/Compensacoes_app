@@ -221,12 +221,16 @@ class TcraTab(QWidget):
         self._last_draft_saved_payload: dict[str, object] | None = None
         self._records_loaded = False
         self._initial_prefetch_pending = True
+        self._teardown_in_progress = False
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.timeout.connect(self._save_form_draft)
+        self._initial_prefetch_timer = QTimer(self)
+        self._initial_prefetch_timer.setSingleShot(True)
+        self._initial_prefetch_timer.timeout.connect(self._prefetch_initial_records)
         self._setup_ui()
         self._set_initial_loading_state()
-        QTimer.singleShot(self.INITIAL_PREFETCH_DELAY_MS, self._prefetch_initial_records)
+        self._initial_prefetch_timer.start(self.INITIAL_PREFETCH_DELAY_MS)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -324,7 +328,7 @@ class TcraTab(QWidget):
         summary_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
         summary_layout.setSpacing(int(5 * self.sf))
         self.summary_helper = QLabel(
-            "Resumo executivo do módulo, com atalhos rápidos para inbox operacional, qualidade cadastral e próximos relatórios."
+            "Use este resumo para entender o recorte atual e abrir rapidamente a fila operacional que pede ação."
         )
         self.summary_helper.setProperty("role", "helper")
         self.summary_helper.setWordWrap(True)
@@ -356,14 +360,14 @@ class TcraTab(QWidget):
         record_header.setSpacing(int(6 * self.sf))
         self.lbl_record_title = QLabel("Nenhum TCRA selecionado")
         self.lbl_record_title.setObjectName("FormStateLabel")
-        self.btn_record_edit = QPushButton("Editar termo")
+        self.btn_record_edit = QPushButton("Abrir cadastro")
         self.btn_record_edit.setProperty("kind", "secondary")
         self.btn_record_edit.setEnabled(False)
         record_header.addWidget(self.lbl_record_title, 1)
         record_header.addWidget(self.btn_record_edit)
         record_layout.addLayout(record_header)
 
-        self.lbl_record_meta = QLabel("Selecione um TCRA na grade para ver detalhes.")
+        self.lbl_record_meta = QLabel("Selecione um TCRA na grade para ver o resumo e abrir o cadastro quando quiser.")
         self.lbl_record_meta.setWordWrap(True)
         self.lbl_record_meta.setObjectName("FormStateLabel")
         record_layout.addWidget(self.lbl_record_meta)
@@ -397,7 +401,7 @@ class TcraTab(QWidget):
         self.lbl_agenda_summary = QLabel("Nenhuma pendência prioritária no recorte atual.")
         self.lbl_agenda_summary.setWordWrap(True)
         self.lbl_agenda_summary.setObjectName("FormStateLabel")
-        self.btn_agenda_view_all = QPushButton("Expandir")
+        self.btn_agenda_view_all = QPushButton("Ver tudo")
         self.btn_agenda_view_all.setProperty("kind", "ghost")
         agenda_header.addWidget(self.lbl_agenda_summary, 1)
         agenda_header.addWidget(self.btn_agenda_view_all)
@@ -414,7 +418,7 @@ class TcraTab(QWidget):
         if AGENDA_SCOPE_HOJE in self.agenda_scope_buttons:
             self.agenda_scope_buttons[AGENDA_SCOPE_HOJE].setChecked(True)
         agenda_scope_layout.addStretch(1)
-        self.agenda_helper = QLabel("Acompanhe aqui o que exige ação imediata no recorte atual.")
+        self.agenda_helper = QLabel("Acompanhe aqui o que pede ação imediata no recorte atual.")
         self.agenda_helper.setProperty("role", "helper")
         self.agenda_helper.setWordWrap(True)
         self.agenda_table = QTableWidget(0, 4, self)
@@ -444,7 +448,7 @@ class TcraTab(QWidget):
         self.lbl_quality_summary = QLabel("Nenhuma pendência cadastral no recorte atual.")
         self.lbl_quality_summary.setWordWrap(True)
         self.lbl_quality_summary.setObjectName("FormStateLabel")
-        self.btn_quality_view_all = QPushButton("Expandir")
+        self.btn_quality_view_all = QPushButton("Ver tudo")
         self.btn_quality_view_all.setProperty("kind", "ghost")
         self.quality_helper = QLabel(
             "Use esta fila para revisar campos ausentes, incoerências e registros que pedem correção."
@@ -1437,21 +1441,29 @@ class TcraTab(QWidget):
         self._mark_form_clean()
 
     def _prefetch_initial_records(self) -> None:
-        if not self._initial_prefetch_pending or self._records_loaded:
+        if self._teardown_in_progress or not self._initial_prefetch_pending or self._records_loaded:
             return
-        if self.has_pending_form_changes():
+        try:
+            has_pending_changes = self.has_pending_form_changes()
+        except RuntimeError:
             return
-        if any(
-            [
-                self.in_numero_processo.text().strip(),
-                self.in_numero_tcra.text().strip(),
-                self.in_local.text().strip(),
-                self.in_endereco.text().strip(),
-                self.in_servicos.toPlainText().strip(),
-                self.in_observacoes.toPlainText().strip(),
-                self.form_eventos,
-            ]
-        ):
+        if has_pending_changes:
+            return
+        try:
+            has_form_content = any(
+                [
+                    self.in_numero_processo.text().strip(),
+                    self.in_numero_tcra.text().strip(),
+                    self.in_local.text().strip(),
+                    self.in_endereco.text().strip(),
+                    self.in_servicos.toPlainText().strip(),
+                    self.in_observacoes.toPlainText().strip(),
+                    self.form_eventos,
+                ]
+            )
+        except RuntimeError:
+            return
+        if has_form_content:
             return
         self._initial_prefetch_pending = False
         tabs_widget = getattr(self.main_window, "tabs", None) if self.main_window is not None else None
@@ -2952,29 +2964,34 @@ class TcraTab(QWidget):
         self.details.setPlainText(preview_data.details_text)
 
     def capture_form_state(self) -> dict[str, object]:
-        return capture_form_state_snapshot(
-            uid=self.current_form_uid,
-            numero_processo=self.in_numero_processo.text(),
-            numero_tcra=self.in_numero_tcra.text(),
-            local=self.in_local.text(),
-            endereco=self.in_endereco.text(),
-            bairro=self.in_bairro.text(),
-            orgao=self.in_orgao.text(),
-            status=self.in_status.currentText(),
-            data_assinatura=self.in_data_assinatura.text(),
-            prazo_final=self.in_prazo_final.text(),
-            periodicidade=self.in_periodicidade.text(),
-            data_ultimo_relatorio=self.in_data_ultimo_relatorio.text(),
-            data_proximo_relatorio=self.in_data_proximo_relatorio.text(),
-            area_m2=self.in_area_m2.text(),
-            numero_mudas=self.in_numero_mudas.text(),
-            responsavel=self.in_responsavel.text(),
-            mpsp=self.chk_mpsp.isChecked(),
-            inquerito=self.in_inquerito.text(),
-            servicos=self.in_servicos.toPlainText(),
-            observacoes=self.in_observacoes.toPlainText(),
-            eventos=self.form_eventos,
-        )
+        if self._teardown_in_progress:
+            return dict(self._clean_form_state or build_empty_form_snapshot(default_status=STATUS_EM_ACOMPANHAMENTO))
+        try:
+            return capture_form_state_snapshot(
+                uid=self.current_form_uid,
+                numero_processo=self.in_numero_processo.text(),
+                numero_tcra=self.in_numero_tcra.text(),
+                local=self.in_local.text(),
+                endereco=self.in_endereco.text(),
+                bairro=self.in_bairro.text(),
+                orgao=self.in_orgao.text(),
+                status=self.in_status.currentText(),
+                data_assinatura=self.in_data_assinatura.text(),
+                prazo_final=self.in_prazo_final.text(),
+                periodicidade=self.in_periodicidade.text(),
+                data_ultimo_relatorio=self.in_data_ultimo_relatorio.text(),
+                data_proximo_relatorio=self.in_data_proximo_relatorio.text(),
+                area_m2=self.in_area_m2.text(),
+                numero_mudas=self.in_numero_mudas.text(),
+                responsavel=self.in_responsavel.text(),
+                mpsp=self.chk_mpsp.isChecked(),
+                inquerito=self.in_inquerito.text(),
+                servicos=self.in_servicos.toPlainText(),
+                observacoes=self.in_observacoes.toPlainText(),
+                eventos=self.form_eventos,
+            )
+        except RuntimeError:
+            return dict(self._clean_form_state or build_empty_form_snapshot(default_status=STATUS_EM_ACOMPANHAMENTO))
 
     def _mark_form_clean(self):
         self._pending_event_audit = None
@@ -2985,6 +3002,13 @@ class TcraTab(QWidget):
         if self._clean_form_state is None:
             return False
         return self.capture_form_state() != self._clean_form_state
+
+    def closeEvent(self, event):
+        self._teardown_in_progress = True
+        self._initial_prefetch_pending = False
+        self._autosave_timer.stop()
+        self._initial_prefetch_timer.stop()
+        super().closeEvent(event)
 
     def _refresh_form_state(self):
         is_dirty = self.has_pending_form_changes()

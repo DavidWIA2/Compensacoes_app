@@ -207,7 +207,7 @@ class WindowShellController:
             getattr(
                 getattr(self.window, "access_session", None),
                 "environment_chip_text",
-                "Ambiente: Local",
+                "Ambiente: Contingência local",
             )
         )
         self.window.account_environment_chip.setProperty("role", "context-chip")
@@ -292,7 +292,7 @@ class WindowShellController:
         environment_chip_text = getattr(
             getattr(self.window, "access_session", None),
             "environment_chip_text",
-            "Ambiente: Local",
+            "Ambiente: Contingência local",
         )
         environment_chip_tooltip = getattr(
             getattr(self.window, "access_session", None),
@@ -349,7 +349,7 @@ class WindowShellController:
         access_session = getattr(self.window, "access_session", None)
         role = str(getattr(access_session, "app_role", "") or "").strip().lower()
         if role == "admin":
-            return "Perfil: administrador"
+            return "Perfil: administrador do sistema"
         if role == "viewer":
             return "Perfil: leitura"
         if role:
@@ -363,10 +363,10 @@ class WindowShellController:
         access_session = getattr(self.window, "access_session", None)
         environment = str(getattr(access_session, "environment", "") or "").strip().lower()
         if environment == "production":
-            return "Sessão corporativa autenticada com base oficial sincronizada."
+            return "Sessão corporativa autenticada na produção oficial, com base protegida e sincronização ativa."
         if environment == "demo":
-            return "Sessão isolada para treinamento e validação visual."
-        return "Sessão local ativa para contingência e uso offline."
+            return "Sessão isolada para treinamento e validação visual, sem escrita na base oficial."
+        return "Sessão local de contingência para uso offline e suporte operacional."
 
     def _update_top_shell_context(self) -> None:
         if hasattr(self.window, "search_context_label"):
@@ -376,9 +376,9 @@ class WindowShellController:
                     "Busque processos, termos, eventos, responsáveis ou pendências do módulo TCRA."
                 )
             elif self._search_context == "admin":
-                self.window.search_context_label.setText("Administração • busca indisponível")
+                self.window.search_context_label.setText("Administração • ambiente oficial")
                 self.window.search_helper_label.setText(
-                    "A gestão de usuários usa filtros próprios dentro da tela de administração."
+                    "A gestão de usuários usa filtros próprios e só fica disponível para administradores ativos na produção oficial."
                 )
             else:
                 self.window.search_context_label.setText("Compensações • recorte ativo")
@@ -393,7 +393,7 @@ class WindowShellController:
             self.window.session_context_label.setText(self._build_account_context_text())
         if hasattr(self.window, "account_environment_chip"):
             self.window.account_environment_chip.setText(
-                getattr(access_session, "environment_chip_text", "Ambiente: Local")
+                getattr(access_session, "environment_chip_text", "Ambiente: Contingência local")
             )
 
     def _is_compact_layout(self) -> bool:
@@ -827,12 +827,10 @@ class WindowShellController:
         snapshot = self._build_window_chrome_snapshot()
         window_title = snapshot.window_title
         access_session = getattr(self.window, "access_session", None)
-        if bool(getattr(access_session, "is_demo", False)):
-            window_title = f"{window_title} [Demonstração]"
         self.window.setWindowTitle(window_title)
         if hasattr(self.window, "session_environment_label"):
             self.window.session_environment_label.setText(
-                getattr(access_session, "environment_chip_text", "Ambiente: Local")
+                getattr(access_session, "environment_chip_text", "Ambiente: Contingência local")
             )
             self.window.session_environment_label.setToolTip(
                 getattr(
@@ -1038,6 +1036,7 @@ class WindowShellController:
     def on_form_field_changed(self):
         self.refresh_tipo_controls()
         self.window.form_controller.remember_current_state()
+        self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
         self.window._update_address_search_enabled()
 
@@ -1064,6 +1063,7 @@ class WindowShellController:
         finally:
             self.window.data_tab.in_oficio.blockSignals(False)
         self.window.form_controller.remember_current_state()
+        self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
 
     def on_chk_arquivado_toggled(self, checked):
@@ -1081,6 +1081,7 @@ class WindowShellController:
         finally:
             self.window.data_tab.in_caixa.blockSignals(False)
         self.window.form_controller.remember_current_state()
+        self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
 
     def finalize_startup_layout(self):

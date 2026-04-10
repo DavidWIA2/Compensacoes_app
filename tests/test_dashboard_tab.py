@@ -150,11 +150,11 @@ def test_dashboard_tab_shows_tcra_overview_and_agenda(monkeypatch, qt_app):
         TcraAgendaItem(
             uid="tcra-2",
             priority_rank=1,
-            prioridade_label="Relatorio pendente",
+            prioridade_label="Relatório pendente",
             termo_label="26207/2019",
             local="Sistema de Lazer",
-            detalhe="Relatorio previsto em 03/04/2026.",
-            status_operacional="Relatorio pendente",
+            detalhe="Relatório previsto em 03/04/2026.",
+            status_operacional="Relatório pendente",
         ),
     )
 
@@ -167,7 +167,7 @@ def test_dashboard_tab_shows_tcra_overview_and_agenda(monkeypatch, qt_app):
     assert tab.card_tcra_cumpridos.lbl_value.text() == "6"
     assert "18 | 12 ativos" in tab.lbl_tcra_summary.text()
     assert "Prazo vencido: TCRA-2024-001" in tab.lbl_tcra_agenda.text()
-    assert "Relatorio pendente: 26207/2019" in tab.lbl_tcra_agenda.text()
+    assert "Relatório pendente: 26207/2019" in tab.lbl_tcra_agenda.text()
     assert "TCRAs: 5 alerta(s)" in tab.lbl_agenda_summary.text()
     assert tab.current_export_context() is not None
 

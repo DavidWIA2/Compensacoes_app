@@ -13,57 +13,69 @@ from app.services.supabase_compensacoes_rpc_service import (
 def friendly_error_message(exc: Exception, action: str = "processar") -> Tuple[str, str]:
     if isinstance(exc, PermissionError):
         return (
-            "Erro de Permissao",
-            f"Nao foi possivel {action}. Verifique se o arquivo esta aberto em outro programa.",
+            "Erro de Permissão",
+            f"Não foi possível {action}. Verifique se o arquivo está aberto em outro programa e tente novamente.",
         )
 
     if isinstance(exc, FileNotFoundError):
         return (
-            "Arquivo Nao Encontrado",
-            "O arquivo selecionado nao foi encontrado. Confira o caminho e tente novamente.",
+            "Arquivo Não Encontrado",
+            "O arquivo selecionado não foi encontrado. Confira o caminho informado e tente novamente.",
         )
 
     if isinstance(exc, WorkbookModifiedExternallyError):
         return (
-            "Planilha Desatualizada",
-            "A planilha foi alterada fora do aplicativo. Recarregue antes de continuar.",
+            "Base Desatualizada",
+            "A base foi alterada fora do aplicativo. Recarregue os dados antes de continuar para evitar conflito.",
         )
 
     if isinstance(exc, AccessAuthError):
         return (
-            "Sessao de Producao",
-            "Nao foi possivel concluir a operacao porque a sessao autenticada do Supabase nao esta valida. Entre novamente em Producao e tente de novo.",
+            "Sessão de Produção",
+            (
+                "Não foi possível concluir a operação porque a sessão autenticada do Supabase não está válida. "
+                "Entre novamente em Produção e tente de novo."
+            ),
         )
 
     if isinstance(exc, SupabaseCompensacoesConflictError):
         return (
-            "Conflito de Edicao",
-            "Este registro foi alterado na base oficial por outra sessao. Recarregue a base sincronizada e tente novamente.",
+            "Conflito de Edição",
+            (
+                "Este registro foi alterado na base oficial por outra sessão. "
+                "Atualize a base sincronizada, revise os dados mais recentes e tente novamente."
+            ),
         )
 
     if isinstance(exc, SupabaseCompensacoesRpcError):
         return (
             "Falha na Base Oficial",
-            f"Nao foi possivel {action} na base oficial do Supabase. {exc}",
+            (
+                f"Não foi possível {action} na base oficial do Supabase. "
+                f"{exc} Verifique a conexão ou tente novamente em instantes."
+            ),
         )
 
     if isinstance(exc, requests.exceptions.Timeout):
         return (
             "Tempo Esgotado",
-            f"Nao foi possivel {action} porque a operacao demorou demais. Tente novamente.",
+            f"Não foi possível {action} porque a operação demorou demais. Tente novamente.",
         )
 
     if isinstance(exc, requests.exceptions.ConnectionError):
         return (
-            "Sem Conexao",
-            f"Nao foi possivel {action} por falha de conexao. Verifique a internet e tente novamente.",
+            "Sem Conexão",
+            (
+                f"Não foi possível {action} por falha de conexão. "
+                "Verifique a internet ou a rede da Prefeitura e tente novamente."
+            ),
         )
 
     text = str(exc).lower()
     if "being used by another process" in text or "esta aberto" in text:
         return (
             "Arquivo em Uso",
-            f"Nao foi possivel {action}. Feche o arquivo em outro programa e tente novamente.",
+            f"Não foi possível {action}. Feche o arquivo em outro programa e tente novamente.",
         )
 
-    return ("Erro", f"Nao foi possivel {action}: {exc}")
+    return ("Erro", f"Não foi possível {action}: {exc}")

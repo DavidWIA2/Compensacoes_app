@@ -43,6 +43,19 @@ def _format_role(role: str) -> str:
     return "Editor"
 
 
+def _role_capabilities_text(role: str) -> str:
+    normalized = str(role or "").strip().lower()
+    if normalized == "admin":
+        return "Pode gerenciar usuários, redefinir senhas, controlar acessos e operar os módulos do sistema."
+    if normalized == "viewer":
+        return "Pode consultar as telas e relatórios, sem alterar dados operacionais."
+    return "Pode operar os módulos, cadastrar e atualizar dados, sem administrar usuários."
+
+
+def _is_admin_role(role: str) -> bool:
+    return str(role or "").strip().lower() == "admin"
+
+
 def _configure_text_input(
     input_field: QLineEdit,
     *,
@@ -193,6 +206,7 @@ class AdminUsersTab(QWidget):
         )
         self.users: list[AdminUserRecord] = []
         self._busy = False
+        self._last_role_sync_user_id = ""
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -242,6 +256,13 @@ class AdminUsersTab(QWidget):
         self.status_label = QLabel("Abra esta aba ou use Atualizar para carregar os usuários.")
         self.status_label.setObjectName("FormStateLabel")
         header_layout.addWidget(self.status_label)
+
+        self.operator_context_label = QLabel(
+            "Gestor atual: conta administrativa autenticada no ambiente oficial."
+        )
+        self.operator_context_label.setProperty("role", "helper")
+        self.operator_context_label.setWordWrap(True)
+        header_layout.addWidget(self.operator_context_label)
 
         summary_row = QHBoxLayout()
         summary_row.setContentsMargins(0, 0, 0, 0)
@@ -358,9 +379,31 @@ class AdminUsersTab(QWidget):
         self.selection_status_label.setObjectName("FormStateLabel")
         self.selection_created_label = QLabel("Criado: --")
         self.selection_created_label.setObjectName("FormStateLabel")
+        self.selection_permissions_label = QLabel("Permissões: --")
+        self.selection_permissions_label.setProperty("role", "helper")
+        self.selection_permissions_label.setWordWrap(True)
         manage_layout.addWidget(self.selection_profile_label)
         manage_layout.addWidget(self.selection_status_label)
         manage_layout.addWidget(self.selection_created_label)
+        manage_layout.addWidget(self.selection_permissions_label)
+
+        profile_editor_caption = QLabel("Perfil operacional")
+        profile_editor_caption.setProperty("role", "panel-caption")
+        manage_layout.addWidget(profile_editor_caption)
+        role_editor_row = QHBoxLayout()
+        role_editor_row.setSpacing(int(6 * self.sf))
+        self.manage_role_combo = QComboBox(self)
+        self.manage_role_combo.addItem("Administrador", "admin")
+        self.manage_role_combo.addItem("Editor", "editor")
+        self.manage_role_combo.addItem("Leitor", "viewer")
+        self.manage_role_combo.setToolTip("Define o perfil operacional da conta selecionada.")
+        self.btn_apply_role = QPushButton("Aplicar perfil")
+        self.btn_apply_role.setProperty("kind", "ghost")
+        self.btn_apply_role.setMinimumHeight(int(28 * self.sf))
+        self.btn_apply_role.setToolTip("Atualiza o perfil da conta selecionada no ambiente oficial.")
+        role_editor_row.addWidget(self.manage_role_combo, 1)
+        role_editor_row.addWidget(self.btn_apply_role, 0)
+        manage_layout.addLayout(role_editor_row)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(int(6 * self.sf))
@@ -410,6 +453,10 @@ class AdminUsersTab(QWidget):
         self.create_role_hint.setProperty("role", "helper")
         self.create_role_hint.setWordWrap(True)
         create_layout.addRow(self.create_role_hint)
+        self.create_permissions_label = QLabel(_role_capabilities_text("editor"))
+        self.create_permissions_label.setProperty("role", "helper")
+        self.create_permissions_label.setWordWrap(True)
+        create_layout.addRow(self.create_permissions_label)
         self.create_domain_hint = QLabel(
             "O domínio corporativo é acrescentado automaticamente. Informe apenas a parte antes de @saocarlos.sp.gov.br.",
             create_group,
@@ -481,11 +528,16 @@ class AdminUsersTab(QWidget):
         self.btn_deactivate.clicked.connect(lambda: self._handle_set_active(False))
         self.btn_reset_password.clicked.connect(self._handle_reset_password)
         self.btn_delete.clicked.connect(self._handle_delete_user)
+        self.btn_apply_role.clicked.connect(self._handle_set_role)
         self.table.itemSelectionChanged.connect(self._refresh_action_state)
         self.table_search_input.textChanged.connect(self._populate_table)
         self.status_filter_combo.currentIndexChanged.connect(self._populate_table)
         self.role_filter_combo.currentIndexChanged.connect(self._populate_table)
+        self.manage_role_combo.currentIndexChanged.connect(self._refresh_action_state)
+        self.role_combo.currentIndexChanged.connect(self._refresh_create_role_preview)
         self._refresh_summary_chips(0)
+        self._refresh_operator_context()
+        self._refresh_create_role_preview()
         self._refresh_action_state()
         self._apply_responsive_layout()
 
@@ -515,13 +567,17 @@ class AdminUsersTab(QWidget):
         self.manage_hint.setVisible(not compact_mode)
         self.create_hint.setVisible(not compact_mode)
         self.create_role_hint.setVisible(not compact_mode)
+        self.operator_context_label.setVisible(not compact_mode)
         self.create_domain_hint.setVisible(not compact_mode)
+        self.create_permissions_label.setVisible(True)
+        self.selection_permissions_label.setVisible(True)
 
         self.sidebar.setMinimumWidth(max(int((260 if compact_mode else 320) * self.sf), 220))
         self.btn_activate.setText("Reativar" if compact_mode else "Reativar acesso")
         self.btn_deactivate.setText("Desativar" if compact_mode else "Desativar acesso")
         self.btn_reset_password.setText("Senha" if compact_mode else "Redefinir senha")
         self.btn_delete.setText("Excluir" if compact_mode else "Excluir conta")
+        self.btn_apply_role.setText("Aplicar" if compact_mode else "Aplicar perfil")
 
     def handle_tab_activated(self) -> None:
         self.refresh_users()
@@ -529,6 +585,7 @@ class AdminUsersTab(QWidget):
     def refresh_users(self) -> None:
         if self._busy:
             return
+        self._refresh_operator_context()
         self._set_busy(True, "Atualizando usuários...")
         try:
             self.users = self.admin_service.list_users(self._access_session())
@@ -628,6 +685,42 @@ class AdminUsersTab(QWidget):
         self.summary_admin_label.setText(f"Admins: {admin_count}")
         self.summary_visible_label.setText(f"Visíveis: {visible_value}")
 
+    def _refresh_operator_context(self) -> None:
+        try:
+            access_session = self._access_session()
+        except AdminUsersError:
+            self.operator_context_label.setText(
+                "Gestor atual: sessão administrativa indisponível para este ambiente."
+            )
+            return
+
+        identity = str(access_session.user_email or access_session.user_id or "administrador").strip()
+        self.operator_context_label.setText(
+            f"Gestor atual: {identity} • {access_session.environment_display_name} • perfil {access_session.role_display_name}."
+        )
+
+    def _refresh_create_role_preview(self) -> None:
+        role = str(self.role_combo.currentData() or "editor").strip().lower()
+        self.create_permissions_label.setText(_role_capabilities_text(role))
+
+    def _active_admin_count(self) -> int:
+        return sum(1 for user in self.users if bool(user.is_active) and _is_admin_role(user.role))
+
+    def _is_last_active_admin(self, user: AdminUserRecord | None) -> bool:
+        return bool(
+            user is not None
+            and bool(user.is_active)
+            and _is_admin_role(user.role)
+            and self._active_admin_count() <= 1
+        )
+
+    def _confirm_admin_action(self, *, title: str, message: str) -> bool:
+        return msg_confirm(
+            self,
+            title,
+            f"{message}\n\nAmbiente: Produção oficial.",
+        )
+
     def _selected_user(self) -> AdminUserRecord | None:
         items = self.table.selectedItems()
         if not items:
@@ -638,34 +731,77 @@ class AdminUsersTab(QWidget):
                 return user
         return None
 
+    def _set_manage_role_value(self, role: str) -> None:
+        target_role = str(role or "editor").strip().lower()
+        for index in range(self.manage_role_combo.count()):
+            if str(self.manage_role_combo.itemData(index) or "").strip().lower() == target_role:
+                previous = self.manage_role_combo.blockSignals(True)
+                self.manage_role_combo.setCurrentIndex(index)
+                self.manage_role_combo.blockSignals(previous)
+                return
+
     def _refresh_action_state(self) -> None:
         user = self._selected_user()
         access_session = self._access_session()
         can_manage = user is not None and not self._busy
         can_manage_self = user is not None and user.user_id == access_session.user_id
+        is_last_active_admin = self._is_last_active_admin(user)
+        if user is None:
+            self._last_role_sync_user_id = ""
+        elif user.user_id != self._last_role_sync_user_id:
+            self._set_manage_role_value(user.role)
+            self._last_role_sync_user_id = user.user_id
         self.btn_activate.setEnabled(can_manage and not bool(user.is_active) and not can_manage_self)
-        self.btn_deactivate.setEnabled(can_manage and bool(user.is_active) and not can_manage_self)
+        self.btn_deactivate.setEnabled(
+            can_manage and bool(user.is_active) and not can_manage_self and not is_last_active_admin
+        )
         self.btn_reset_password.setEnabled(can_manage)
-        self.btn_delete.setEnabled(can_manage and not can_manage_self)
+        self.btn_delete.setEnabled(can_manage and not can_manage_self and not is_last_active_admin)
+        self.manage_role_combo.setEnabled(can_manage and not can_manage_self)
+        self.btn_apply_role.setEnabled(
+            can_manage
+            and not can_manage_self
+            and user is not None
+            and str(self.manage_role_combo.currentData() or "").strip().lower() != str(user.role or "").strip().lower()
+            and not (is_last_active_admin and str(self.manage_role_combo.currentData() or "").strip().lower() != "admin")
+        )
         if user is None:
             self.selection_summary_label.setText("Nenhuma conta selecionada")
             self.selection_profile_label.setText("Perfil: --")
             self.selection_status_label.setText("Situação: --")
             self.selection_created_label.setText("Criado: --")
+            self.selection_permissions_label.setText("Permissões: selecione uma conta para ver o escopo do perfil.")
+            self.manage_role_combo.setCurrentIndex(1)
             self.selection_hint.setText("Selecione uma conta para revisar perfil, situação e ações administrativas disponíveis.")
         elif can_manage_self:
             self.selection_summary_label.setText(f"{user.email} | sua conta")
             self.selection_profile_label.setText(f"Perfil: {_format_role(user.role)}")
             self.selection_status_label.setText(f"Situação: {user.status_label}")
             self.selection_created_label.setText(f"Criado: {(user.created_at or '')[:10] or '--'}")
+            self.selection_permissions_label.setText(_role_capabilities_text(user.role))
+            if is_last_active_admin:
+                self.selection_hint.setText(
+                    "Sua própria conta também é o último administrador ativo. Ela não pode ser desativada, excluída nem rebaixada por esta tela."
+                )
+            else:
+                self.selection_hint.setText(
+                    "Sua própria conta não pode ser desativada, excluída nem ter o perfil alterado por esta tela, mas a senha ainda pode ser redefinida."
+                )
+        elif is_last_active_admin:
+            self.selection_summary_label.setText(f"{user.email} | administrador protegido")
+            self.selection_profile_label.setText(f"Perfil: {_format_role(user.role)}")
+            self.selection_status_label.setText(f"Situação: {user.status_label}")
+            self.selection_created_label.setText(f"Criado: {(user.created_at or '')[:10] or '--'}")
+            self.selection_permissions_label.setText(_role_capabilities_text(user.role))
             self.selection_hint.setText(
-                "Sua própria conta não pode ser desativada nem excluída por esta tela, mas a senha ainda pode ser redefinida."
+                "Proteção ativa: este é o último administrador ativo. A conta não pode ser desativada, excluída nem rebaixada."
             )
         else:
             self.selection_summary_label.setText(f"{user.email} | {_format_role(user.role)}")
             self.selection_profile_label.setText(f"Perfil: {_format_role(user.role)}")
             self.selection_status_label.setText(f"Situação: {user.status_label}")
             self.selection_created_label.setText(f"Criado: {(user.created_at or '')[:10] or '--'}")
+            self.selection_permissions_label.setText(_role_capabilities_text(user.role))
             self.selection_hint.setText(
                 f"Conta pronta para gestão: {user.email} • {_format_role(user.role)} • {user.status_label}"
             )
@@ -707,6 +843,21 @@ class AdminUsersTab(QWidget):
         user = self._selected_user()
         if user is None:
             return
+        if not is_active and self._is_last_active_admin(user):
+            QMessageBox.warning(
+                self,
+                "Administração",
+                "Não é possível desativar o último administrador ativo do ambiente oficial.",
+            )
+            return
+        if not self._confirm_admin_action(
+            title="Atualizar acesso",
+            message=(
+                f"Deseja {'reativar' if is_active else 'desativar'} a conta {user.email} "
+                f"com perfil {_format_role(user.role)}?"
+            ),
+        ):
+            return
         self._set_busy(True, "Atualizando status do usuário...")
         try:
             updated = self.admin_service.set_user_active(
@@ -732,10 +883,19 @@ class AdminUsersTab(QWidget):
         user = self._selected_user()
         if user is None:
             return
-        if not msg_confirm(
-            self,
-            "Excluir usuário",
-            f"Deseja excluir o usuário {user.email}?",
+        if self._is_last_active_admin(user):
+            QMessageBox.warning(
+                self,
+                "Administração",
+                "Não é possível excluir o último administrador ativo do ambiente oficial.",
+            )
+            return
+        if not self._confirm_admin_action(
+            title="Excluir usuário",
+            message=(
+                f"Deseja excluir definitivamente a conta {user.email}? "
+                "Essa ação remove o acesso do usuário à base oficial."
+            ),
         ):
             return
 
@@ -782,6 +942,55 @@ class AdminUsersTab(QWidget):
         self.status_label.setText(f"Senha redefinida com sucesso para {updated.email}.")
         self._set_busy(False, self.status_label.text())
 
+    def _handle_set_role(self) -> None:
+        user = self._selected_user()
+        if user is None:
+            return
+        next_role = str(self.manage_role_combo.currentData() or "editor").strip().lower()
+        current_role = str(user.role or "").strip().lower()
+        if next_role == current_role:
+            return
+        if self._is_last_active_admin(user) and next_role != "admin":
+            QMessageBox.warning(
+                self,
+                "Administração",
+                "Não é possível rebaixar o último administrador ativo do ambiente oficial.",
+            )
+            return
+        if not self._confirm_admin_action(
+            title="Alterar perfil",
+            message=(
+                f"Deseja alterar o perfil de {user.email} de {_format_role(current_role)} "
+                f"para {_format_role(next_role)}?"
+            ),
+        ):
+            self._set_manage_role_value(current_role)
+            self._refresh_action_state()
+            return
+
+        self._set_busy(True, "Atualizando perfil do usuário...")
+        try:
+            updated = self.admin_service.set_user_role(
+                self._access_session(),
+                user_id=user.user_id,
+                role=next_role,
+            )
+        except AdminUsersError as exc:
+            self._set_manage_role_value(current_role)
+            self._set_busy(False, str(exc))
+            QMessageBox.warning(self, "Administração", str(exc))
+            return
+        except Exception as exc:
+            self._set_manage_role_value(current_role)
+            self._set_busy(False, f"Falha inesperada: {exc}")
+            QMessageBox.critical(self, "Administração", f"Falha inesperada ao atualizar perfil: {exc}")
+            return
+
+        self.status_label.setText(
+            f"Perfil atualizado: {updated.email} agora é {_format_role(updated.role)}."
+        )
+        self.refresh_users()
+
     def _set_busy(self, busy: bool, message: str) -> None:
         self._busy = busy
         self.status_label.setText(message)
@@ -797,6 +1006,7 @@ class AdminUsersTab(QWidget):
             self.password_input,
             self.role_combo,
             self.is_active_combo,
+            self.manage_role_combo,
             self.table,
         ):
             widget.setEnabled(not busy)

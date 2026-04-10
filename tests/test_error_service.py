@@ -14,21 +14,21 @@ class FakeConnectionError(Exception):
 def test_friendly_error_message_handles_permission_error():
     title, msg = friendly_error_message(PermissionError("denied"), "salvar")
 
-    assert title == "Erro de Permissao"
+    assert title == "Erro de Permissão"
     assert "arquivo" in msg.lower()
 
 
 def test_friendly_error_message_handles_file_not_found():
     title, msg = friendly_error_message(FileNotFoundError("missing"), "abrir")
 
-    assert title == "Arquivo Nao Encontrado"
-    assert "nao foi encontrado" in msg.lower()
+    assert title == "Arquivo Não Encontrado"
+    assert "não foi encontrado" in msg.lower()
 
 
 def test_friendly_error_message_handles_external_workbook_change():
     title, msg = friendly_error_message(WorkbookModifiedExternallyError("stale"), "salvar")
 
-    assert title == "Planilha Desatualizada"
+    assert title == "Base Desatualizada"
     assert "recarregue" in msg.lower()
 
 
@@ -49,7 +49,7 @@ def test_friendly_error_message_fallback():
 def test_friendly_error_message_handles_access_auth_error():
     title, msg = friendly_error_message(AccessAuthError("tokens invalidos"), "salvar")
 
-    assert title == "Sessao de Producao"
+    assert title == "Sessão de Produção"
     assert "supabase" in msg.lower()
 
 
@@ -66,5 +66,5 @@ def test_friendly_error_message_handles_supabase_conflict_error():
         "salvar",
     )
 
-    assert title == "Conflito de Edicao"
-    assert "recarregue" in msg.lower()
+    assert title == "Conflito de Edição"
+    assert "atualize" in msg.lower()

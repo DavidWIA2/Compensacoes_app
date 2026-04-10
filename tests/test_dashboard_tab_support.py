@@ -130,8 +130,14 @@ def test_dashboard_tab_support_builds_tcra_agenda_summary_and_palette_keys():
     summary_text = build_dashboard_agenda_summary_text(metrics, overview, agenda)
     assert "Compensações: 12 registro(s) | 8 pendentes" in summary_text
     assert "TCRAs: 5 alerta(s)" in summary_text
-    assert "Foco TCRA de hoje: Prazo vencido: TCRA-2024-001" in summary_text
+    assert "Foco do dia no TCRA: Prazo vencido: TCRA-2024-001" in summary_text
     assert build_dashboard_micro_palette_keys(metrics, report) == ["Gregorio", "Medeiros"]
+
+
+def test_dashboard_tab_support_uses_professional_empty_states():
+    assert "validação estrutural aparecerá" in build_record_integrity_overview_text(None)
+    assert "nenhuma pendência prioritária" in build_tcra_agenda_text(())
+    assert "nenhum termo disponível" in build_tcra_summary_text(None)
 
 
 def test_dashboard_tab_support_builds_chart_payloads_and_tcra_export_context():

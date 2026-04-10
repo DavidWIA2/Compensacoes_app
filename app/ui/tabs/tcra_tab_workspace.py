@@ -92,7 +92,7 @@ def _build_quick_filter_labels(records: Sequence[Tcra], *, today: date) -> dict[
     return {
         QUICK_FILTER_ALL: f"Todos ({len(records)})",
         QUICK_FILTER_ALERTAS: f"Alertas ({resolve_quick_filter_count(records, QUICK_FILTER_ALERTAS, today=today)})",
-        QUICK_FILTER_PROXIMOS: f"Prox. 30d ({resolve_quick_filter_count(records, QUICK_FILTER_PROXIMOS, today=today)})",
+        QUICK_FILTER_PROXIMOS: f"Próx. 30d ({resolve_quick_filter_count(records, QUICK_FILTER_PROXIMOS, today=today)})",
         QUICK_FILTER_SEM_NUMERO: f"Sem número ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_NUMERO, today=today)})",
         QUICK_FILTER_SEM_RESPONSAVEL: (
             f"Sem responsável ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_RESPONSAVEL, today=today)})"
@@ -110,7 +110,7 @@ def _build_agenda_summary(
     if not agenda_items:
         return f"Janela {scope_label}: nenhuma pendência no recorte atual."
     highlights = ", ".join(f"{item.prioridade_label}: {item.termo_label}" for item in agenda_items[:2])
-    return f"{scope_label}: {len(agenda_items)} item(ns) | mostrando {shown_count} | {highlights}"
+    return f"Janela {scope_label}: {len(agenda_items)} prioridade(s) | mostrando {shown_count} | {highlights}"
 
 
 def _build_quality_summary(
@@ -124,7 +124,7 @@ def _build_quality_summary(
     cadastro_count = len(quality_items) - critical_count
     highlights = ", ".join(f"{item.severity_label}: {item.termo_label}" for item in quality_items[:2])
     return (
-        f"Qualidade: {len(quality_items)} item(ns) | mostrando {shown_count} | "
+        f"Qualidade cadastral: {len(quality_items)} item(ns) | mostrando {shown_count} | "
         f"{critical_count} críticos | {cadastro_count} cadastrais | {highlights}"
     )
 
@@ -194,9 +194,10 @@ def build_workspace_snapshot(
             f"{base_metrics['count_alertas']} alertas | {overview.mpsp_relacionados_count} MPSP"
         )
         radar_summary_text = (
-            f"Alertas {base_metrics['count_alertas']} | Revisões {len(base_quality_items)} | "
-            f"Relatórios pendentes {base_metrics['count_relatorio_pendente']} | "
-            f"Prox. {UPCOMING_REPORT_WINDOW_DAYS}d {upcoming_count}"
+            f"Foco do recorte: {base_metrics['count_alertas']} alertas | "
+            f"{base_metrics['count_relatorio_pendente']} relatórios pendentes | "
+            f"{len(base_quality_items)} revisões | "
+            f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d {upcoming_count}"
         )
         data_quality_text = (
             f"Qualidade: {base_metrics['count_sem_numero_tcra']} sem número | "
@@ -234,7 +235,7 @@ def build_workspace_snapshot(
         context_text=context_text,
         radar_summary_text=radar_summary_text,
         data_quality_text=data_quality_text,
-        upcoming_summary_text=f"Próximos: {upcoming_text}",
+        upcoming_summary_text=f"Próximos relatórios: {upcoming_text}",
         upcoming_button_text=upcoming_button_text,
         upcoming_button_enabled=bool(upcoming_count),
         results_text=(

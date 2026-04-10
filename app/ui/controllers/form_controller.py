@@ -25,11 +25,14 @@ from app.ui.components.dialogs import PlantiosDialog
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.controllers.form_controller_support import (
     FormStateSnapshot,
+    FormValidationPresentation,
+    build_field_feedback_stylesheet,
     build_dirty_state_view,
     build_duplicate_highlight_stylesheet,
     build_form_action_state,
     build_form_record,
     build_form_state_snapshot,
+    build_form_validation_presentation,
     build_prefill_form_state,
     resolve_before_record_for_audit,
     same_record_identity,
@@ -125,6 +128,7 @@ class FormController:
         self.window.data_tab.form_group.setTitle(self._CLEAN_GROUP_TITLE)
         self.window.form_state_label.setText("Sem alterações")
         self.window.setWindowModified(False)
+        self._reset_inline_feedback()
         self.reset_history()
         self.window._refresh_window_chrome()
 
@@ -228,6 +232,7 @@ class FormController:
         self._clean_state = dict(state)
         self._refresh_dirty_state()
         self.update_form_action_buttons()
+        self.validate_as_you_type()
 
     def remember_current_state(self):
         if self._tracking_suspended:
@@ -280,26 +285,158 @@ class FormController:
         self.window.setWindowModified(state_view.window_modified)
         self.window._refresh_window_chrome()
 
+    def _field_widgets(self) -> Dict[str, object]:
+        return {
+            "oficio_processo": self.window.data_tab.in_oficio,
+            "caixa": self.window.data_tab.in_caixa,
+            "av_tec": self.window.data_tab.in_avtec,
+            "compensacao": self.window.data_tab.in_comp,
+            "endereco": self.window.data_tab.in_end,
+            "endereco_plantio": self.window.data_tab.in_end_plantio,
+            "microbacia": self.window.data_tab.in_micro,
+        }
+
+    @staticmethod
+    def _repolish_widget(widget) -> None:
+        try:
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+            widget.update()
+        except RuntimeError:
+            return
+
+    @staticmethod
+    def _base_tooltip_for_widget(widget) -> str:
+        cached = widget.property("_base_tooltip")
+        if cached is None:
+            cached = widget.toolTip()
+            widget.setProperty("_base_tooltip", cached)
+        return str(cached or "").strip()
+
+    def _set_widget_tooltip_feedback(self, widget, feedback_message: str = "") -> None:
+        base_tooltip = self._base_tooltip_for_widget(widget)
+        feedback_message = str(feedback_message or "").strip()
+        if base_tooltip and feedback_message:
+            widget.setToolTip(f"{base_tooltip}\n\n{feedback_message}")
+        else:
+            widget.setToolTip(feedback_message or base_tooltip)
+
+    def _reset_inline_feedback(self) -> None:
+        if hasattr(self.window.data_tab, "lbl_form_feedback"):
+            self.window.data_tab.lbl_form_feedback.clear()
+            self.window.data_tab.lbl_form_feedback.setProperty("role", "helper")
+            self.window.data_tab.lbl_form_feedback.setVisible(False)
+            self._repolish_widget(self.window.data_tab.lbl_form_feedback)
+        if hasattr(self.window.data_tab, "lbl_form_geocode"):
+            self.window.data_tab.lbl_form_geocode.clear()
+            self.window.data_tab.lbl_form_geocode.setProperty("role", "status-note")
+            self.window.data_tab.lbl_form_geocode.setVisible(False)
+            self._repolish_widget(self.window.data_tab.lbl_form_geocode)
+
+        seen_widgets = set()
+        for widget in self._field_widgets().values():
+            widget_id = id(widget)
+            if widget_id in seen_widgets:
+                continue
+            seen_widgets.add(widget_id)
+            widget.setStyleSheet("")
+            self._set_widget_tooltip_feedback(widget, "")
+            self._repolish_widget(widget)
+
+    def _focus_field(self, field_name: str) -> None:
+        widget = self._field_widgets().get(str(field_name or "").strip())
+        if widget is None:
+            return
+        line_edit = widget.lineEdit() if hasattr(widget, "lineEdit") and callable(widget.lineEdit) else None
+        if line_edit is not None:
+            line_edit.setFocus()
+            line_edit.selectAll()
+            return
+        if hasattr(widget, "setFocus"):
+            widget.setFocus()
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
+
+    def _apply_validation_feedback(self, presentation: FormValidationPresentation) -> None:
+        self._reset_inline_feedback()
+
+        severity = str(presentation.severity or "info").strip().lower()
+        role = {
+            "error": "feedback-error",
+            "warning": "feedback-warning",
+            "info": "feedback-info",
+            "success": "feedback-success",
+        }.get(severity, "helper")
+
+        feedback_lines = [str(presentation.summary_text or "").strip()]
+        detail_text = str(presentation.detail_text or "").strip()
+        duplicate_text = str(presentation.duplicate_text or "").strip()
+        if detail_text:
+            feedback_lines.append(detail_text)
+        if duplicate_text:
+            feedback_lines.append(duplicate_text)
+        feedback_lines = [line for line in feedback_lines if line]
+
+        if hasattr(self.window.data_tab, "lbl_form_feedback") and feedback_lines:
+            self.window.data_tab.lbl_form_feedback.setText("\n".join(feedback_lines))
+            self.window.data_tab.lbl_form_feedback.setProperty("role", role)
+            self.window.data_tab.lbl_form_feedback.setVisible(True)
+            self._repolish_widget(self.window.data_tab.lbl_form_feedback)
+
+        geocode_text = str(presentation.geocode_text or "").strip()
+        if hasattr(self.window.data_tab, "lbl_form_geocode") and geocode_text:
+            self.window.data_tab.lbl_form_geocode.setText(geocode_text)
+            self.window.data_tab.lbl_form_geocode.setVisible(True)
+            self._repolish_widget(self.window.data_tab.lbl_form_geocode)
+
+        for field_name, feedback in dict(presentation.field_feedback or {}).items():
+            widget = self._field_widgets().get(field_name)
+            if widget is None:
+                continue
+            palette = widget.palette()
+            widget.setStyleSheet(
+                build_field_feedback_stylesheet(
+                    background_color=palette.color(QPalette.ColorRole.Base).name(),
+                    text_color=palette.color(QPalette.ColorRole.Text).name(),
+                    severity=feedback.severity,
+                )
+            )
+            self._set_widget_tooltip_feedback(widget, feedback.message)
+            self._repolish_widget(widget)
+
     def confirm_discard_changes(self, action_text: str) -> bool:
         if not self.has_pending_changes():
             return True
         return msg_confirm(
-                self.window,
+            self.window,
             "Alterações pendentes",
             f"Existem alterações não salvas. Deseja descartá-las para {action_text}?",
         )
 
     def validate_as_you_type(self):
-        av_tec = self.window.data_tab.in_avtec.text().strip()
-        uid = self.window.selected.uid if self.window.selected else ""
-        dup = self.check_duplicate_av_tec(av_tec, uid)
+        record = self.read_form()
+        if (
+            self.window.selected is None
+            and not str(record.oficio_processo or "").strip()
+            and not str(record.av_tec or "").strip()
+            and not str(record.compensacao or "").strip()
+            and not str(record.endereco or "").strip()
+            and not str(record.endereco_plantio or "").strip()
+            and not str(record.microbacia or "").strip()
+            and not tuple(getattr(record, "plantios", ()) or ())
+        ):
+            self._reset_inline_feedback()
+            return
 
-        if dup:
-            self.window.data_tab.in_avtec.setStyleSheet(self._duplicate_av_tec_stylesheet())
-            self.window.data_tab.in_avtec.setToolTip(f"Esta Av. Técnica já existe na linha {dup - 1}.")
-        else:
-            self.window.data_tab.in_avtec.setStyleSheet("")
-            self.window.data_tab.in_avtec.setToolTip("")
+        uid = self.window.selected.uid if self.window.selected else ""
+        duplicate_row = self.check_duplicate_av_tec(str(record.av_tec or "").strip(), uid)
+        presentation = build_form_validation_presentation(
+            record=record,
+            duplicate_row=duplicate_row,
+        )
+        self._apply_validation_feedback(presentation)
 
     def _duplicate_av_tec_stylesheet(self) -> str:
         palette = self.window.data_tab.in_avtec.palette()
@@ -339,6 +476,7 @@ class FormController:
             self.window.data_tab.btn_manage_plantios.setEnabled(True)
             self.window.data_tab.in_end_plantio.setFocus()
             QMessageBox.warning(self.window, "Aviso", self._LOCKED_COMPENSADO_ERROR)
+            self.validate_as_you_type()
             self.update_form_action_buttons()
             self.window._update_address_search_enabled()
             return
@@ -346,6 +484,7 @@ class FormController:
         self.window.data_tab.in_end_plantio.setEnabled(checked)
         self.window.data_tab.btn_manage_plantios.setEnabled(checked)
         self.remember_current_state()
+        self.validate_as_you_type()
         self.update_form_action_buttons()
         self.window._update_address_search_enabled()
 
@@ -361,6 +500,7 @@ class FormController:
         if dialog.exec():
             self._set_form_plantios(dialog.plantios, block_signals=True)
             self.remember_current_state()
+            self.validate_as_you_type()
             self.update_form_action_buttons()
             self.window._update_address_search_enabled()
 
@@ -472,6 +612,13 @@ class FormController:
             compensado_checked=self.window.data_tab.chk_compensado.isChecked(),
             eletronico_value=self._checked_eletronico_value(),
             plantios=clone_plantios(self.window.form_plantios),
+            sn_checked=self.window.data_tab.chk_sn.isChecked(),
+            arquivado_checked=self.window.data_tab.chk_arquivado.isChecked(),
+            microbacia_resolver=getattr(
+                getattr(self.window, "shell_controller", None),
+                "resolve_microbacia_display_name",
+                None,
+            ),
         )
 
     def add_new(self):
@@ -493,14 +640,26 @@ class FormController:
             authoritative_records = list(preparation.base_records)
             validation = self.record_use_cases.validate_for_create(record, authoritative_records)
             if validation.error_message:
+                self.validate_as_you_type()
+                presentation = build_form_validation_presentation(
+                    record=record,
+                    duplicate_row=preparation.duplicate_row,
+                )
+                if presentation.focus_field:
+                    self._focus_field(presentation.focus_field)
                 QMessageBox.warning(self.window, "Erro", validation.error_message)
                 return
             duplicate = preparation.duplicate_row
             if duplicate and not msg_confirm(
                 self.window,
-                "Duplicado",
-            f"A Av. Tec. '{record.av_tec}' já existe na linha {duplicate - 1}. Cadastrar mesmo assim?",
+                "Possível duplicidade",
+                (
+                    f"A Av. Tec. '{record.av_tec}' já aparece na linha {duplicate - 1}. "
+                    "Revise o cadastro atual e continue apenas se realmente for um novo processo."
+                ),
             ):
+                self.validate_as_you_type()
+                self._focus_field("av_tec")
                 return
             write_result = self.persistence.execute_add(
                 record,
@@ -548,18 +707,32 @@ class FormController:
         authoritative_records = list(preparation.base_records)
         plantio_error = validate_record_plantios(record)
         if plantio_error:
+            self.validate_as_you_type()
+            self._focus_field("endereco_plantio")
             QMessageBox.warning(self.window, "Erro", plantio_error)
             return
         validation = self.record_use_cases.validate_for_update(record, authoritative_records)
         if validation.error_message:
+            self.validate_as_you_type()
+            presentation = build_form_validation_presentation(
+                record=record,
+                duplicate_row=preparation.duplicate_row,
+            )
+            if presentation.focus_field:
+                self._focus_field(presentation.focus_field)
             QMessageBox.warning(self.window, "Erro", validation.error_message)
             return
         duplicate = preparation.duplicate_row
         if duplicate and not msg_confirm(
             self.window,
-            "Duplicado",
-            f"A Av. Tec. '{record.av_tec}' já existe na linha {duplicate - 1}. Salvar mesmo assim?",
+            "Possível duplicidade",
+            (
+                f"A Av. Tec. '{record.av_tec}' já aparece na linha {duplicate - 1}. "
+                "Revise antes de salvar e continue só se a duplicidade for esperada."
+            ),
         ):
+            self.validate_as_you_type()
+            self._focus_field("av_tec")
             return
         write_result = self.persistence.execute_edit(
             record,
@@ -628,12 +801,11 @@ class FormController:
             self.window.data_tab.in_oficio.setEnabled(True)
             self.window.data_tab.in_end_plantio.setEnabled(False)
             self.window.data_tab.btn_manage_plantios.setEnabled(False)
-            self.window.data_tab.in_avtec.setStyleSheet("")
-            self.window.data_tab.in_avtec.setToolTip("")
             self.window.data_tab.table.clearSelection()
             self.window.last_marker_coords = None
             self.window.data_tab.btn_street_view.setEnabled(False)
 
+        self._reset_inline_feedback()
         self.window.shell_controller.refresh_tipo_controls()
         self.window._update_address_search_enabled()
         self.update_form_action_buttons()

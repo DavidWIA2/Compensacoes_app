@@ -175,14 +175,14 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     assert window.operations_tab.table.rowCount() == 2
     assert window.operations_tab.selected_event.event_id == "evt-1"
     assert window.operations_tab.btn_open_backup.isEnabled() is True
-    assert "Resumo visível: 2 operações" in window.operations_tab.lbl_summary.text()
+    assert "Foco do recorte: 2 operações" in window.operations_tab.lbl_summary.text()
     assert "Panorama operacional:" in window.operations_tab.lbl_highlights.text()
     assert "Sincronia remota: Supabase confirmado" in window.operations_tab.lbl_remote_sync.text()
     assert "Espelho local (SQLite): Sincronizado" in window.operations_tab.lbl_persistence.text()
     assert "Registros espelhados: 8/8" in window.operations_tab.lbl_persistence.text()
     assert "Resumo local (SQLite): 8 registros" in window.operations_tab.lbl_records_overview.text()
     assert "Sessão carregada: espelho local (SQLite) com 8 registro(s)." in window.operations_tab.lbl_session_source.text()
-    assert "Escrita autoritativa: SQLite primário | edit confirmada no espelho de planilha." in window.operations_tab.lbl_authoritative_write.text()
+    assert "Escrita autoritativa: SQLite primário | edit confirmada no espelho externo." in window.operations_tab.lbl_authoritative_write.text()
     assert "Identidade final reconciliada" in window.operations_tab.lbl_authoritative_write.text()
     assert "Escrita local (SQLite): edit sincronizada com 8 registro(s)." in window.operations_tab.lbl_mutation_sync.text()
     assert "Modo de escrita local: sincronização incremental." in window.operations_tab.lbl_mutation_sync.text()
@@ -452,7 +452,7 @@ def test_operations_tab_can_toggle_technical_details(ui_window_factory):
     window = ui_window_factory()
 
     assert window.operations_tab.technical_details_frame.isVisible() is False
-    assert window.operations_tab.btn_toggle_details.text() == "Diagnóstico técnico"
+    assert window.operations_tab.btn_toggle_details.text() == "Ver diagnóstico técnico"
 
     window.operations_tab.btn_toggle_details.click()
 
@@ -462,7 +462,7 @@ def test_operations_tab_can_toggle_technical_details(ui_window_factory):
     window.operations_tab.btn_toggle_details.click()
 
     assert window.operations_tab.technical_details_frame.isHidden() is True
-    assert window.operations_tab.btn_toggle_details.text() == "Diagnóstico técnico"
+    assert window.operations_tab.btn_toggle_details.text() == "Ver diagnóstico técnico"
     window.close()
 
 

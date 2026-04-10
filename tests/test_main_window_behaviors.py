@@ -258,8 +258,8 @@ def test_main_window_marks_demo_environment_and_uses_demo_database(monkeypatch, 
     window._refresh_window_chrome()
 
     assert window.persistence_service.db_path == demo_db
-    assert window.session_environment_label.text() == "Ambiente: Demonstração"
-    assert "[Demonstração]" in window.windowTitle()
+    assert window.session_environment_label.text() == "Ambiente: Demonstração isolada"
+    assert "Demonstração isolada" in window.windowTitle()
     window.close()
 
 
@@ -282,7 +282,7 @@ def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch
 
     assert len(window.records) == 1
     assert window.shell_controller.current_session_path() == DEFAULT_SINGLETON_SESSION_PATH
-    assert window.session_environment_label.text() == "Ambiente: Produção"
+    assert window.session_environment_label.text() == "Ambiente: Produção oficial"
     window.close()
 
 
@@ -3022,7 +3022,7 @@ def test_delete_selected_surfaces_lookup_errors(monkeypatch):
     window.delete_selected()
 
     assert reloaded == []
-    assert errors == ["Nao foi possivel excluir o registro: UID ausente"]
+    assert errors == ["Não foi possível excluir o registro: UID ausente"]
     window.close()
 
 
@@ -3798,7 +3798,7 @@ def test_duplicate_av_tec_highlight_keeps_current_palette_colors():
 
     style = window.data_tab.in_avtec.styleSheet()
 
-    assert "border: 2px solid #e74c3c;" in style
+    assert "border: 2px solid #d97706;" in style
     assert f"background-color: {expected_bg};" in style
     assert f"color: {expected_text};" in style
     assert "#fdf0ed" not in style
@@ -3830,8 +3830,9 @@ def test_duplicate_av_tec_highlight_can_use_sqlite_duplicate_lookup(monkeypatch)
     window.data_tab.in_avtec.setText("AT-1")
     window._validate_as_you_type()
 
-    assert "border: 2px solid #e74c3c;" in window.data_tab.in_avtec.styleSheet()
-    assert window.data_tab.in_avtec.toolTip() == "Esta Av. Técnica já existe na linha 9."
+    assert "border: 2px solid #d97706;" in window.data_tab.in_avtec.styleSheet()
+    assert "Av. Tec." in window.data_tab.in_avtec.toolTip()
+    assert "linha 9" in window.data_tab.in_avtec.toolTip()
     window.close()
 
 

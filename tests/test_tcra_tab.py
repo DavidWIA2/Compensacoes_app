@@ -150,7 +150,7 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert tab.card_cumpridos.lbl_value.text() == "1"
     assert tab.card_mpsp.lbl_value.text() == "1"
     assert "termos" in tab.lbl_context.text()
-    assert "Alertas" in tab.lbl_radar_summary.text()
+    assert "Foco do recorte" in tab.lbl_radar_summary.text()
     assert tab.lbl_import_status.isHidden() is True
     assert tab.overview_tabs.tabText(0) == "Seleção"
     assert "Inbox operacional (" in tab.overview_tabs.tabText(1)
@@ -923,7 +923,7 @@ def test_tcra_tab_quick_filters_update_counts_and_alert_style(tmp_path):
     get_app().processEvents()
 
     assert "Alertas (1)" in tab.quick_filter_buttons["alertas"].text()
-    assert "Prox. 30d (1)" in tab.quick_filter_buttons["proximos"].text()
+    assert "Próx. 30d (1)" in tab.quick_filter_buttons["proximos"].text()
     assert "Sem número (1)" in tab.quick_filter_buttons["sem_numero"].text()
 
     tab.quick_filter_buttons["alertas"].click()
@@ -1024,7 +1024,7 @@ def test_tcra_tab_quality_queue_selects_record(tmp_path):
     get_app().processEvents()
 
     assert tab.quality_table.rowCount() == 1
-    assert "Qualidade:" in tab.lbl_quality_summary.text()
+    assert "Qualidade cadastral:" in tab.lbl_quality_summary.text()
 
     tab.quality_table.selectRow(0)
     get_app().processEvents()

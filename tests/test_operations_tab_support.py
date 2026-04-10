@@ -10,7 +10,9 @@ from app.services.audit_service import AuditOverview
 from app.ui.tabs.operations_tab_support import (
     build_authoritative_write_text,
     build_context_text,
+    build_event_details_text,
     build_mutation_sync_text,
+    build_no_results_details_text,
     build_persistence_status_text,
     build_read_source_text,
     build_record_integrity_text,
@@ -78,8 +80,8 @@ def test_operations_tab_support_builds_overview_and_persistence_texts():
         },
     )()
 
-    assert "Sessão monitorada: dummy.xlsx" in build_context_text("dummy.xlsx", overview)
-    assert "Resumo visível: 2 operações" in build_visible_summary_text(overview)
+    assert "Base monitorada: dummy.xlsx" in build_context_text("dummy.xlsx", overview)
+    assert "Foco do recorte: 2 operações" in build_visible_summary_text(overview)
     assert "EDIT: 1 | IMPORT: 1" in build_visible_summary_text(overview)
     assert "Espelho local (SQLite): Sincronizado" in build_persistence_status_text(persistence_report)
     assert "Registros espelhados: 8/8" in build_persistence_status_text(persistence_report)
@@ -119,7 +121,7 @@ def test_operations_tab_support_builds_overview_and_persistence_texts():
     assert "Supabase confirmado" in remote_sync
     assert "Cache: sincronizado" in highlights
     assert "Sincronia: Supabase ok" in highlights
-    assert "Sessão: snapshot local" in highlights
+    assert "Sessão: cache local" in highlights
     assert "Leitura: cache local" in highlights
     assert "Escrita oficial: Supabase" in highlights
     assert "Base: valida" in highlights
@@ -196,7 +198,7 @@ def test_operations_tab_support_builds_write_and_runtime_texts():
     assert "Escrita local (SQLite): edit sincronizada com 8 registro(s)." in mutation_text
     assert "Modo de escrita local: sincronização incremental." in mutation_text
     write_text = build_authoritative_write_text(write_status)
-    assert "Escrita autoritativa: SQLite primário | edit confirmada no espelho de planilha." in write_text
+    assert "Escrita autoritativa: SQLite primário | edit confirmada no espelho externo." in write_text
     assert "Identidade final reconciliada" in write_text
     runtime_texts = build_runtime_overview_texts(runtime_report)
     assert "Sincronizando espelho local..." in runtime_texts.summary
@@ -272,7 +274,7 @@ def test_operations_tab_support_describes_record_integrity_issues():
             "warning_count": 2,
             "analyzed_records": 10,
             "affected_records_count": 2,
-            "summary": "Base com pendencias estruturais.",
+            "summary": "Base com pendências estruturais.",
             "issues": (
                 type("Issue", (), {"message": "UID duplicado"})(),
                 type("Issue", (), {"message": "Latitude invalida"})(),
@@ -288,4 +290,29 @@ def test_operations_tab_support_describes_record_integrity_issues():
 
     assert "1 erro(s) e 2 alerta(s)" in text
     assert "UID duplicado" in text
-    assert "Base: inconsistencias" in highlights
+    assert "Base: inconsistências" in highlights
+
+
+def test_operations_tab_support_builds_professional_event_detail_text():
+    event = type(
+        "Event",
+        (),
+        {
+            "timestamp": "2026-04-09T12:00:00+00:00",
+            "action": "edit",
+            "summary": "Registro alterado: AT-1",
+            "backup_path": "C:/backup/at1.json",
+            "metadata": {"uid": "uid-1"},
+            "before": {"status": "pendente"},
+            "after": {"status": "compensado"},
+        },
+    )()
+
+    text = build_event_details_text(event)
+
+    assert "Resumo da operação" in text
+    assert "Registro alterado: AT-1" in text
+    assert "C:/backup/at1.json" in text
+    assert "Estado anterior" in text
+    assert "Estado posterior" in text
+    assert "Nenhuma operação corresponde" in build_no_results_details_text()

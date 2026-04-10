@@ -77,27 +77,58 @@ class AppAccessSession:
         return self.environment == AccessEnvironment.DEMO
 
     @property
+    def is_production(self) -> bool:
+        return self.environment == AccessEnvironment.PRODUCTION
+
+    @property
+    def is_admin(self) -> bool:
+        return str(self.app_role or "").strip().lower() == "admin"
+
+    @property
+    def role_display_name(self) -> str:
+        normalized = str(self.app_role or "").strip().lower()
+        if normalized == "admin":
+            return "Administrador"
+        if normalized == "viewer":
+            return "Leitura"
+        if normalized == "demo":
+            return "Demonstração"
+        if normalized:
+            return "Edição"
+        if self.environment == AccessEnvironment.DEMO:
+            return "Demonstração"
+        return "Local"
+
+    @property
+    def environment_display_name(self) -> str:
+        if self.environment == AccessEnvironment.DEMO:
+            return "Demonstração isolada"
+        if self.environment == AccessEnvironment.PRODUCTION:
+            return "Produção oficial"
+        return "Contingência local"
+
+    @property
     def environment_chip_text(self) -> str:
         if self.environment == AccessEnvironment.DEMO:
-            return "Ambiente: Demonstração"
+            return "Ambiente: Demonstração isolada"
         if self.environment == AccessEnvironment.PRODUCTION:
-            return "Ambiente: Produção"
-        return "Ambiente: Local"
+            return "Ambiente: Produção oficial"
+        return "Ambiente: Contingência local"
 
     @property
     def environment_tooltip_text(self) -> str:
         if self.environment == AccessEnvironment.DEMO:
             if self.supabase_url:
-                return "Modo demonstração autenticado no Supabase e executando com base fictícia isolada."
-            return "Modo demonstração com base fictícia local reiniciada a cada abertura."
+                return "Modo de demonstração autenticado no Supabase, usando uma base fictícia isolada e segura para treinamento."
+            return "Modo de demonstração com base fictícia local reiniciada a cada abertura, sem impacto na produção."
         if self.environment == AccessEnvironment.PRODUCTION:
             identity = self.user_email or self.user_id or "usuário autenticado"
-            role_suffix = f" (perfil: {self.app_role})" if self.app_role else ""
+            role_suffix = f" (perfil: {self.role_display_name})" if self.app_role else ""
             return (
-                f"Acesso de produção autenticado via Supabase para {identity}{role_suffix}, "
-                "com cache local sincronizado da base oficial."
+                f"Acesso à produção oficial autenticado via Supabase para {identity}{role_suffix}, "
+                "com cache local sincronizado da base protegida."
             )
-        return "Inicialização local sem gateway de autenticação."
+        return "Sessão local de contingência, sem autenticação remota e sem impacto direto na base oficial."
 
     def settings_name(self, base_name: str) -> str:
         if self.environment == AccessEnvironment.DEMO:

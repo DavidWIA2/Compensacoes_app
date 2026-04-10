@@ -7,7 +7,7 @@ from app.services.audit_service import format_audit_timestamp
 
 
 COMPENSACOES_SEARCH_PLACEHOLDER = (
-    "Buscar compensações por ofício, av. tec., endereço ou microbacia..."
+    "Buscar compensações por ofício, Av. Tec., endereço ou microbacia..."
 )
 TCRA_SEARCH_PLACEHOLDER = (
     "Buscar TCRAs por processo, local, órgão, evento ou observação..."
@@ -45,21 +45,48 @@ def build_user_identity_label_text(access_session: object | None) -> str:
 def build_user_identity_tooltip_text(access_session: object | None) -> str:
     environment = _environment_kind(access_session)
     user_email = str(getattr(access_session, "user_email", "") or "").strip()
-    role = str(getattr(access_session, "app_role", "") or "").strip()
+    role_display = _role_display_name(access_session)
+    environment_display = _environment_display_name(access_session)
     if user_email:
-        lines = [f"Usuário autenticado: {user_email}."]
-        if role:
-            lines.append(f"Perfil de acesso: {role}.")
+        lines = [f"Usuário autenticado: {user_email}.", f"Ambiente atual: {environment_display}."]
+        if role_display:
+            lines.append(f"Perfil de acesso: {role_display}.")
         if environment == "production":
             lines.append('Use "Sair" para encerrar a sessão e voltar à tela de login.')
         return "\n".join(lines)
     if environment == "demo":
-        return 'Sessão de demonstração ativa. Use "Sair" para voltar à tela de login.'
-    return 'Sessão local ativa. Use "Sair" para voltar à tela de login.'
+        return 'Sessão de demonstração isolada ativa. Use "Sair" para voltar à tela de login.'
+    return 'Sessão local de contingência ativa. Use "Sair" para voltar à tela de login.'
 
 
 def _environment_kind(access_session: object | None) -> str:
     return str(getattr(access_session, "environment", "") or "").strip().lower()
+
+
+def _environment_display_name(access_session: object | None) -> str:
+    session_value = getattr(access_session, "environment_display_name", "")
+    if str(session_value).strip():
+        return str(session_value).strip()
+    environment = _environment_kind(access_session)
+    if environment == "production":
+        return "Produção oficial"
+    if environment == "demo":
+        return "Demonstração isolada"
+    return "Contingência local"
+
+
+def _role_display_name(access_session: object | None) -> str:
+    session_value = getattr(access_session, "role_display_name", "")
+    if str(session_value).strip():
+        return str(session_value).strip()
+    role = str(getattr(access_session, "app_role", "") or "").strip().lower()
+    if role == "admin":
+        return "Administrador"
+    if role == "viewer":
+        return "Leitura"
+    if role:
+        return "Edição"
+    return ""
 
 
 def _has_active_session(path: str) -> bool:
@@ -109,11 +136,11 @@ def build_sync_label_text(
     if remote_status == "refreshed":
         return "Sincronia: Supabase ok"
     if remote_status in {"failed", "unavailable"}:
-        return "Sincronia: offline"
+        return "Sincronia: cache em uso"
     if remote_status == "deferred":
         return "Sincronia: pausada"
     if str(getattr(persistence_report, "synced_at", "") or "").strip():
-        return "Sincronia: cache válido"
+        return "Sincronia: cache atualizado"
     return "Sincronia: aguardando"
 
 
@@ -143,7 +170,7 @@ def build_sync_tooltip_text(
     persistence_synced_at = str(getattr(persistence_report, "synced_at", "") or "").strip()
 
     if remote_status_value == "refreshed":
-        lines = [f"Última leitura remota confirmada no Supabase para {workbook_name}."]
+        lines = [f"Leitura remota confirmada no Supabase para {workbook_name}."]
         if synced_at:
             lines.append(f"Cache local sincronizado em {format_audit_timestamp(synced_at)}.")
         if checked_at:
@@ -162,7 +189,7 @@ def build_sync_tooltip_text(
 
     if remote_status_value in {"failed", "unavailable"}:
         lines = [
-            "A última tentativa de sincronização com o Supabase falhou; o app continua usando o cache local."
+            "A última tentativa de sincronização com o Supabase falhou. O app continua operando com o cache local válido."
         ]
         if checked_at:
             lines.append(f"Última checagem remota: {format_audit_timestamp(checked_at)}.")
@@ -176,7 +203,7 @@ def build_sync_tooltip_text(
 
     if persistence_synced_at:
         return (
-            "A interface está usando o cache local sincronizado da produção.\n"
+            "A interface está usando o cache local já sincronizado com a produção.\n"
             f"Última sincronização válida: {format_audit_timestamp(persistence_synced_at)}."
         )
 
@@ -189,13 +216,6 @@ def build_records_label_text(total_records: int, filtered_records: int) -> str:
     if filtered_records == total_records:
         return f"Registros: {total_records}"
     return f"Registros: {filtered_records} de {total_records}"
-
-
-def build_records_tooltip_text(search_text: str) -> str:
-    normalized_search = str(search_text or "").strip()
-    if normalized_search:
-        return f"Busca atual: {normalized_search}"
-    return "Resumo do recorte atualmente visível na tela."
 
 
 def _payload_value(payload: object | None, key: str, default: object) -> object:
@@ -227,7 +247,7 @@ def build_records_tooltip_text(
     lines = [
         f"Busca atual: {normalized_search}"
         if normalized_search
-        else "Resumo do recorte atualmente visivel na tela."
+        else "Resumo do recorte atualmente visível na tela."
     ]
     integrity_text = build_integrity_tooltip_text(record_integrity_report)
     if integrity_text:
@@ -275,9 +295,9 @@ def build_write_label_text(status: object | None, *, has_active_session: bool) -
     if status_value == "remote_authoritative":
         return "Escrita: Supabase"
     if status_value == "sqlite_primary":
-        return "Escrita: SQLite -> espelho"
+        return "Escrita: SQLite + cache"
     if status_value == "session_fallback":
-        return "Escrita: memória -> espelho"
+        return "Escrita: fallback local"
     if status_value == "rolled_back_after_excel_failure":
         return "Escrita: rollback"
     if status_value == "excel_failure":
@@ -289,32 +309,32 @@ def build_write_tooltip_text(status: object | None, *, has_active_session: bool)
     if not has_active_session:
         return "Nenhum banco local carregado."
     if status is None:
-        return "Nenhuma escrita autoritativa concluída no banco local."
+        return "Nenhuma escrita autoritativa concluída nesta sessão."
 
     status_value = str(getattr(status, "status", "") or "").strip()
     operation = str(getattr(status, "operation", "") or "").strip() or "mutação"
     issues = tuple(getattr(status, "issues", ()) or ())
-    lines = [f"Última mutação: {operation}."]
+    lines = [f"Última operação: {operation}."]
 
     if status_value == "sqlite_authoritative":
         lines.append("Fluxo: SQLite como autoridade operacional do banco local.")
     elif status_value == "session_authoritative":
-        lines.append("Fluxo: estado em memória mantido sem confirmação em planilha externa.")
+        lines.append("Fluxo: estado em memória mantido sem confirmação em espelho externo.")
     elif status_value == "remote_authoritative":
-        lines.append("Fluxo: Supabase como autoridade da produção com cache SQLite sincronizado.")
+        lines.append("Fluxo: base oficial gravada no Supabase e cache local atualizado em seguida.")
     elif status_value == "sqlite_primary":
-        lines.append("Fluxo: SQLite primário com espelho em planilha externa.")
+        lines.append("Fluxo: gravação local confirmada e refletida no cache operacional.")
     elif status_value == "session_fallback":
-        lines.append("Fluxo: fallback em memória com confirmação em planilha externa.")
+        lines.append("Fluxo: gravação preservada localmente após falha na atualização completa do cache.")
     elif status_value == "rolled_back_after_excel_failure":
-        lines.append("Fluxo: falha no espelho de planilha com rollback aplicado no SQLite.")
+        lines.append("Fluxo: falha no espelho externo com rollback aplicado no banco local.")
     elif status_value == "excel_failure":
-        lines.append("Fluxo: falha ao confirmar a mutação no espelho de planilha.")
+        lines.append("Fluxo: falha ao confirmar a operação no espelho externo.")
     else:
-        lines.append("Fluxo: aguardando novas mutações.")
+        lines.append("Fluxo: aguardando novas operações.")
 
     if bool(getattr(status, "finalized", False)):
-        lines.append("Identidade final reconciliada após gravação.")
+        lines.append("Identidade final reconciliada após a gravação.")
     if issues:
         lines.append("Observações: " + " | ".join(str(issue) for issue in issues))
     return "\n".join(lines)
@@ -334,11 +354,11 @@ def build_window_title(
 
     environment = _environment_kind(access_session)
     if environment == "production":
-        title = f"{app_title}[*] - Produção sincronizada"
+        title = f"{app_title}[*] - Produção oficial sincronizada"
     elif environment == "demo":
-        title = f"{app_title}[*] - Demonstração"
+        title = f"{app_title}[*] - Demonstração isolada"
     else:
-        title = f"{app_title}[*] - Base local"
+        title = f"{app_title}[*] - Base local de contingência"
     if total_records > 0:
         title = f"{title} ({filtered_records}/{total_records})"
     return title
@@ -366,9 +386,9 @@ def build_window_chrome_snapshot(
     if not has_active_session:
         file_label = "Fonte: local"
     elif environment == "production":
-        file_label = "Fonte: cache sincronizado"
+        file_label = "Fonte: cache oficial"
     elif environment == "demo":
-        file_label = "Fonte: demonstração"
+        file_label = "Fonte: demonstração isolada"
     else:
         file_label = f"Fonte: {display_label}"
 

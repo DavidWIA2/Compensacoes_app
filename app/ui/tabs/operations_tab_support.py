@@ -21,6 +21,70 @@ class RuntimeOverviewTextPayload:
     cancel_enabled: bool
 
 
+def build_event_details_text(event: AuditEvent | None) -> str:
+    if event is None:
+        return (
+            "Nenhuma operação selecionada.\n\n"
+            "Selecione um item da linha do tempo para revisar a ação registrada, "
+            "o backup disponível e o conteúdo técnico associado."
+        )
+
+    lines = [
+        "Resumo da operação",
+        f"- Data/Hora: {format_audit_timestamp(getattr(event, 'timestamp', ''))}",
+        f"- Ação: {str(getattr(event, 'action', '') or '').strip().upper() or '--'}",
+        f"- Síntese: {str(getattr(event, 'summary', '') or '').strip() or '--'}",
+        f"- Backup: {'Disponível' if audit_backup_available(event) else 'Não disponível'}",
+    ]
+
+    backup_path = str(getattr(event, "backup_path", "") or "").strip()
+    if backup_path:
+        lines.append(f"- Caminho do backup: {backup_path}")
+
+    metadata = getattr(event, "metadata", None)
+    before = getattr(event, "before", None)
+    after = getattr(event, "after", None)
+
+    if metadata:
+        lines.extend(
+            [
+                "",
+                "Metadados",
+                json_like_block(metadata),
+            ]
+        )
+    if before is not None:
+        lines.extend(
+            [
+                "",
+                "Estado anterior",
+                json_like_block(before),
+            ]
+        )
+    if after is not None:
+        lines.extend(
+            [
+                "",
+                "Estado posterior",
+                json_like_block(after),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def build_no_results_details_text() -> str:
+    return (
+        "Nenhuma operação corresponde aos filtros atuais.\n\n"
+        "Revise ação, backup e busca textual para ampliar o recorte do histórico."
+    )
+
+
+def json_like_block(payload: object) -> str:
+    import json
+
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def _payload_value(payload: object | None, key: str, default: object) -> object:
     if isinstance(payload, dict):
         return payload.get(key, default)
@@ -45,11 +109,11 @@ def build_status_highlights_text(
         if remote_status == "refreshed":
             chips.append("Sincronia: Supabase ok")
         elif remote_status in {"failed", "unavailable"}:
-            chips.append("Sincronia: offline")
+            chips.append("Sincronia: cache em uso")
         elif remote_status == "deferred":
             chips.append("Sincronia: pausada")
         elif persistence_report is not None and str(getattr(persistence_report, "synced_at", "") or "").strip():
-            chips.append("Sincronia: cache válido")
+            chips.append("Sincronia: cache atualizado")
         else:
             chips.append("Sincronia: aguardando")
 
@@ -57,8 +121,8 @@ def build_status_highlights_text(
         persistence_status = str(getattr(persistence_report, "status", "") or "").strip()
         persistence_map = {
             "sincronizado": "Cache: sincronizado",
-            "atencao": "Cache: em atenção",
-            "ausente": "Cache: não sincronizado",
+            "atencao": "Cache: revisar",
+            "ausente": "Cache: pendente",
             "indisponivel": "Cache: indisponível",
         }
         chips.append(persistence_map.get(persistence_status, f"Cache: {persistence_status or 'aguardando'}"))
@@ -68,7 +132,7 @@ def build_status_highlights_text(
         strategy = str(getattr(session_source_status, "strategy", "") or "").strip()
         if source == "sqlite":
             if strategy == "sqlite_snapshot":
-                chips.append("Sessão: snapshot local")
+                chips.append("Sessão: cache local")
             else:
                 chips.append("Sessão: cache local")
         elif source:
@@ -86,7 +150,7 @@ def build_status_highlights_text(
             "session_authoritative": "Escrita oficial: memória",
             "session_fallback": "Escrita: fallback local",
             "rolled_back_after_excel_failure": "Escrita: rollback",
-            "excel_failure": "Escrita: atenção",
+            "excel_failure": "Escrita: revisar",
         }
         chips.append(write_map.get(write_status, "Escrita: aguardando"))
 
@@ -96,7 +160,7 @@ def build_status_highlights_text(
         if issue_count == 0:
             chips.append("Base: valida")
         elif error_count > 0:
-            chips.append("Base: inconsistencias")
+            chips.append("Base: inconsistências")
         else:
             chips.append("Base: alertas")
 
@@ -108,14 +172,14 @@ def build_status_highlights_text(
     if authoritative_write_status is not None:
         issues.extend(str(item) for item in getattr(authoritative_write_status, "issues", ()) or ())
     if record_integrity_report is not None and int(_payload_value(record_integrity_report, "issue_count", 0) or 0) > 0:
-        issues.append("integridade da base com pendencias")
+        issues.append("integridade da base com pendências")
     if record_read_status is not None:
         issues.extend(str(item) for item in getattr(record_read_status, "issues", ()) or ())
     if issues:
         chips.append("Atenção: ver detalhes")
 
     if not chips:
-        return "Panorama operacional: aguardando sessão."
+        return "Panorama operacional: aguardando uma base ativa."
     return "Panorama operacional: " + " | ".join(chips)
 
 
@@ -128,14 +192,14 @@ def build_remote_sync_text(
     environment = str(getattr(access_session, "environment", "") or "").strip().lower()
     if environment != "production":
         if environment == "demo":
-            return "Sincronia remota: não se aplica no ambiente de demonstração."
-        return "Sincronia remota: não se aplica fora da produção."
+            return "Sincronia remota: não se aplica no ambiente de demonstração isolada."
+        return "Sincronia remota: não se aplica fora da produção oficial."
 
     if remote_status is None:
         last_synced_at = str(getattr(persistence_report, "synced_at", "") or "").strip()
         if last_synced_at:
             return (
-                "Sincronia remota: usando cache local sincronizado da produção.\n"
+                "Sincronia remota: usando o cache local já sincronizado com a produção.\n"
                 f"Última sincronização válida no cache: {format_audit_timestamp(last_synced_at)}"
             )
         return "Sincronia remota: aguardando a primeira checagem com o Supabase nesta sessão."
@@ -166,7 +230,9 @@ def build_remote_sync_text(
         return "\n".join(lines)
 
     if status in {"failed", "unavailable"}:
-        lines = ["Sincronia remota: falha na última tentativa com o Supabase; o app segue usando o cache local."]
+        lines = [
+            "Sincronia remota: falha na última tentativa com o Supabase; o app segue operando com o cache local válido."
+        ]
         if checked_at:
             lines.append(f"Última checagem remota: {format_audit_timestamp(checked_at)}")
         if synced_at:
@@ -193,9 +259,9 @@ def build_context_text(session_path: str, overview: AuditOverview) -> str:
     session_label = session_path or "nenhuma"
     return "\n".join(
         [
-            f"Sessão monitorada: {session_label}",
+            f"Base monitorada: {session_label}",
             (
-                f"Última operação: {overview.latest_timestamp or '--'} | "
+                f"Última operação registrada: {overview.latest_timestamp or '--'} | "
                 f"{overview.latest_summary or 'Nenhuma operação registrada.'}"
             ),
         ]
@@ -206,15 +272,15 @@ def build_visible_summary_text(overview: AuditOverview) -> str:
     if overview.action_counts:
         actions_text = " | ".join(f"{action}: {count}" for action, count in overview.action_counts)
     else:
-        actions_text = "Nenhuma operação corresponde aos filtros atuais."
+        actions_text = "Nenhuma operação corresponde ao recorte atual."
     return "\n".join(
         [
             (
-                f"Resumo visível: {overview.total_events} operações | "
+                f"Foco do recorte: {overview.total_events} operações | "
                 f"{overview.events_today} hoje | "
                 f"{overview.available_backups}/{overview.configured_backups} backups disponíveis"
             ),
-            f"Ações em destaque: {actions_text}",
+            f"Operações em destaque: {actions_text}",
         ]
     )
 
@@ -275,7 +341,7 @@ def build_record_overview_text(report: Optional[PersistenceRecordOverviewReport]
         return "Resumo local (SQLite): o espelho local não está disponível nesta sessão."
 
     if report.status == "ausente":
-        return "Resumo local (SQLite): a sessão ainda não foi sincronizada para consultas locais."
+        return "Resumo local (SQLite): a base ainda não foi sincronizada para consultas locais."
 
     lines = [
         (
@@ -304,7 +370,7 @@ def build_record_overview_text(report: Optional[PersistenceRecordOverviewReport]
 
 def build_record_integrity_text(report: object | None) -> str:
     if report is None:
-        return "Integridade da base: aguardando validacao estrutural dos registros."
+        return "Integridade da base: aguardando validação estrutural dos registros."
 
     issue_count = int(_payload_value(report, "issue_count", 0) or 0)
     error_count = int(_payload_value(report, "error_count", 0) or 0)
@@ -316,7 +382,7 @@ def build_record_integrity_text(report: object | None) -> str:
 
     if issue_count == 0:
         return (
-            "Integridade da base: nenhuma inconsistencia estrutural detectada.\n"
+            "Integridade da base: nenhuma inconsistência estrutural detectada.\n"
             f"Registros analisados: {analyzed_records}"
         )
 
@@ -371,7 +437,7 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
 
 def build_session_source_text(status: object | None) -> str:
     if status is None:
-        return "Sessão carregada: aguardando leitura inicial da sessão."
+        return "Sessão carregada: aguardando leitura inicial da base."
 
     source = str(getattr(status, "source", "") or "").strip()
     strategy = str(getattr(status, "strategy", "") or "").strip()
@@ -382,7 +448,7 @@ def build_session_source_text(status: object | None) -> str:
     if source == "sqlite":
         lines = [f"Sessão carregada: espelho local (SQLite) com {filtered_records} registro(s)."]
         if strategy == "sqlite_snapshot":
-            lines.append("Modo de carga da sessão: snapshot local validado.")
+            lines.append("Modo de carga: snapshot local validado.")
         if synced_at:
             lines.append(f"Última sincronização usada na carga: {format_audit_timestamp(synced_at)}")
         return "\n".join(lines)
@@ -395,7 +461,7 @@ def build_session_source_text(status: object | None) -> str:
 
 def build_mutation_sync_text(status: object | None) -> str:
     if status is None:
-        return "Escrita local (SQLite): nenhuma mutação registrada nesta sessão."
+        return "Escrita local (SQLite): nenhuma operação registrada nesta sessão."
 
     sync_status = str(getattr(status, "status", "") or "").strip()
     operation = str(getattr(status, "operation", "") or "").strip() or "mutação"
@@ -411,7 +477,7 @@ def build_mutation_sync_text(status: object | None) -> str:
         elif strategy == "snapshot_rebuild":
             lines.append("Modo de escrita local: reconstrução completa do snapshot.")
         elif strategy == "remote_snapshot_refresh":
-            lines.append("Modo de escrita local: refresh completo do cache remoto.")
+            lines.append("Modo de escrita local: atualização completa do cache remoto.")
         if synced_at:
             lines.append(f"Última sincronização de escrita: {format_audit_timestamp(synced_at)}")
         if issues:
@@ -430,15 +496,15 @@ def build_mutation_sync_text(status: object | None) -> str:
             lines.append("Detalhes: " + " | ".join(str(issue) for issue in issues))
         return "\n".join(lines)
 
-    return "Escrita local (SQLite): aguardando mutações da sessão."
+    return "Escrita local (SQLite): aguardando novas operações."
 
 
 def build_authoritative_write_text(status: object | None) -> str:
     if status is None:
-        return "Escrita autoritativa: nenhuma mutação concluída nesta sessão."
+        return "Escrita autoritativa: nenhuma operação concluída nesta sessão."
 
     status_value = str(getattr(status, "status", "") or "").strip()
-    operation = str(getattr(status, "operation", "") or "").strip() or "mutação"
+    operation = str(getattr(status, "operation", "") or "").strip() or "operação"
     authority_source = str(getattr(status, "authority_source", "") or "").strip() or "session"
     sqlite_strategy = str(getattr(status, "sqlite_strategy", "") or "").strip()
     synced_at = str(getattr(status, "synced_at", "") or "").strip()
@@ -448,14 +514,14 @@ def build_authoritative_write_text(status: object | None) -> str:
     issues = tuple(getattr(status, "issues", ()) or ())
 
     if status_value == "sqlite_primary":
-        lines = [f"Escrita autoritativa: SQLite primário | {operation} confirmada no espelho de planilha."]
+        lines = [f"Escrita autoritativa: SQLite primário | {operation} confirmada no espelho externo."]
         lines.append(f"Fluxo persistido: {record_count} registro(s) projetados para a sessão.")
         if sqlite_strategy == "incremental":
-            lines.append("Fluxo autoritativo: escrita local incremental antes do espelho de planilha.")
+            lines.append("Fluxo autoritativo: escrita local incremental antes do espelho externo.")
         elif sqlite_strategy == "snapshot_rebuild":
-            lines.append("Fluxo autoritativo: reconstrução do snapshot local antes do espelho de planilha.")
+            lines.append("Fluxo autoritativo: reconstrução do snapshot local antes do espelho externo.")
         if finalized:
-            lines.append("Identidade final reconciliada após a gravação no espelho de planilha.")
+            lines.append("Identidade final reconciliada após a gravação no espelho externo.")
         if synced_at:
             lines.append(f"Última confirmação local: {format_audit_timestamp(synced_at)}")
         if issues:
@@ -468,7 +534,7 @@ def build_authoritative_write_text(status: object | None) -> str:
         if sqlite_strategy == "remote_snapshot_refresh":
             lines.append("Fluxo autoritativo: sincronização completa do cache local após a RPC remota.")
         elif sqlite_strategy == "incremental":
-            lines.append("Fluxo autoritativo: fallback incremental do cache local após a escrita remota.")
+            lines.append("Fluxo autoritativo: atualização incremental do cache local após a escrita remota.")
         elif sqlite_strategy == "snapshot_rebuild":
             lines.append("Fluxo autoritativo: reconstrução local do snapshot após a escrita remota.")
         if synced_at:
@@ -493,9 +559,9 @@ def build_authoritative_write_text(status: object | None) -> str:
         return "\n".join(lines)
 
     if status_value == "session_authoritative":
-        lines = [f"Escrita autoritativa: sessão em memória | {operation} persistida sem planilha externa."]
+        lines = [f"Escrita autoritativa: sessão em memória | {operation} persistida sem espelho externo."]
         if authority_source != "sqlite":
-            lines.append("O SQLite não estava disponível como fonte primária desta mutação.")
+            lines.append("O SQLite não estava disponível como fonte primária desta operação.")
         if synced_at:
             lines.append(f"Último status local conhecido: {format_audit_timestamp(synced_at)}")
         if issues:
@@ -503,9 +569,9 @@ def build_authoritative_write_text(status: object | None) -> str:
         return "\n".join(lines)
 
     if status_value == "session_fallback":
-        lines = [f"Escrita autoritativa: fallback em memória | {operation} confirmada no espelho de planilha."]
+        lines = [f"Escrita autoritativa: fallback em memória | {operation} confirmada no espelho externo."]
         if authority_source != "sqlite":
-            lines.append("O SQLite não estava apto para ser a fonte primária desta mutação.")
+            lines.append("O SQLite não estava apto para ser a fonte primária desta operação.")
         if synced_at:
             lines.append(f"Último status local conhecido: {format_audit_timestamp(synced_at)}")
         if issues:
@@ -513,18 +579,18 @@ def build_authoritative_write_text(status: object | None) -> str:
         return "\n".join(lines)
 
     if status_value == "rolled_back_after_excel_failure" or rollback_applied:
-        lines = [f"Escrita autoritativa: falha ao espelhar {operation} na planilha externa; rollback local aplicado."]
+        lines = [f"Escrita autoritativa: falha ao espelhar {operation} no espelho externo; rollback local aplicado."]
         if issues:
             lines.append("Detalhes: " + " | ".join(str(issue) for issue in issues))
         return "\n".join(lines)
 
     if status_value == "excel_failure":
-        lines = [f"Escrita autoritativa: falha ao aplicar {operation} na planilha externa."]
+        lines = [f"Escrita autoritativa: falha ao aplicar {operation} no espelho externo."]
         if issues:
             lines.append("Detalhes: " + " | ".join(str(issue) for issue in issues))
         return "\n".join(lines)
 
-    return "Escrita autoritativa: aguardando mutações da sessão."
+    return "Escrita autoritativa: aguardando novas operações da sessão."
 
 
 def build_runtime_overview_texts(

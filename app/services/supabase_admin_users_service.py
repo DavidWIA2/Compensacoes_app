@@ -140,6 +140,25 @@ class SupabaseAdminUsersService:
         )
         return self._parse_user(payload.get("user") or {})
 
+    def set_user_role(
+        self,
+        access_session: AppAccessSession,
+        *,
+        user_id: str,
+        role: str,
+    ) -> AdminUserRecord:
+        payload = self._request_json(
+            "POST",
+            function_name=self.ADMIN_USERS_FUNCTION,
+            payload={
+                "action": "set_role",
+                "user_id": str(user_id or "").strip(),
+                "role": str(role or "editor").strip().lower(),
+            },
+            access_session=access_session,
+        )
+        return self._parse_user(payload.get("user") or {})
+
     def delete_user(
         self,
         access_session: AppAccessSession,
@@ -213,13 +232,13 @@ class SupabaseAdminUsersService:
     def _build_function_url(self, function_name: str) -> str:
         base_url = str(self.production_profile.url or "").strip().rstrip("/")
         if not base_url:
-            raise AdminUsersError("A URL de producao do Supabase nao esta configurada.")
+            raise AdminUsersError("A URL da produção oficial do Supabase não está configurada.")
         return f"{base_url}/functions/v1/{function_name}"
 
     def _build_headers(self, access_session: AppAccessSession | None) -> dict[str, str]:
         publishable_key = str(self.production_profile.publishable_key or "").strip()
         if not publishable_key:
-            raise AdminUsersError("A chave publishable de producao nao esta configurada.")
+            raise AdminUsersError("A chave publishable da produção oficial não está configurada.")
 
         headers = {
             "apikey": publishable_key,
@@ -234,9 +253,9 @@ class SupabaseAdminUsersService:
     @staticmethod
     def _validate_admin_session(access_session: AppAccessSession) -> None:
         if access_session.environment != AccessEnvironment.PRODUCTION:
-            raise AdminUsersError("A administração de usuários só está disponível em Produção.")
+            raise AdminUsersError("A administração de usuários só está disponível na Produção oficial.")
         if str(access_session.app_role or "").strip().lower() != "admin":
-            raise AdminUsersError("Apenas administradores podem gerenciar usuários.")
+            raise AdminUsersError("Apenas administradores ativos podem gerenciar usuários.")
         access_token = str(access_session.access_token or "").strip()
         if not access_token:
             raise AdminUsersError("A sessão atual não possui token válido para o backend administrativo.")

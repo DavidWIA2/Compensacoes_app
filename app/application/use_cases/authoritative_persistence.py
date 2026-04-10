@@ -417,7 +417,7 @@ class AuthoritativePersistenceUseCases:
 
         sync_service = getattr(self.access_service, "production_sync_service", None)
         if sync_service is None:
-            issue = "Servico de sincronizacao da producao indisponivel para leitura remote-first."
+            issue = "Serviço de sincronização da produção indisponível para leitura remote-first."
             logger.warning(issue)
             return build_remote_snapshot_refresh_result(
                 status="unavailable",
@@ -434,7 +434,7 @@ class AuthoritativePersistenceUseCases:
                 session_path=normalized_path,
             )
         except Exception as exc:
-            issue = f"Falha ao sincronizar snapshot remoto antes da leitura: {exc}"
+            issue = f"Falha ao sincronizar o snapshot remoto antes da leitura: {exc}"
             logger.warning(issue, exc_info=True)
             return build_remote_snapshot_refresh_result(
                 status="failed",
@@ -486,7 +486,7 @@ class AuthoritativePersistenceUseCases:
         target_db_path = getattr(self.persistence_service, "db_path", None)
 
         if sync_service is None:
-            issue = "Servico de sincronizacao da producao indisponivel para atualizar o cache local."
+            issue = "Serviço de sincronização da produção indisponível para atualizar o cache local."
         else:
             try:
                 sync_service.sync_authenticated_client(
@@ -509,13 +509,13 @@ class AuthoritativePersistenceUseCases:
                     source="sqlite" if synced_records else "projection",
                 )
             except Exception as exc:
-                issue = f"Sincronizacao completa do cache local apos escrita remota falhou: {exc}"
+                issue = f"Base oficial gravada, mas a sincronização completa do cache local falhou: {exc}"
                 logger.warning(issue, exc_info=True)
 
         try:
             fallback_result = fallback_local_apply()
         except Exception as exc:
-            fallback_issue = f"Fallback local apos escrita remota tambem falhou: {exc}"
+            fallback_issue = f"O fallback local após a escrita remota também falhou: {exc}"
             logger.warning(fallback_issue, exc_info=True)
             status = LocalMutationSyncStatus(
                 status="falha",
@@ -872,7 +872,7 @@ class AuthoritativePersistenceUseCases:
                     loaded_records,
                 )
             except Exception as exc:
-                issue = f"Falha ao sincronizar espelho local apos carga: {exc}"
+                issue = f"Falha ao sincronizar o espelho local após a carga: {exc}"
                 sync_issues = (issue,)
                 logger.warning(issue, exc_info=True)
 

@@ -1,10 +1,14 @@
+from datetime import datetime
+
 from app.models.compensacao import Compensacao
 from app.services.report_service_support import (
+    INSTITUTIONAL_APP_NAME,
     build_dashboard_chart_rows,
     build_department_header_html_lines,
     build_grid_pdf_layout,
     build_individual_report_rows,
     build_records_to_dict_list,
+    build_report_metadata_rows,
 )
 
 
@@ -69,3 +73,17 @@ def test_support_exposes_shared_department_header_lines():
 
     assert lines[0] == "PREFEITURA MUNICIPAL DE S&Atilde;O CARLOS"
     assert lines[-1] == "Se&ccedil;&atilde;o de Recupera&ccedil;&atilde;o Ambiental"
+
+
+def test_support_builds_institutional_report_metadata_rows():
+    rows = build_report_metadata_rows(
+        "Status: Pendente",
+        source_label="Painel executivo",
+        generated_at=datetime(2026, 4, 9, 14, 33),
+    )
+
+    assert rows[0].label == "Sistema"
+    assert rows[0].value == INSTITUTIONAL_APP_NAME
+    assert rows[1].value == "Painel executivo"
+    assert rows[2].value == "09/04/2026 14:33"
+    assert rows[3].value == "Status: Pendente"

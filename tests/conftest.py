@@ -2,13 +2,12 @@ import gc
 import logging
 import os
 import sys
-import ctypes
 import faulthandler
 from types import SimpleNamespace
 
 import pytest
 from PySide6 import QtWidgets
-from PySide6.QtCore import QCoreApplication, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 
@@ -134,8 +133,30 @@ def cleanup_qt_widgets():
     if not app:
         return
 
-    # Qt can keep closed top-level widgets alive until posted events run.
+    _cleanup_qt_app(app)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    app = QApplication.instance()
+    if app:
+        _cleanup_qt_app(app)
+        app.quit()
+    logging.shutdown()
+    faulthandler.disable()
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+
+def _cleanup_qt_app(app: QApplication) -> None:
     for widget in list(app.topLevelWidgets()):
+        _force_close_widget(widget)
+
+    _drain_qt_events(app)
+    gc.collect()
+
+
+def _force_close_widget(widget) -> None:
+    try:
         if hasattr(widget, "form_controller"):
             widget.form_controller.confirm_discard_changes = lambda *args, **kwargs: True
         if hasattr(widget, "_startup_close_guard_active"):
@@ -144,42 +165,43 @@ def cleanup_qt_widgets():
             widget._startup_close_guard_armed = False
         if hasattr(widget, "_skip_close_discard_confirmation"):
             widget._skip_close_discard_confirmation = True
-        widget.hide()
-        widget.deleteLater()
 
-    QCoreApplication.sendPostedEvents(None, 0)
-    app.processEvents()
-    QCoreApplication.sendPostedEvents(None, 0)
-    app.processEvents()
-    gc.collect()
-
-
-def pytest_sessionfinish(session, exitstatus):
-    app = QApplication.instance()
-    if app:
-        for widget in list(app.topLevelWidgets()):
+        lifecycle_controller = getattr(widget, "lifecycle_controller", None)
+        if lifecycle_controller is not None and hasattr(lifecycle_controller, "stop_owned_timers"):
             try:
-                if hasattr(widget, "form_controller"):
-                    widget.form_controller.confirm_discard_changes = lambda *args, **kwargs: True
-                if hasattr(widget, "_startup_close_guard_active"):
-                    widget._startup_close_guard_active = False
-                if hasattr(widget, "_startup_close_guard_armed"):
-                    widget._startup_close_guard_armed = False
-                if hasattr(widget, "_skip_close_discard_confirmation"):
-                    widget._skip_close_discard_confirmation = True
-                widget.hide()
-                widget.deleteLater()
+                lifecycle_controller.stop_owned_timers()
+            except Exception:
+                pass
+
+        support_controller = getattr(widget, "support_controller", None)
+        if support_controller is not None and hasattr(support_controller, "shutdown"):
+            try:
+                support_controller.shutdown()
+            except Exception:
+                pass
+
+        job_runner = getattr(widget, "job_runner", None)
+        if job_runner is not None and hasattr(job_runner, "shutdown_all_workers"):
+            try:
+                job_runner.shutdown_all_workers()
+            except Exception:
+                pass
+
+        for timer in widget.findChildren(QTimer):
+            try:
+                timer.stop()
             except RuntimeError:
                 continue
+
+        widget.close()
+        widget.hide()
+        widget.deleteLater()
+    except RuntimeError:
+        return
+
+
+def _drain_qt_events(app: QApplication) -> None:
+    for _ in range(4):
+        QCoreApplication.sendPostedEvents(None, int(QEvent.DeferredDelete))
         QCoreApplication.sendPostedEvents(None, 0)
         app.processEvents()
-        QCoreApplication.sendPostedEvents(None, 0)
-        app.processEvents()
-        app.quit()
-    logging.shutdown()
-    try:
-        faulthandler.disable()
-        sys.stdout.flush()
-        sys.stderr.flush()
-    finally:
-        ctypes.windll.kernel32.ExitProcess(int(exitstatus))

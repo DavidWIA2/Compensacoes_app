@@ -228,3 +228,37 @@ def test_reset_user_password_posts_reset_action(monkeypatch, production_profile,
         "user_id": "user-1",
         "password": "senha-nova-segura",
     }
+
+
+def test_set_user_role_posts_role_change_action(monkeypatch, production_profile, admin_session):
+    captured = {}
+
+    def fake_request(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(
+            payload={
+                "user": {
+                    "id": "user-1",
+                    "email": "novo.usuario@saocarlos.sp.gov.br",
+                    "display_name": "Novo Usuario",
+                    "role": "viewer",
+                    "is_active": True,
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.services.supabase_admin_users_service.requests.request", fake_request)
+    service = SupabaseAdminUsersService(production_profile=production_profile)
+
+    user = service.set_user_role(
+        admin_session,
+        user_id="user-1",
+        role="viewer",
+    )
+
+    assert user.role == "viewer"
+    assert captured["json"] == {
+        "action": "set_role",
+        "user_id": "user-1",
+        "role": "viewer",
+    }

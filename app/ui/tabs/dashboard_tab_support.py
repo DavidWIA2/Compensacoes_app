@@ -135,7 +135,7 @@ def build_local_overview_text(report: Optional[PersistenceRecordOverviewReport])
 
 def build_record_integrity_overview_text(report: object | None) -> str:
     if report is None:
-        return "Integridade cadastral: aguardando validacao estrutural da base."
+        return "Integridade cadastral: a validação estrutural aparecerá assim que a base for lida."
 
     issue_count = int(_payload_value(report, "issue_count", 0) or 0)
     error_count = int(_payload_value(report, "error_count", 0) or 0)
@@ -144,7 +144,7 @@ def build_record_integrity_overview_text(report: object | None) -> str:
     issues = tuple(_payload_value(report, "issues", ()) or ())
 
     if issue_count == 0:
-        return "Integridade cadastral: base validada sem inconsistencias estruturais."
+        return "Integridade cadastral: base validada, sem inconsistências estruturais."
 
     lines = [
         (
@@ -172,11 +172,11 @@ def build_dashboard_context_text(
         return "Base sincronizada pronta para leitura."
 
     if record_read_status is None or record_read_status.status == "indisponivel":
-        read_mode = "leitura em memoria"
+        read_mode = "leitura em memória"
     elif record_read_status.uses_sqlite:
         read_mode = "leitura por cache local"
     else:
-        read_mode = "leitura em memoria"
+        read_mode = "leitura em memória"
 
     issue_count = int(_payload_value(record_integrity_report, "issue_count", 0) or 0)
     error_count = int(_payload_value(record_integrity_report, "error_count", 0) or 0)
@@ -223,7 +223,7 @@ def build_read_source_text(status: Optional[LocalRecordReadStatus]) -> str:
 
 def build_tcra_summary_text(overview: Optional[TcraRecordOverview]) -> str:
     if overview is None:
-        return "TCRAs: nenhum termo carregado no cache sincronizado."
+        return "TCRAs: nenhum termo disponível no cache sincronizado no momento."
     return (
         f"Base TCRA: {overview.total_count} | "
         f"{overview.ativos_count} ativos | "
@@ -239,7 +239,7 @@ def build_tcra_agenda_text(
     limit: int = 4,
 ) -> str:
     if not agenda_items:
-        return "Agenda TCRA: sem pendências prioritárias."
+        return "Agenda TCRA: nenhuma pendência prioritária no momento."
     agenda_text = " | ".join(
         f"{item.prioridade_label}: {item.termo_label}"
         for item in list(agenda_items)[: max(limit, 0)]
@@ -260,7 +260,7 @@ def build_dashboard_agenda_summary_text(
     comp_volume = f"Compensações: {comp_total} registro(s) | {comp_pendentes} pendentes no recorte atual."
 
     if tcra_overview is None:
-        tcra_volume = "TCRAs: aguardando leitura."
+        tcra_volume = "TCRAs: aguardando a primeira leitura do módulo."
     else:
         tcra_volume = (
             f"TCRAs: {tcra_overview.alertas_count} alerta(s) | "
@@ -273,9 +273,9 @@ def build_dashboard_agenda_summary_text(
             f"{item.prioridade_label}: {item.termo_label}"
             for item in list(tcra_agenda)[: max(tcra_focus_limit, 0)]
         )
-        tcra_focus = f"Foco TCRA de hoje: {foco}"
+        tcra_focus = f"Foco do dia no TCRA: {foco}"
     else:
-        tcra_focus = "Foco TCRA de hoje: sem pendências prioritárias."
+        tcra_focus = "Foco do dia no TCRA: nenhuma pendência prioritária no momento."
 
     return "\n".join([comp_volume, tcra_volume, tcra_focus])
 
@@ -287,7 +287,7 @@ def build_tcra_dashboard_export_context(
     if overview is None:
         return DashboardExportContext(
             title="Painel TCRA",
-            kpi_lines=("TCRAs: nenhum termo carregado no cache sincronizado.",),
+            kpi_lines=("TCRAs: nenhum termo disponível no cache sincronizado no momento.",),
             filter_summary="Cache sincronizado TCRA",
         )
 
@@ -307,7 +307,7 @@ def build_tcra_dashboard_export_context(
             for item in list(agenda_items)[:3]
         )
     else:
-        filter_summary = "Agenda TCRA: sem pendências prioritárias."
+        filter_summary = "Agenda TCRA: nenhuma pendência prioritária no momento."
     return DashboardExportContext(
         title="Painel TCRA",
         kpi_lines=kpi_lines,

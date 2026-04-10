@@ -81,16 +81,16 @@ def test_window_shell_support_builds_professional_window_chrome_snapshot():
         write_status=write_status,
     )
 
-    assert snapshot.window_title.endswith("Produção sincronizada (2/4)")
-    assert snapshot.file_label == "Fonte: cache sincronizado"
+    assert snapshot.window_title.endswith("Produção oficial sincronizada (2/4)")
+    assert snapshot.file_label == "Fonte: cache oficial"
     assert "Supabase" in snapshot.file_tooltip
     assert snapshot.sync_label == "Sincronia: Supabase ok"
     assert "Base oficial" in snapshot.sync_tooltip
     assert snapshot.records_label == "Registros: 2 de 4"
     assert snapshot.records_tooltip == "Busca atual: Gregorio\nIntegridade: 1 erro(s) e 1 alerta(s)."
-    assert snapshot.write_label == "Escrita: SQLite -> espelho"
-    assert "Última mutação: import" in snapshot.write_tooltip
-    assert "Identidade final reconciliada após gravação." in snapshot.write_tooltip
+    assert snapshot.write_label == "Escrita: SQLite + cache"
+    assert "Última operação: import" in snapshot.write_tooltip
+    assert "Identidade final reconciliada após a gravação." in snapshot.write_tooltip
     assert snapshot.selection_label == "Selecionado: AT-1"
     assert snapshot.selection_tooltip == "Registro atualmente carregado no formulário."
     assert "ofício" in COMPENSACOES_SEARCH_PLACEHOLDER.lower()
@@ -139,10 +139,10 @@ def test_window_shell_support_distinguishes_remote_authoritative_writes():
     )
 
     assert snapshot.write_label == "Escrita: Supabase"
-    assert "Supabase como autoridade da produção" in snapshot.write_tooltip
-    assert snapshot.sync_label == "Sincronia: offline"
+    assert "base oficial gravada no Supabase" in snapshot.write_tooltip
+    assert snapshot.sync_label == "Sincronia: cache em uso"
     assert "cache local" in snapshot.sync_tooltip.lower()
-    assert snapshot.records_tooltip == "Resumo do recorte atualmente visivel na tela."
+    assert snapshot.records_tooltip == "Resumo do recorte atualmente visível na tela."
 
 
 def test_window_shell_support_builds_user_identity_text_and_tooltip():
@@ -159,4 +159,5 @@ def test_window_shell_support_builds_user_identity_text_and_tooltip():
     assert build_user_identity_label_text(access_session) == "Conta: david.oliveira"
     tooltip = build_user_identity_tooltip_text(access_session)
     assert "david.oliveira@saocarlos.sp.gov.br" in tooltip
-    assert "admin" in tooltip
+    assert "Administrador" in tooltip
+    assert "Produção oficial" in tooltip

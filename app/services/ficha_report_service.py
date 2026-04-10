@@ -14,21 +14,15 @@ from app.services.plantio_service import record_plantio_items
 from app.services.report_service_support import (
     build_department_header_html_lines,
     build_individual_report_rows,
+    resolve_report_logo_path,
 )
-from app.ui.components.ui_utils import resource_path
 
 
 def _resolve_ficha_logo_path() -> str:
-    candidate_paths = [
-        resource_path("assets", "icons", "pga_icon_clean_512.png"),
-        resource_path("assets", "Logo_512.png"),
-        resource_path("assets", "logo_prefeitura.png"),
-        os.path.join(os.path.expanduser("~"), "Downloads", "logo prefeitura.png"),
-    ]
-    for path in candidate_paths:
-        if os.path.exists(path):
-            return path
-    return candidate_paths[-1]
+    candidate_path = resolve_report_logo_path()
+    if os.path.exists(candidate_path):
+        return candidate_path
+    return os.path.join(os.path.expanduser("~"), "Downloads", "logo prefeitura.png")
 
 
 def _build_ficha_header(styles):
@@ -164,7 +158,7 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
 
     elements = [
         *_build_ficha_header(styles),
-        Paragraph("Ficha de Compensa\u00e7\u00e3o Ambiental", title_style),
+        Paragraph("Ficha de Compensação Ambiental", title_style),
         Spacer(1, 0.12 * inch),
     ]
 
@@ -240,6 +234,6 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
     elements.append(Spacer(1, 0.5 * inch))
     elements.append(Spacer(1, 1.5 * inch))
     elements.append(Paragraph("_" * 40, signature_style))
-    elements.append(Paragraph("Assinatura do T\u00e9cnico Respons\u00e1vel", signature_subtitle_style))
+    elements.append(Paragraph("Assinatura do Técnico Responsável", signature_subtitle_style))
 
     doc.build(elements)

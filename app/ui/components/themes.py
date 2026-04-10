@@ -787,5 +787,29 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             color: {t['muted']};
             font-size: {int(9 * sf)}px;
         }}
+
+        QLabel[role="feedback-error"] {{
+            color: {t['btn_danger']};
+            font-size: {int(10 * sf)}px;
+            font-weight: 700;
+        }}
+
+        QLabel[role="feedback-warning"] {{
+            color: #d97706;
+            font-size: {int(10 * sf)}px;
+            font-weight: 700;
+        }}
+
+        QLabel[role="feedback-info"] {{
+            color: {t['btn_primary']};
+            font-size: {int(10 * sf)}px;
+            font-weight: 700;
+        }}
+
+        QLabel[role="feedback-success"] {{
+            color: {t['btn_success']};
+            font-size: {int(10 * sf)}px;
+            font-weight: 700;
+        }}
     """
 

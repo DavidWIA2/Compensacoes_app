@@ -34,6 +34,7 @@ class _FakeAdminUsersService:
             ),
         ]
         self.reset_calls = []
+        self.role_calls = []
 
     def list_users(self, _access_session):
         return list(self.users)
@@ -41,6 +42,23 @@ class _FakeAdminUsersService:
     def reset_user_password(self, _access_session, *, user_id, password):
         self.reset_calls.append((user_id, password))
         return next(user for user in self.users if user.user_id == user_id)
+
+    def set_user_role(self, _access_session, *, user_id, role):
+        self.role_calls.append((user_id, role))
+        for index, user in enumerate(self.users):
+            if user.user_id == user_id:
+                updated = AdminUserRecord(
+                    user_id=user.user_id,
+                    email=user.email,
+                    display_name=user.display_name,
+                    role=role,
+                    is_active=user.is_active,
+                    created_at=user.created_at,
+                    updated_at=user.updated_at,
+                )
+                self.users[index] = updated
+                return updated
+        raise AssertionError("user not found")
 
 
 class _FakeWindow(QWidget):
@@ -80,6 +98,7 @@ def test_admin_users_tab_disables_self_management_actions():
     assert tab.btn_deactivate.isEnabled() is False
     assert tab.btn_delete.isEnabled() is False
     assert "própria conta" in tab.selection_hint.text().lower()
+    assert tab.btn_apply_role.isEnabled() is False
 
 
 def test_admin_users_tab_strips_default_domain_from_email_field():
@@ -101,6 +120,19 @@ def test_admin_users_tab_enables_password_reset_for_selected_self():
     tab._refresh_action_state()
 
     assert tab.btn_reset_password.isEnabled() is True
+
+
+def test_admin_users_tab_marks_last_active_admin_as_protected():
+    _app()
+    tab = AdminUsersTab(_FakeWindow(), admin_service=_FakeAdminUsersService())
+    tab.refresh_users()
+
+    tab.table.selectRow(0)
+    tab._refresh_action_state()
+
+    assert tab.btn_deactivate.isEnabled() is False
+    assert tab.btn_delete.isEnabled() is False
+    assert "último administrador ativo" in tab.selection_hint.text().lower()
 
 
 def test_admin_users_tab_resets_password(monkeypatch):
@@ -126,6 +158,21 @@ def test_admin_users_tab_resets_password(monkeypatch):
     tab._handle_reset_password()
 
     assert fake_service.reset_calls == [("editor-1", "senha-nova-segura")]
+
+
+def test_admin_users_tab_applies_selected_role(monkeypatch):
+    _app()
+    fake_service = _FakeAdminUsersService()
+    monkeypatch.setattr("app.ui.tabs.admin_users_tab.msg_confirm", lambda *args, **kwargs: True)
+    tab = AdminUsersTab(_FakeWindow(), admin_service=fake_service)
+    tab.refresh_users()
+    tab.table.selectRow(1)
+    tab._refresh_action_state()
+
+    tab.manage_role_combo.setCurrentIndex(2)
+    tab._handle_set_role()
+
+    assert fake_service.role_calls == [("editor-1", "viewer")]
 
 
 def test_admin_users_tab_inputs_enable_clear_buttons_and_sorting():
@@ -163,3 +210,13 @@ def test_reset_user_password_dialog_allows_password_visibility_toggle():
 
     assert dialog.password_input.echoMode() == QLineEdit.Normal
     assert dialog.confirm_password_input.echoMode() == QLineEdit.Normal
+
+
+def test_admin_users_tab_updates_role_preview_for_create_form():
+    _app()
+    tab = AdminUsersTab(_FakeWindow(), admin_service=_FakeAdminUsersService())
+
+    tab.role_combo.setCurrentIndex(2)
+    tab._refresh_create_role_preview()
+
+    assert "gerenciar usuários" in tab.create_permissions_label.text().lower()

@@ -115,6 +115,42 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, user: refreshed });
     }
 
+    if (action === "set_role") {
+      const userId = normalizeUserId(payload?.user_id);
+      const nextRole = normalizeRole(payload?.role);
+
+      const { data: existing, error: existingError } = await service
+        .from("profiles")
+        .select("id, email, display_name, role, is_active, created_at, updated_at")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingError) {
+        throw new HttpError(500, `Falha ao localizar usuario: ${existingError.message}`);
+      }
+      if (!existing) {
+        throw new HttpError(404, "Usuario nao encontrado.");
+      }
+      if (existing.id === currentUser.id && normalizeRole(existing.role) !== nextRole) {
+        throw new HttpError(400, "Voce nao pode alterar o perfil da propria conta por esta tela.");
+      }
+      if (existing.role === "admin" && existing.is_active && nextRole !== "admin") {
+        const adminCount = await activeAdminCount(service);
+        if (adminCount <= 1) {
+          throw new HttpError(400, "Nao e possivel rebaixar o ultimo administrador ativo.");
+        }
+      }
+
+      const refreshed = await upsertProfile(service, {
+        id: existing.id,
+        email: existing.email ?? "",
+        display_name: existing.display_name ?? "",
+        role: nextRole,
+        is_active: Boolean(existing.is_active),
+      });
+      return jsonResponse({ ok: true, user: refreshed });
+    }
+
     if (action === "delete") {
       const userId = normalizeUserId(payload?.user_id);
       if (userId === currentUser.id) {

@@ -270,9 +270,9 @@ def test_window_chrome_shows_authoritative_write_status():
     window._refresh_window_chrome()
 
     assert window.session_sync_label.text() == "Sincronia: local"
-    assert window.session_write_label.text() == "Escrita: SQLite -> espelho"
-    assert "Última mutação: import" in window.session_write_label.toolTip()
-    assert "Identidade final reconciliada após gravação." in window.session_write_label.toolTip()
+    assert window.session_write_label.text() == "Escrita: SQLite + cache"
+    assert "Última operação: import" in window.session_write_label.toolTip()
+    assert "Identidade final reconciliada após a gravação." in window.session_write_label.toolTip()
     window.close()
 
 

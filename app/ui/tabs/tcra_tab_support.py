@@ -128,7 +128,7 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     if tcra_has_relatorio_pendente(record, today=today):
         flags.append("Relatório pendente")
     if tcra_has_report_due_soon(record, today=today):
-        flags.append("Prox. 30d")
+        flags.append("Próx. 30d")
     if tcra_has_missing_identity(record):
         flags.append("Sem número")
     if tcra_has_missing_responsavel(record):

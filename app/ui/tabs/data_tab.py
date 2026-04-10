@@ -256,6 +256,16 @@ class DataTab(QWidget):
         self.lbl_form_context.setProperty("role", "helper")
         self.lbl_form_context.setWordWrap(True)
         r_lay.addWidget(self.lbl_form_context, 0)
+        self.lbl_form_feedback = QLabel("")
+        self.lbl_form_feedback.setProperty("role", "helper")
+        self.lbl_form_feedback.setWordWrap(True)
+        self.lbl_form_feedback.setVisible(False)
+        r_lay.addWidget(self.lbl_form_feedback, 0)
+        self.lbl_form_geocode = QLabel("")
+        self.lbl_form_geocode.setProperty("role", "status-note")
+        self.lbl_form_geocode.setWordWrap(True)
+        self.lbl_form_geocode.setVisible(False)
+        r_lay.addWidget(self.lbl_form_geocode, 0)
         self.form_group = self._create_form_group()
         self._update_form_group_height()
         r_lay.addWidget(self.form_group, 0)
@@ -355,12 +365,12 @@ class DataTab(QWidget):
         placeholder_layout.setSpacing(int(6 * self.sf))
 
         self.map_placeholder_label = QLabel(
-            "O mapa embutido será carregado sob demanda para manter a abertura do app mais estável."
+            "O mapa embutido é carregado sob demanda para manter a abertura do app estável. Use-o quando precisar validar endereço, microbacia ou plantio no contexto do cadastro."
         )
         self.map_placeholder_label.setWordWrap(True)
         self.map_placeholder_label.setObjectName("FormStateLabel")
 
-        self.btn_load_map = QPushButton("Carregar mapa")
+        self.btn_load_map = QPushButton("Abrir mapa")
         self.btn_load_map.setProperty("kind", "primary")
         self.btn_load_map.setMinimumHeight(int(30 * self.sf))
         self.btn_load_map.clicked.connect(self.load_map)
@@ -808,7 +818,9 @@ class DataTab(QWidget):
         map_html = resource_path("app", "ui", "map_leaflet.html")
         if not os.path.exists(map_html):
             if getattr(self, "map_placeholder_label", None) is not None:
-                self.map_placeholder_label.setText("Não foi possível localizar o HTML do mapa nesta instalação.")
+                self.map_placeholder_label.setText(
+                    "Não foi possível localizar o componente do mapa nesta instalação. Verifique os arquivos do aplicativo antes de seguir com a validação geográfica."
+                )
             return
 
         web = self.ensure_map_web_view()

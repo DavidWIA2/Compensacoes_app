@@ -1478,12 +1478,18 @@ class TableFullScreenDialog(QDialog):
     def _expand_table_to_fullscreen(self):
         if not self._table:
             return
-        apply_fullscreen_preferred_widths(self._table, self._preferred_fullscreen_column_widths())
+        try:
+            apply_fullscreen_preferred_widths(self._table, self._preferred_fullscreen_column_widths())
+        except RuntimeError:
+            return
 
     def _restore_table_layout(self):
         if not self._table or self._table_layout_snapshot is None:
             return
-        restore_fullscreen_table_layout(self._table, self._table_layout_snapshot)
+        try:
+            restore_fullscreen_table_layout(self._table, self._table_layout_snapshot)
+        except RuntimeError:
+            return
 
     def closeEvent(self, event):
         if self._on_close_callback:

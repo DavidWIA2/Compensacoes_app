@@ -87,7 +87,7 @@ class DashboardTab(QWidget):
         )
         self.lbl_panel_subtitle.setProperty("role", "page-subtitle")
         self.lbl_panel_subtitle.setWordWrap(True)
-        self.lbl_panel_context = QLabel("Base sincronizada pronta para leitura.")
+        self.lbl_panel_context = QLabel("Base sincronizada pronta para leitura executiva.")
         self.lbl_panel_context.setProperty("role", "page-meta")
         self.lbl_panel_context.setWordWrap(True)
         hero_text.addWidget(self.lbl_panel_kicker)
@@ -207,7 +207,7 @@ class DashboardTab(QWidget):
         total_pendente = int(metrics.get("total_pendente", 0) or 0)
         total_compensado = int(metrics.get("total_compensado", 0) or 0)
         if total_processos <= 0:
-            self.lbl_comp_summary.setText("Painel operacional: aguardando leitura da base.")
+            self.lbl_comp_summary.setText("Foco do recorte: aguardando a primeira leitura da base.")
             return
         self.lbl_comp_summary.setText(
             f"Recorte atual: {total_processos} processo(s) | {total_pendente} pendente(s) | {total_compensado} compensado(s)"
@@ -249,12 +249,12 @@ class DashboardTab(QWidget):
         comp_summary_row = QHBoxLayout()
         comp_summary_row.setContentsMargins(0, 0, 0, 0)
         comp_summary_row.setSpacing(int(6 * self.sf))
-        self.lbl_comp_summary = QLabel("Painel operacional: aguardando leitura da base.")
+        self.lbl_comp_summary = QLabel("Foco do recorte: aguardando a primeira leitura da base.")
         self._configure_compact_info_label(self.lbl_comp_summary, max_height=int(26 * self.sf))
-        self.btn_open_operations = QPushButton("Operações")
+        self.btn_open_operations = QPushButton("Ir para Operações")
         self.btn_open_operations.setProperty("kind", "chip-quiet")
         self.btn_open_operations.setMinimumHeight(int(24 * self.sf))
-        self.btn_open_tcra_agenda = QPushButton("Agenda TCRA")
+        self.btn_open_tcra_agenda = QPushButton("Abrir agenda TCRA")
         self.btn_open_tcra_agenda.setProperty("kind", "chip-quiet")
         self.btn_open_tcra_agenda.setMinimumHeight(int(24 * self.sf))
         self.btn_toggle_comp_details = QPushButton("Detalhes")
@@ -272,9 +272,9 @@ class DashboardTab(QWidget):
         details_layout = QVBoxLayout(self.compensation_details_panel)
         details_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
         details_layout.setSpacing(int(4 * self.sf))
-        details_title = QLabel("Leitura operacional detalhada")
+        details_title = QLabel("Checklist operacional")
         details_title.setProperty("role", "sidebar-title")
-        details_caption = QLabel("Use este bloco para validar o cache sincronizado, o recorte local e a agenda executiva.")
+        details_caption = QLabel("Use este bloco para validar cache, integridade cadastral e foco do dia antes de agir.")
         details_caption.setProperty("role", "sidebar-helper")
         details_caption.setWordWrap(True)
         details_layout.addWidget(details_title)
@@ -284,24 +284,24 @@ class DashboardTab(QWidget):
         )
 
         self.lbl_local_overview = QLabel(
-            "Resumo local (SQLite): carregue uma sessão para acompanhar a qualidade dos dados."
+            "Resumo local (SQLite): carregue uma base para acompanhar a qualidade dos dados."
         )
         self._configure_compact_info_label(self.lbl_local_overview, max_height=int(34 * self.sf))
         details_layout.addWidget(self.lbl_local_overview)
 
         self.lbl_record_integrity = QLabel(
-            "Integridade cadastral: aguardando validacao estrutural da base."
+            "Integridade cadastral: a validação estrutural aparecerá após a leitura da base."
         )
         self._configure_compact_info_label(self.lbl_record_integrity, max_height=int(40 * self.sf))
         details_layout.addWidget(self.lbl_record_integrity)
 
         self.lbl_read_source = QLabel(
-            "Leitura operacional atual: aguardando aplicação dos filtros."
+            "Leitura operacional atual: aguardando a leitura inicial da base."
         )
         self._configure_compact_info_label(self.lbl_read_source, max_height=int(34 * self.sf))
         details_layout.addWidget(self.lbl_read_source)
 
-        self.lbl_agenda_summary = QLabel("Agenda executiva: aguardando leitura inicial.")
+        self.lbl_agenda_summary = QLabel("Foco do dia: aguardando a leitura inicial.")
         self._configure_compact_info_label(self.lbl_agenda_summary, max_height=int(34 * self.sf))
         details_layout.addWidget(self.lbl_agenda_summary)
         layout.addWidget(self.compensation_details_panel)
@@ -346,9 +346,9 @@ class DashboardTab(QWidget):
         tcra_summary_row = QHBoxLayout()
         tcra_summary_row.setContentsMargins(0, 0, 0, 0)
         tcra_summary_row.setSpacing(int(6 * self.sf))
-        self.lbl_tcra_summary = QLabel("TCRAs: nenhum termo carregado no banco local.")
+        self.lbl_tcra_summary = QLabel("TCRAs: nenhum termo disponível no cache sincronizado no momento.")
         self._configure_compact_info_label(self.lbl_tcra_summary, max_height=int(28 * self.sf))
-        self.btn_open_tcra_page = QPushButton("Abrir módulo TCRA")
+        self.btn_open_tcra_page = QPushButton("Abrir módulo")
         self.btn_open_tcra_page.setProperty("kind", "chip-quiet")
         self.btn_open_tcra_page.setMinimumHeight(int(24 * self.sf))
         self.btn_open_tcra_page.clicked.connect(self._open_tcra_tab)
@@ -361,9 +361,9 @@ class DashboardTab(QWidget):
         tcra_agenda_layout = QVBoxLayout(tcra_agenda_frame)
         tcra_agenda_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
         tcra_agenda_layout.setSpacing(int(4 * self.sf))
-        tcra_agenda_title = QLabel("Agenda prioritária")
+        tcra_agenda_title = QLabel("Foco da agenda TCRA")
         tcra_agenda_title.setProperty("role", "panel-caption")
-        self.lbl_tcra_agenda = QLabel("Agenda TCRA: --")
+        self.lbl_tcra_agenda = QLabel("Agenda TCRA: nenhuma pendência prioritária no momento.")
         self._configure_compact_info_label(self.lbl_tcra_agenda, max_height=int(30 * self.sf))
         tcra_agenda_layout.addWidget(tcra_agenda_title)
         tcra_agenda_layout.addWidget(self.lbl_tcra_agenda)
@@ -447,7 +447,7 @@ class DashboardTab(QWidget):
         placeholder_layout.setContentsMargins(0, 0, 0, 0)
         placeholder_layout.setSpacing(0)
 
-        placeholder = QLabel("Os gráficos serão carregados quando esta visão for aberta.")
+        placeholder = QLabel("Abra esta visão para carregar os gráficos executivos do recorte atual sem pesar a abertura do aplicativo.")
         placeholder.setWordWrap(True)
         placeholder.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         placeholder.setObjectName("FormStateLabel")

@@ -758,7 +758,7 @@ class AccessDialog(QDialog):
         title = QLabel(APP_NAME, self.form_pane)
         title.setObjectName("accessTitle")
         self.header_subtitle = QLabel(
-            "Acesse o ambiente oficial, utilize a demonstração isolada ou recupere sua senha mantendo o mesmo padrão institucional do sistema.",
+            "Acesse a base oficial com autenticação corporativa, use a demonstração isolada para treinamento ou recupere sua senha mantendo o mesmo padrão institucional do sistema.",
             self.form_pane,
         )
         self.header_subtitle.setObjectName("accessSubtitle")
@@ -769,6 +769,7 @@ class AccessDialog(QDialog):
             "Produção oficial",
             "Demonstração isolada",
             "Email corporativo",
+            "Perfis controlados",
             parent=self.form_pane,
         )
         title_stack.addWidget(self.header_subtitle)
@@ -780,14 +781,15 @@ class AccessDialog(QDialog):
 
         self.production_group, production_layout, self.production_hint = _build_section_shell(
             "Produção",
-            "Use sua conta institucional da Prefeitura para acessar a base oficial compartilhada.",
+            "Use sua conta institucional da Prefeitura para acessar a base oficial compartilhada e auditável.",
             parent=self.form_pane,
         )
         production_layout.addWidget(
             _build_access_badge_row(
-                "Base oficial",
+                "Base oficial protegida",
                 "Sincronia ativa",
                 "Uso corporativo",
+                "Perfis com controle",
                 parent=self.production_group,
             )
         )
@@ -841,7 +843,7 @@ class AccessDialog(QDialog):
         self.production_domain_hint.setObjectName("accessHint")
         self.production_domain_hint.setWordWrap(True)
         self.production_security_note = QLabel(
-            "Somente contas autorizadas podem acessar a base oficial e sincronizar o cache local.",
+            "Somente contas autorizadas podem acessar a base oficial, sincronizar o cache local e abrir a administração de usuários.",
             self.production_group,
         )
         self.production_security_note.setObjectName("accessHint")
@@ -865,7 +867,7 @@ class AccessDialog(QDialog):
 
         self.demo_group, demo_layout, self.demo_hint = _build_section_shell(
             "Demonstração",
-            "Abra uma base fictícia isolada para conhecer a experiência do produto sem impactar a produção.",
+            "Abra uma base fictícia isolada para conhecer a experiência do produto sem qualquer escrita na produção.",
             parent=self.form_pane,
         )
         demo_layout.addWidget(
@@ -897,14 +899,15 @@ class AccessDialog(QDialog):
         status_title.setObjectName("sectionTitle")
         status_title.setStyleSheet("font-size: 14px;")
         self.status_label = QLabel(
-            "Selecione como deseja entrar. Produção usa autenticação institucional e cache sincronizado; Demonstração abre uma base isolada.",
+            "Selecione como deseja entrar. Produção usa autenticação institucional e a base oficial sincronizada; Demonstração abre uma base isolada e segura para treinamento.",
             self.status_panel,
         )
         self.status_label.setObjectName("accessHint")
         self.status_label.setWordWrap(True)
         self.status_badges = _build_access_badge_row(
-            "Produção: base oficial",
+            "Produção: base oficial protegida",
             "Demonstração: ambiente isolado",
+            "Administração: só em produção",
             parent=self.status_panel,
         )
         status_layout.addWidget(status_title)
@@ -1004,7 +1007,7 @@ class AccessDialog(QDialog):
 
         if self.access_service.can_sign_in_production():
             self.production_status.setText(
-                "Produção pronta para autenticação com email corporativo e sincronização da base oficial."
+                "Produção oficial pronta para autenticação com email corporativo e sincronização da base protegida."
             )
             self.email_input.setEnabled(True)
             self.password_input.setEnabled(True)
@@ -1013,7 +1016,7 @@ class AccessDialog(QDialog):
             self.password_toggle_button.setEnabled(True)
         else:
             self.production_status.setText(
-                "A autenticação de produção ainda não está configurada nesta instalação."
+                "A autenticação da produção oficial ainda não está configurada nesta instalação."
             )
             self.email_input.setEnabled(False)
             self.password_input.setEnabled(False)
@@ -1075,7 +1078,7 @@ class AccessDialog(QDialog):
             self.status_label.setText(message)
         elif not self.status_label.text().strip():
             self.status_label.setText(
-                "Selecione como deseja entrar. Produção usa autenticação institucional e cache sincronizado; Demonstração abre uma base isolada."
+                "Selecione como deseja entrar. Produção usa autenticação institucional e a base oficial sincronizada; Demonstração abre uma base isolada e segura."
             )
         self._apply_responsive_layout()
 

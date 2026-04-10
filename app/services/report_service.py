@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
+from functools import partial
 from typing import Any, List, Tuple
 
 import pandas as pd
@@ -10,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.compensacao import Compensacao
@@ -17,6 +20,9 @@ from app.models.display_columns import DISPLAY_COLUMNS
 from app.services.ficha_report_service import export_individual_pdf as export_ficha_report_pdf
 from app.services.report_service_support import (
     DATA_SHEET_NAME,
+    INSTITUTIONAL_APP_NAME,
+    INSTITUTIONAL_REPORT_SUBTITLE,
+    INSTITUTIONAL_SOURCE_LABEL,
     REPORT_DETAIL_LABEL,
     REPORT_SUMMARY_LABEL,
     REPORT_TITLE,
@@ -27,40 +33,44 @@ from app.services.report_service_support import (
     SUMMARY_LABEL_PENDING_TYPE,
     SUMMARY_LABEL_VALUE,
     SUMMARY_SHEET_NAME,
+    ReportMetadataRow,
     build_dashboard_chart_rows,
     build_department_header_html_lines,
     build_grid_pdf_layout,
     build_individual_report_rows,
     build_records_to_dict_list,
+    build_report_metadata_rows,
     build_selected_headers,
     format_individual_status,
+    resolve_report_logo_path,
 )
-from app.ui.components.ui_utils import resource_path
 
 
 ALL_COLUMNS = DISPLAY_COLUMNS
 
-HEADER_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-COMPENSADO_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+BRAND_BLUE = "1F4E79"
+BRAND_BLUE_LIGHT = "EAF2FA"
+BRAND_BORDER = "C8D5E3"
+BRAND_FILL = PatternFill(start_color=BRAND_BLUE_LIGHT, end_color=BRAND_BLUE_LIGHT, fill_type="solid")
+HEADER_FILL = PatternFill(start_color=BRAND_BLUE, end_color=BRAND_BLUE, fill_type="solid")
+NEUTRAL_FILL = PatternFill(start_color="F7F9FC", end_color="F7F9FC", fill_type="solid")
+HIGHLIGHT_FILL = PatternFill(start_color="EEF6ED", end_color="EEF6ED", fill_type="solid")
 BORDER_STYLE = Border(
-    left=Side(style="thin"),
-    right=Side(style="thin"),
-    top=Side(style="thin"),
-    bottom=Side(style="thin"),
+    left=Side(style="thin", color=BRAND_BORDER),
+    right=Side(style="thin", color=BRAND_BORDER),
+    top=Side(style="thin", color=BRAND_BORDER),
+    bottom=Side(style="thin", color=BRAND_BORDER),
 )
 FONT_BOLD = Font(bold=True)
+HEADER_FONT = Font(bold=True, color="FFFFFF")
+TITLE_FONT = Font(bold=True, size=15, color=BRAND_BLUE)
+SUBTITLE_FONT = Font(italic=True, color="5B6B7B")
 ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+ALIGN_LEFT_WRAP = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
 
 def _resolve_report_logo_path() -> str:
-    candidate_paths = [
-        resource_path("assets", "icons", "pga_icon_clean_512.png"),
-        resource_path("assets", "Logo_512.png"),
-    ]
-    for path in candidate_paths:
-        if os.path.exists(path):
-            return path
-    return candidate_paths[-1]
+    return resolve_report_logo_path()
 
 
 def _selected_headers(selected_cols: List[str]) -> List[str]:
@@ -73,59 +83,6 @@ def _format_individual_status(record: Compensacao) -> str:
 
 def _build_individual_pdf_rows(record: Compensacao, observation: str = "") -> List[List[str]]:
     return build_individual_report_rows(record, observation)
-
-
-def _build_individual_pdf_header(styles):
-    logo_path = _resolve_report_logo_path()
-    logo = Spacer(1, 1)
-    if os.path.exists(logo_path):
-        logo = Image(logo_path, width=1.15 * inch, height=0.95 * inch)
-
-    header_title = ParagraphStyle(
-        "FichaHeaderTitle",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        leading=14,
-        alignment=1,
-        textColor=colors.black,
-    )
-    header_text = ParagraphStyle(
-        "FichaHeaderText",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8,
-        leading=10,
-        alignment=1,
-        textColor=colors.black,
-    )
-
-    lines = [
-        Paragraph(build_department_header_html_lines()[0], header_title),
-        *[Paragraph(line, header_text) for line in build_department_header_html_lines()[1:]],
-    ]
-
-    table = Table([[logo, lines]], colWidths=[1.35 * inch, 4.85 * inch])
-    table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ALIGN", (0, 0), (0, 0), "CENTER"),
-                ("ALIGN", (1, 0), (1, 0), "CENTER"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-            ]
-        )
-    )
-
-    return [
-        table,
-        Spacer(1, 0.12 * inch),
-        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#7A7A7A")),
-        Spacer(1, 0.18 * inch),
-    ]
 
 
 def _records_to_dict_list(records: List[Compensacao], selected_cols: List[str]) -> List[dict[str, str]]:
@@ -150,17 +107,17 @@ def _style_worksheet(ws, highlight_compensado: bool = False):
         for cell in row:
             cell.border = BORDER_STYLE
             if cell.row == 1:
-                cell.font = FONT_BOLD
+                cell.font = HEADER_FONT
                 cell.fill = HEADER_FILL
                 cell.alignment = ALIGN_CENTER
             elif is_green_row:
-                cell.fill = COMPENSADO_FILL
+                cell.fill = HIGHLIGHT_FILL
+                cell.alignment = ALIGN_LEFT_WRAP
+            else:
+                cell.alignment = ALIGN_LEFT_WRAP
 
-            if cell.row > 1:
-                if cell.value and len(str(cell.value)) < 15:
-                    cell.alignment = ALIGN_CENTER
-                else:
-                    cell.alignment = Alignment(vertical="center", wrap_text=False)
+            if cell.row > 1 and cell.value and len(str(cell.value)) < 15:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
 
     for column_cells in ws.columns:
         length = max(len(str(cell.value) or "") for cell in column_cells)
@@ -168,15 +125,234 @@ def _style_worksheet(ws, highlight_compensado: bool = False):
         ws.column_dimensions[get_column_letter(column_cells[0].column)].width = final_width
 
     ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = "A2"
 
 
 def _write_summary_table(worksheet, *, start_row: int, start_col: int, title: str, headers: tuple[str, str], rows):
     worksheet.cell(row=start_row, column=start_col, value=title).font = FONT_BOLD
+    worksheet.cell(row=start_row, column=start_col).fill = BRAND_FILL
     worksheet.cell(row=start_row + 1, column=start_col, value=headers[0]).font = FONT_BOLD
     worksheet.cell(row=start_row + 1, column=start_col + 1, value=headers[1]).font = FONT_BOLD
+    worksheet.cell(row=start_row + 1, column=start_col).fill = NEUTRAL_FILL
+    worksheet.cell(row=start_row + 1, column=start_col + 1).fill = NEUTRAL_FILL
+    worksheet.cell(row=start_row + 1, column=start_col).border = BORDER_STYLE
+    worksheet.cell(row=start_row + 1, column=start_col + 1).border = BORDER_STYLE
     for index, row in enumerate(rows):
         worksheet.cell(row=start_row + 2 + index, column=start_col, value=row[0])
         worksheet.cell(row=start_row + 2 + index, column=start_col + 1, value=row[1])
+        worksheet.cell(row=start_row + 2 + index, column=start_col).border = BORDER_STYLE
+        worksheet.cell(row=start_row + 2 + index, column=start_col + 1).border = BORDER_STYLE
+
+
+def _apply_workbook_properties(workbook, *, title: str, subject: str, description: str) -> None:
+    workbook.properties.creator = INSTITUTIONAL_APP_NAME
+    workbook.properties.lastModifiedBy = INSTITUTIONAL_APP_NAME
+    workbook.properties.title = title
+    workbook.properties.subject = subject
+    workbook.properties.description = description
+    workbook.properties.keywords = "compensações, meio ambiente, prefeitura, são carlos"
+    workbook.properties.category = "Relatório institucional"
+
+
+def _style_summary_worksheet(worksheet, *, metadata_rows: tuple[ReportMetadataRow, ...]) -> None:
+    worksheet.merge_cells("A1:H1")
+    worksheet["A1"] = REPORT_TITLE
+    worksheet["A1"].font = TITLE_FONT
+    worksheet["A1"].alignment = ALIGN_CENTER
+
+    worksheet.merge_cells("A2:H2")
+    worksheet["A2"] = f"{INSTITUTIONAL_REPORT_SUBTITLE} | {INSTITUTIONAL_APP_NAME}"
+    worksheet["A2"].font = SUBTITLE_FONT
+    worksheet["A2"].alignment = ALIGN_CENTER
+
+    start_row = 4
+    for index, item in enumerate(metadata_rows):
+        row = start_row + index
+        worksheet.cell(row=row, column=1, value=item.label).font = FONT_BOLD
+        worksheet.cell(row=row, column=1).fill = BRAND_FILL
+        worksheet.cell(row=row, column=1).border = BORDER_STYLE
+        worksheet.cell(row=row, column=2, value=item.value).border = BORDER_STYLE
+        worksheet.cell(row=row, column=2).alignment = ALIGN_LEFT_WRAP
+
+    worksheet.column_dimensions["A"].width = 18
+    worksheet.column_dimensions["B"].width = 56
+    worksheet.column_dimensions["E"].width = 24
+    worksheet.column_dimensions["F"].width = 14
+    worksheet.column_dimensions["I"].width = 20
+    worksheet.column_dimensions["J"].width = 14
+    worksheet.freeze_panes = "A10"
+
+
+def _build_pdf_header(styles, *, title: str, metadata_rows: tuple[ReportMetadataRow, ...]):
+    logo_path = _resolve_report_logo_path()
+    logo = Spacer(1, 1)
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.05 * inch, height=0.88 * inch)
+
+    header_title = ParagraphStyle(
+        "InstitutionTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        leading=14,
+        alignment=1,
+        textColor=colors.HexColor("#143A5A"),
+    )
+    header_text = ParagraphStyle(
+        "InstitutionText",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        alignment=1,
+        textColor=colors.HexColor("#334E68"),
+    )
+    report_title = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=18,
+        alignment=0,
+        textColor=colors.HexColor("#143A5A"),
+        spaceAfter=8,
+    )
+    metadata_label = ParagraphStyle(
+        "ReportMetaLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#143A5A"),
+    )
+    metadata_value = ParagraphStyle(
+        "ReportMetaValue",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#334E68"),
+    )
+
+    department_lines = [
+        Paragraph(build_department_header_html_lines()[0], header_title),
+        *[Paragraph(line, header_text) for line in build_department_header_html_lines()[1:]],
+    ]
+    header_table = Table([[logo, department_lines]], colWidths=[1.25 * inch, 8.2 * inch])
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    metadata_table = Table(
+        [[Paragraph(item.label, metadata_label), Paragraph(item.value, metadata_value)] for item in metadata_rows],
+        colWidths=[1.15 * inch, 7.85 * inch],
+    )
+    metadata_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#EAF2FA")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#C8D5E3")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#C8D5E3")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]
+        )
+    )
+
+    return [
+        header_table,
+        Spacer(1, 0.1 * inch),
+        HRFlowable(width="100%", thickness=0.8, color=colors.HexColor("#90A4B8")),
+        Spacer(1, 0.12 * inch),
+        Paragraph(title, report_title),
+        metadata_table,
+        Spacer(1, 0.18 * inch),
+    ]
+
+
+def _build_kpi_table(kpis: List[Tuple[str, Any]]):
+    rows = [[SUMMARY_LABEL_METRIC, SUMMARY_LABEL_VALUE]] + [[str(key), str(value)] for key, value in kpis]
+    table = Table(rows, colWidths=[3.2 * inch, 1.4 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#9FB3C8")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#C8D5E3")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F7F9FC")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    return table
+
+
+def _build_dashboard_kpi_table(kpi_lines: List[str], styles):
+    item_style = ParagraphStyle(
+        "DashboardKpiItem",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#243B53"),
+    )
+    title_style = ParagraphStyle(
+        "DashboardKpiTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        textColor=colors.white,
+    )
+    rows = [[Paragraph(REPORT_SUMMARY_LABEL, title_style)]]
+    rows.extend([[Paragraph(str(line), item_style)] for line in kpi_lines])
+    table = Table(rows, colWidths=[8.9 * inch])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+                ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#9FB3C8")),
+                ("INNERGRID", (0, 1), (-1, -1), 0.4, colors.HexColor("#D7E2EC")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    return table
+
+
+def _draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str):
+    canvas.saveState()
+    canvas.setStrokeColor(colors.HexColor("#C8D5E3"))
+    canvas.line(doc.leftMargin, 18, doc.pagesize[0] - doc.rightMargin, 18)
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#486581"))
+    canvas.drawString(doc.leftMargin, 8, f"{INSTITUTIONAL_APP_NAME} | {title}")
+    right_text = f"Emitido em {generated_label} | Página {canvas.getPageNumber()}"
+    text_width = stringWidth(right_text, "Helvetica", 8)
+    canvas.drawString(doc.pagesize[0] - doc.rightMargin - text_width, 8, right_text)
+    canvas.restoreState()
 
 
 def export_csv(path: str, records: List[Compensacao], selected_cols: List[str]):
@@ -204,6 +380,7 @@ def export_excel_two_sheets(
 ):
     data = _records_to_dict_list(records, selected_cols)
     df_dados = pd.DataFrame(data) if data else pd.DataFrame(columns=_selected_headers(selected_cols))
+    metadata_rows = build_report_metadata_rows(filtros_txt, source_label=INSTITUTIONAL_SOURCE_LABEL)
 
     try:
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -211,13 +388,18 @@ def export_excel_two_sheets(
             worksheet = writer.book.create_sheet(SUMMARY_SHEET_NAME)
             writer.sheets[SUMMARY_SHEET_NAME] = worksheet
 
-            worksheet.cell(row=1, column=1, value=SUMMARY_LABEL_FILTERS)
-            worksheet.cell(row=1, column=2, value=filtros_txt)
-            worksheet["B1"].font = FONT_BOLD
+            _apply_workbook_properties(
+                writer.book,
+                title=REPORT_TITLE,
+                subject="Resumo gerencial de compensações",
+                description="Exportação institucional da Plataforma de Gestão Ambiental.",
+            )
+
+            _style_summary_worksheet(worksheet, metadata_rows=metadata_rows)
 
             _write_summary_table(
                 worksheet,
-                start_row=3,
+                start_row=10,
                 start_col=1,
                 title=SUMMARY_LABEL_GENERAL,
                 headers=(SUMMARY_LABEL_METRIC, SUMMARY_LABEL_VALUE),
@@ -225,7 +407,7 @@ def export_excel_two_sheets(
             )
             _write_summary_table(
                 worksheet,
-                start_row=3,
+                start_row=10,
                 start_col=5,
                 title=SUMMARY_LABEL_PENDING_MICRO,
                 headers=("Microbacia", "Mudas"),
@@ -233,7 +415,7 @@ def export_excel_two_sheets(
             )
             _write_summary_table(
                 worksheet,
-                start_row=3,
+                start_row=10,
                 start_col=9,
                 title=SUMMARY_LABEL_PENDING_TYPE,
                 headers=("Tipo", "Mudas"),
@@ -241,7 +423,6 @@ def export_excel_two_sheets(
             )
 
             _style_worksheet(writer.sheets[DATA_SHEET_NAME], highlight_compensado=True)
-            _style_worksheet(writer.sheets[SUMMARY_SHEET_NAME], highlight_compensado=False)
     except Exception as exc:
         raise RuntimeError(f"Erro ao salvar Excel: {exc}") from exc
 
@@ -262,13 +443,15 @@ def export_pdf(
     doc = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
-        rightMargin=20,
-        leftMargin=20,
-        topMargin=20,
-        bottomMargin=18,
+        rightMargin=22,
+        leftMargin=22,
+        topMargin=22,
+        bottomMargin=26,
     )
     elements = []
     styles = getSampleStyleSheet()
+    generated_label = datetime.now().strftime("%d/%m/%Y %H:%M")
+    metadata_rows = build_report_metadata_rows(filtros_txt, source_label=INSTITUTIONAL_SOURCE_LABEL)
 
     style_header = ParagraphStyle(
         "HeaderStyle",
@@ -285,47 +468,36 @@ def export_pdf(
         fontSize=7,
         leading=8,
         alignment=0,
+        textColor=colors.HexColor("#243B53"),
     )
     style_cell_center = ParagraphStyle(
         "CellStyleCenter",
         parent=style_cell,
         alignment=1,
     )
-
-    title_style = styles["Title"]
-    title_style.fontSize = 14
-    normal_style = styles["Normal"]
-    normal_style.fontSize = 9
-
-    elements.append(Paragraph(REPORT_TITLE, title_style))
-    elements.append(Spacer(1, 10))
-    elements.append(Paragraph(f"<b>Filtros:</b> {filtros_txt}", normal_style))
-    elements.append(Spacer(1, 10))
-
-    kpi_data = [[SUMMARY_LABEL_METRIC, SUMMARY_LABEL_VALUE]] + [[str(key), str(value)] for key, value in kpis]
-    kpi_table = Table(kpi_data, colWidths=[200, 100])
-    kpi_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ]
-        )
+    section_title = ParagraphStyle(
+        "SectionTitle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor("#143A5A"),
+        spaceAfter=6,
     )
-    elements.append(Paragraph(f"<b>{REPORT_SUMMARY_LABEL}</b>", normal_style))
-    elements.append(kpi_table)
-    elements.append(Spacer(1, 15))
 
-    page_width = landscape(A4)[0] - 40
+    elements.extend(_build_pdf_header(styles, title=REPORT_TITLE, metadata_rows=metadata_rows))
+    elements.append(Paragraph(REPORT_SUMMARY_LABEL, section_title))
+    elements.append(_build_kpi_table(kpis))
+    elements.append(Spacer(1, 0.15 * inch))
+
+    page_width = landscape(A4)[0] - doc.leftMargin - doc.rightMargin
     layout = build_grid_pdf_layout(selected_cols, page_width)
 
     table_data = [[Paragraph(header, style_header) for header in layout.headers]]
     raw_data = _records_to_dict_list(records, selected_cols)
     for row_dict in raw_data:
         row_elements = []
-        for index, attr in enumerate(selected_cols):
+        for index, _attr in enumerate(selected_cols):
             value = str(row_dict.get(layout.headers[index], "") or "")
             current_style = style_cell_center if layout.weights[index] <= 1.0 else style_cell
             row_elements.append(Paragraph(value, current_style))
@@ -335,41 +507,49 @@ def export_pdf(
     main_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.darkblue),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                ("LEFTPADDING", (0, 0), (-1, -1), 2),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B8C7D9")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D7E2EC")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
 
-    elements.append(Paragraph(f"<b>{REPORT_DETAIL_LABEL}</b>", normal_style))
+    elements.append(Paragraph(REPORT_DETAIL_LABEL, section_title))
     elements.append(main_table)
-    doc.build(elements)
+    doc.build(
+        elements,
+        onFirstPage=partial(_draw_pdf_page_frame, title=REPORT_TITLE, generated_label=generated_label),
+        onLaterPages=partial(_draw_pdf_page_frame, title=REPORT_TITLE, generated_label=generated_label),
+    )
 
 
 def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_txt: str, chart_images: List[str]):
     doc = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
-        rightMargin=20,
-        leftMargin=20,
-        topMargin=20,
-        bottomMargin=20,
+        rightMargin=22,
+        leftMargin=22,
+        topMargin=22,
+        bottomMargin=26,
     )
     elements = []
     styles = getSampleStyleSheet()
-    elements.append(Paragraph(titulo, styles["Title"]))
-    elements.append(Paragraph(f"Filtros: {filtros_txt}", styles["Normal"]))
-    elements.append(Spacer(1, 20))
-    for line in kpi_lines:
-        elements.append(Paragraph(f"- {line}", styles["Heading3"]))
-    elements.append(Spacer(1, 20))
+    generated_label = datetime.now().strftime("%d/%m/%Y %H:%M")
+    metadata_rows = build_report_metadata_rows(
+        filtros_txt,
+        source_label="Painel executivo",
+    )
+    elements.extend(_build_pdf_header(styles, title=titulo, metadata_rows=metadata_rows))
+    elements.append(_build_dashboard_kpi_table(kpi_lines, styles))
+    elements.append(Spacer(1, 0.18 * inch))
 
     chart_objects = []
     for img_path in chart_images:
@@ -384,12 +564,23 @@ def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_t
                 [
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#C8D5E3")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E1E8F0")),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FBFCFE")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
                 ]
             )
         )
         elements.append(charts_table)
 
-    doc.build(elements)
+    doc.build(
+        elements,
+        onFirstPage=partial(_draw_pdf_page_frame, title=titulo, generated_label=generated_label),
+        onLaterPages=partial(_draw_pdf_page_frame, title=titulo, generated_label=generated_label),
+    )
 
 
 def export_individual_pdf(filepath: str, record: Compensacao, observation: str = ""):

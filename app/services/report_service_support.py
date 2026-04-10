@@ -1,25 +1,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, List, Sequence
 
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_LABEL_BY_ATTR, display_column_label
 from app.services.coordinates import format_coordinate_pair
 from app.services.records_service import display_tipo_value
+from app.ui.components.ui_utils import resource_path
 
 
 DATA_SHEET_NAME = "Dados"
 SUMMARY_SHEET_NAME = "Resumo Gerencial"
 REPORT_TITLE = "Relatório de Compensações"
-REPORT_SUMMARY_LABEL = "Resumo do Relatório:"
-REPORT_DETAIL_LABEL = "Detalhamento:"
-SUMMARY_LABEL_FILTERS = "Filtros Aplicados:"
+REPORT_SUMMARY_LABEL = "Resumo do Relatório"
+REPORT_DETAIL_LABEL = "Detalhamento"
+SUMMARY_LABEL_FILTERS = "Filtros aplicados"
 SUMMARY_LABEL_GENERAL = "INDICADORES GERAIS"
 SUMMARY_LABEL_METRIC = "Métrica"
 SUMMARY_LABEL_VALUE = "Valor"
 SUMMARY_LABEL_PENDING_MICRO = "PENDÊNCIAS POR MICROBACIA"
 SUMMARY_LABEL_PENDING_TYPE = "PENDÊNCIAS POR TIPO"
+INSTITUTIONAL_APP_NAME = "Plataforma de Gestão Ambiental"
+INSTITUTIONAL_REPORT_SUBTITLE = "Prefeitura Municipal de São Carlos"
+INSTITUTIONAL_SOURCE_LABEL = "Base operacional atual"
+
+
+@dataclass(frozen=True)
+class ReportMetadataRow:
+    label: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,44 @@ def build_records_to_dict_list(records: Sequence[Compensacao], selected_cols: Se
             row[header_name] = "" if value is None else str(value)
         data_list.append(row)
     return data_list
+
+
+def format_report_timestamp(timestamp: datetime | None = None) -> str:
+    value = timestamp or datetime.now()
+    return value.strftime("%d/%m/%Y %H:%M")
+
+
+def build_report_metadata_rows(
+    filter_summary: str,
+    *,
+    source_label: str = INSTITUTIONAL_SOURCE_LABEL,
+    generated_at: datetime | None = None,
+) -> tuple[ReportMetadataRow, ...]:
+    normalized_filter = str(filter_summary or "").strip() or "Sem filtros aplicados"
+    normalized_source = str(source_label or "").strip() or INSTITUTIONAL_SOURCE_LABEL
+    return (
+        ReportMetadataRow("Sistema", INSTITUTIONAL_APP_NAME),
+        ReportMetadataRow("Origem", normalized_source),
+        ReportMetadataRow("Emitido em", format_report_timestamp(generated_at)),
+        ReportMetadataRow("Escopo", normalized_filter),
+    )
+
+
+def resolve_report_logo_path() -> str:
+    candidate_paths = (
+        resource_path("assets", "icons", "pga_icon_clean_512.png"),
+        resource_path("assets", "Logo_512.png"),
+        resource_path("assets", "logo_prefeitura.png"),
+    )
+    for path in candidate_paths:
+        if not path:
+            continue
+        try:
+            with open(path, "rb"):
+                return path
+        except OSError:
+            continue
+    return candidate_paths[0]
 
 
 def _column_weight_for_attr(attr: str) -> float:

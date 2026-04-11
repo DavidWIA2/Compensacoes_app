@@ -112,7 +112,6 @@ def ensure_window_fits_available_geometry(window) -> bool:
         window.setWindowState(normalized_state | Qt.WindowMaximized)
         return True
 
-    width_margin = max(int(available.width() * 0.02), 12)
     height_margin = max(int(available.height() * 0.02), 16)
     bottom_overlap = geometry.bottom() - available.bottom()
     content_geometry = None
@@ -127,10 +126,6 @@ def ensure_window_fits_available_geometry(window) -> bool:
         or geometry.top() < available.top()
         or geometry.right() > available.right()
         or geometry.bottom() > available.bottom()
-    )
-    nearly_fullscreen = (
-        geometry.width() >= max(available.width() - width_margin, 1)
-        or geometry.height() >= max(available.height() - height_margin, 1)
     )
     slight_bottom_cut = (
         bottom_overlap >= 0
@@ -162,7 +157,7 @@ def ensure_window_fits_available_geometry(window) -> bool:
             pass
         return True
 
-    if not exceeds_bounds and not nearly_fullscreen:
+    if not exceeds_bounds:
         return False
 
     normalized_state = state & ~(Qt.WindowMinimized | Qt.WindowFullScreen)

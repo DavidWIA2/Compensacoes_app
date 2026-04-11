@@ -3,7 +3,18 @@ from typing import Dict
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QMessageBox,
+    QSizePolicy,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.batch_geocode_operations import BatchGeocodeOperationsUseCases
@@ -23,10 +34,7 @@ from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
 from app.ui.components.ui_utils import msg_confirm, resource_path
 from app.ui.components.workers import GeocodeWorker
-from app.ui.controllers.window_layout_support import (
-    apply_widget_responsive_layout,
-    schedule_window_fit,
-)
+from app.ui.controllers.window_layout_support import apply_widget_responsive_layout
 from app.utils.logger import get_logger
 
 
@@ -177,7 +185,6 @@ class MapController:
         if ok:
             data_tab = getattr(self.window, "data_tab", None)
             apply_widget_responsive_layout(data_tab, finalize=True)
-            schedule_window_fit(self.window, delays=(0, 250))
             self.window._initial_map_sync_timer.start(500)
 
     def initial_map_sync(self):
@@ -320,17 +327,133 @@ class MapController:
         dialog.exec()
 
     def open_table_fullscreen(self):
-        splitter = self.window.data_tab.splitter
-        left_panel = self.window.data_tab.left_panel
-        target_index = splitter.indexOf(left_panel)
-        previous_sizes = splitter.sizes()
+        preserved_geometry = self._capture_main_window_geometry()
+        content = self._build_table_fullscreen_content()
+        try:
+            dialog = TableFullScreenDialog(self.window, content, lambda widget: widget.deleteLater())
+            dialog.exec()
+        finally:
+            QTimer.singleShot(0, lambda: self._restore_main_window_geometry(preserved_geometry))
 
-        def restore_panel(widget):
-            splitter.insertWidget(target_index if target_index >= 0 else 0, widget)
-            QTimer.singleShot(0, lambda: splitter.setSizes(previous_sizes))
+    def _build_table_fullscreen_content(self):
+        source_table = self.window.data_tab.table
+        content = QWidget()
+        content.setObjectName("TableFullscreenMirror")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(max(int(6 * self.window.scale_factor), 4))
+        content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        dialog = TableFullScreenDialog(self.window, left_panel, restore_panel)
-        dialog.exec()
+        table = QTableView(content)
+        table.setObjectName("TableFullscreenMirrorView")
+        table.setModel(source_table.model())
+        table.setSortingEnabled(source_table.isSortingEnabled())
+        table.setSelectionBehavior(source_table.selectionBehavior())
+        table.setSelectionMode(source_table.selectionMode())
+        table.setAlternatingRowColors(source_table.alternatingRowColors())
+        table.setShowGrid(source_table.showGrid())
+        table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        source_vertical = source_table.verticalHeader()
+        target_vertical = table.verticalHeader()
+        target_vertical.setVisible(source_vertical.isVisible())
+        target_vertical.setDefaultSectionSize(source_vertical.defaultSectionSize())
+
+        source_header = source_table.horizontalHeader()
+        target_header = table.horizontalHeader()
+        target_header.setSectionResizeMode(QHeaderView.Interactive)
+        target_header.setStretchLastSection(source_header.stretchLastSection())
+
+        for column in range(source_header.count()):
+            table.setColumnHidden(column, source_table.isColumnHidden(column))
+            target_header.resizeSection(column, source_header.sectionSize(column))
+
+        sort_section = source_header.sortIndicatorSection()
+        if sort_section >= 0:
+            table.sortByColumn(sort_section, source_header.sortIndicatorOrder())
+
+        if source_table.currentIndex().isValid():
+            table.setCurrentIndex(source_table.currentIndex())
+
+        click_handler = getattr(self.window, "_on_table_clicked", None)
+        if callable(click_handler):
+            table.clicked.connect(click_handler)
+
+        table.setMinimumHeight(0)
+        layout.addWidget(table, 1)
+        layout.addWidget(self._build_table_fullscreen_totals_group(content), 0)
+        return content
+
+    def _build_table_fullscreen_totals_group(self, parent):
+        sf = getattr(self.window, "scale_factor", 1.0)
+        data_tab = self.window.data_tab
+        group = QGroupBox("Indicadores do recorte", parent)
+        group.setObjectName("TableFullscreenTotals")
+        group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        group.setFixedHeight(self._table_fullscreen_totals_height())
+
+        layout = QHBoxLayout(group)
+        layout.setContentsMargins(max(int(7 * sf), 5), max(int(7 * sf), 5), max(int(7 * sf), 5), max(int(5 * sf), 4))
+        layout.setSpacing(max(int(7 * sf), 5))
+
+        kpi_table = self._build_table_fullscreen_summary_table(data_tab.kpi_model, group)
+        micro_table = self._build_table_fullscreen_summary_table(data_tab.micro_model, group)
+        layout.addWidget(kpi_table, 1)
+        layout.addWidget(micro_table, 1)
+        return group
+
+    def _table_fullscreen_totals_height(self) -> int:
+        sf = getattr(self.window, "scale_factor", 1.0)
+        data_tab = self.window.data_tab
+        visible_rows = max(
+            min(max(data_tab.kpi_model.rowCount(), 1), 4),
+            min(max(data_tab.micro_model.rowCount(), 1), 4),
+            3,
+        )
+        header_height = max(int(24 * sf), 22)
+        row_height = max(int(21 * sf), 19)
+        group_chrome = max(int(64 * sf), 54)
+        return max(header_height + (row_height * visible_rows) + group_chrome, max(int(160 * sf), 144))
+
+    @staticmethod
+    def _build_table_fullscreen_summary_table(model, parent):
+        table = QTableView(parent)
+        table.setModel(model)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(True)
+        table.setSelectionMode(QTableView.NoSelection)
+        table.setEditTriggers(QTableView.NoEditTriggers)
+        table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(21)
+        table.horizontalHeader().setFixedHeight(24)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        return table
+
+    def _capture_main_window_geometry(self):
+        try:
+            return self.window.saveGeometry(), self.window.windowState()
+        except RuntimeError:
+            return None, None
+        except Exception:
+            logger.debug("Nao foi possivel capturar a geometria da janela principal.", exc_info=True)
+            return None, None
+
+    def _restore_main_window_geometry(self, preserved_geometry) -> None:
+        if not preserved_geometry:
+            return
+        geometry, state = preserved_geometry
+        if geometry is None:
+            return
+        try:
+            self.window.restoreGeometry(geometry)
+            if state is not None:
+                self.window.setWindowState(state)
+        except RuntimeError:
+            return
+        except Exception:
+            logger.debug("Nao foi possivel restaurar a geometria da janela principal.", exc_info=True)
 
     def record_needs_batch_geocode(self, record: Compensacao) -> bool:
         has_main_address = bool((record.endereco or "").strip())

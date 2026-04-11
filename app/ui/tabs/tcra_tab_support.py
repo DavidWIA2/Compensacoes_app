@@ -50,6 +50,51 @@ _format_date = format_date
 _format_date_text = format_date_text
 
 
+def format_orgao_context(record: Tcra) -> str:
+    orgao = normalize_orgao_label(record.orgao_acompanhamento) or _stringify(record.orgao_acompanhamento)
+    if tcra_is_mpsp_related(record) and "MPSP" not in orgao.upper():
+        return f"{orgao} + MPSP" if orgao else "MPSP"
+    return orgao or "--"
+
+
+def resolve_record_priority_label(record: Tcra, *, today: date) -> str:
+    operational_status = resolve_operational_status(record, today=today)
+    if tcra_has_prazo_vencido(record, today=today):
+        return "Vencido"
+    if tcra_has_relatorio_pendente(record, today=today):
+        return "Relatório"
+    if tcra_has_report_due_soon(record, today=today):
+        return "30 dias"
+    if tcra_has_missing_identity(record) or tcra_has_missing_responsavel(record) or tcra_has_missing_orgao(record):
+        return "Cadastro"
+    if operational_status == STATUS_CUMPRIDO:
+        return "Concluído"
+    if operational_status == STATUS_SEM_VALIDADE:
+        return "Validade"
+    return "Rotina"
+
+
+def resolve_record_next_action(record: Tcra, *, today: date) -> str:
+    operational_status = resolve_operational_status(record, today=today)
+    if tcra_has_prazo_vencido(record, today=today):
+        return "Cobrar cumprimento / revisar prazo"
+    if tcra_has_relatorio_pendente(record, today=today):
+        return "Cobrar relatório"
+    if tcra_has_report_due_soon(record, today=today):
+        return f"Preparar relatório para {format_date(record.data_proximo_relatorio)}"
+    if tcra_has_missing_identity(record):
+        return "Completar número do TCRA"
+    if tcra_has_missing_responsavel(record):
+        return "Definir responsável"
+    if tcra_has_missing_orgao(record):
+        return "Definir órgão"
+    if operational_status == STATUS_CUMPRIDO:
+        return "Conferir arquivamento"
+    if operational_status == STATUS_SEM_VALIDADE:
+        return "Revisar validade do termo"
+    return "Acompanhar rotina"
+
+
 def serialize_tcra_evento(evento: TcraEvento) -> dict[str, object]:
     return {
         "sequence": int(evento.sequence),
@@ -120,6 +165,8 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     operational_status = resolve_operational_status(record, today=today)
     operational_issues = resolve_operational_issues(record, today=today)
     consistency_issues = resolve_record_consistency_issues(record, today=today)
+    priority_label = resolve_record_priority_label(record, today=today)
+    next_action = resolve_record_next_action(record, today=today)
     flags: list[str] = []
     if tcra_is_mpsp_related(record):
         flags.append("MPSP")
@@ -137,6 +184,9 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
         flags.append("Sem órgão")
 
     details_lines = [
+        f"Prioridade: {priority_label}",
+        f"Próxima ação: {next_action}",
+        "",
         f"Processo: {record.numero_processo or '--'}",
         f"TCRA: {record.numero_tcra or '--'}",
         f"Local: {record.local or '--'}",
@@ -158,7 +208,7 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
             f"Status {operational_status}",
             f"Prazo {_format_date(record.prazo_final)}",
             f"Relatório {_format_date(record.data_proximo_relatorio)}",
-            f"Órgão {normalize_orgao_label(record.orgao_acompanhamento) or '--'}",
+            f"Órgão {format_orgao_context(record)}",
         ]
     )
     return TcraRecordPanelData(

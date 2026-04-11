@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from app.ui.controllers.window_layout_support import (
-    apply_window_responsive_layout,
-    schedule_window_fit,
-)
+from app.ui.controllers.window_layout_support import apply_window_responsive_layout
 from app.ui.tabs.dashboard_tab_support import build_dashboard_micro_palette_keys
 
 
@@ -72,9 +69,6 @@ class WindowNavigationController:
             tcra_overview, tcra_agenda = self.window.tcra_tab.build_dashboard_payload()
             self.window.dash_tab.update_tcra_overview(tcra_overview, tcra_agenda)
 
-    def _schedule_window_fit(self) -> None:
-        schedule_window_fit(self.window)
-
     def on_tab_changed(self, _index: int):
         if hasattr(self.window, "shell_controller"):
             self.window.shell_controller.sync_global_search_context()
@@ -106,4 +100,8 @@ class WindowNavigationController:
         if self.is_admin_tab_active() and getattr(self.window, "admin_users_tab", None) is not None:
             self.window.admin_users_tab.handle_tab_activated()
 
-        self._schedule_window_fit()
+        apply_window_responsive_layout(
+            self.window,
+            include_active_tab=True,
+            finalize_active_tab=True,
+        )

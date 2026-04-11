@@ -38,8 +38,6 @@ def test_window_navigation_controller_refreshes_official_cache_before_operations
     operations_calls = []
 
     monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
-    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
-
     operations_tab = object()
     window = SimpleNamespace(
         tabs=SimpleNamespace(currentWidget=lambda: operations_tab),
@@ -64,8 +62,6 @@ def test_window_navigation_controller_keeps_regular_operations_refresh_when_cach
     calls = []
 
     monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
-    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
-
     operations_tab = object()
     window = SimpleNamespace(
         tabs=SimpleNamespace(currentWidget=lambda: operations_tab),
@@ -89,8 +85,6 @@ def test_window_navigation_controller_refreshes_admin_tab_when_activated(monkeyp
     calls = []
 
     monkeypatch.setattr(nav_module, "apply_window_responsive_layout", lambda *args, **kwargs: True)
-    monkeypatch.setattr(nav_module, "schedule_window_fit", lambda *args, **kwargs: True)
-
     admin_tab = SimpleNamespace(handle_tab_activated=lambda: calls.append("admin"))
     window = SimpleNamespace(
         tabs=SimpleNamespace(currentWidget=lambda: admin_tab),

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QComboBox, QMessageBox, QCheckBox, QFileDialog, QDateEdit,
     QTableView, QHeaderView, QDialogButtonBox, QTableWidget, QTableWidgetItem,
     QFormLayout, QPlainTextEdit,
-    QAbstractItemView
+    QAbstractItemView, QWidget
 )
 from app.application.use_cases.import_preview_presenter import (
     ImportPreviewPresentation,
@@ -1297,6 +1297,12 @@ class TableFullScreenDialog(QDialog):
         self._filter_use_cases = TableFullscreenFiltersUseCases()
         self._table_layout_snapshot: Optional[TableHeaderLayoutSnapshot] = None
         self._syncing_filters = False
+        self._table_layout_timer = QTimer(self)
+        self._table_layout_timer.setSingleShot(True)
+        self._table_layout_timer.timeout.connect(self._expand_table_to_fullscreen)
+        self._table_late_layout_timer = QTimer(self)
+        self._table_late_layout_timer.setSingleShot(True)
+        self._table_late_layout_timer.timeout.connect(self._expand_table_to_fullscreen)
         self._has_filter_source = all(
             hasattr(parent, attr) for attr in ("data_tab", "search", "apply_filter")
         )
@@ -1363,8 +1369,10 @@ class TableFullScreenDialog(QDialog):
             self._copy_filters_from_main()
             self._connect_filter_signals()
         self._capture_table_layout()
-        QTimer.singleShot(0, self._expand_table_to_fullscreen)
         self.showMaximized()
+        self._expand_table_to_fullscreen()
+        self._queue_table_layout_refresh()
+        self._table_late_layout_timer.start(80)
 
     def _capture_table_layout(self):
         if not self._table:
@@ -1479,9 +1487,58 @@ class TableFullScreenDialog(QDialog):
         if not self._table:
             return
         try:
+            self._reserve_footer_space_for_fullscreen_table()
             apply_fullscreen_preferred_widths(self._table, self._preferred_fullscreen_column_widths())
         except RuntimeError:
             return
+
+    def _queue_table_layout_refresh(self):
+        if self._table_layout_timer.isActive():
+            self._table_layout_timer.stop()
+        self._table_layout_timer.start(0)
+
+    def _reserve_footer_space_for_fullscreen_table(self):
+        footer = self._content.findChild(QWidget, "TableFullscreenTotals") if self._content is not None else None
+        if footer is None:
+            return
+
+        dialog_layout = self.layout()
+        content_layout = self._content.layout() if self._content is not None else None
+        dialog_margins = dialog_layout.contentsMargins() if dialog_layout is not None else None
+        content_margins = content_layout.contentsMargins() if content_layout is not None else None
+        dialog_spacing = dialog_layout.spacing() if dialog_layout is not None else 0
+        content_spacing = content_layout.spacing() if content_layout is not None else 0
+        footer_height = footer.height() if footer.height() > 0 else footer.sizeHint().height()
+        content_height = self._content.height() if self._content is not None else 0
+        if content_height > 0:
+            reserved_inside_content = (
+                footer_height
+                + max(content_spacing, 0)
+                + 28
+            )
+            if content_margins is not None:
+                reserved_inside_content += content_margins.top() + content_margins.bottom()
+            available = max(content_height - reserved_inside_content, 160)
+            self._table.setMinimumHeight(0)
+            self._table.setMaximumHeight(available)
+            return
+
+        top_bar = self.findChild(QWidget, "TopBar")
+        top_height = top_bar.height() if top_bar is not None and top_bar.height() > 0 else 0
+        reserved = (
+            top_height
+            + footer_height
+            + max(dialog_spacing, 0)
+            + max(content_spacing, 0)
+            + 36
+        )
+        if dialog_margins is not None:
+            reserved += dialog_margins.top() + dialog_margins.bottom()
+        if content_margins is not None:
+            reserved += content_margins.top() + content_margins.bottom()
+        available = max(self.height() - reserved, 160)
+        self._table.setMinimumHeight(0)
+        self._table.setMaximumHeight(available)
 
     def _restore_table_layout(self):
         if not self._table or self._table_layout_snapshot is None:
@@ -1492,6 +1549,8 @@ class TableFullScreenDialog(QDialog):
             return
 
     def closeEvent(self, event):
+        self._table_layout_timer.stop()
+        self._table_late_layout_timer.stop()
         if self._on_close_callback:
             self._on_close_callback(self._content)
         QTimer.singleShot(0, self._restore_table_layout)
@@ -1500,7 +1559,7 @@ class TableFullScreenDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._table:
-            QTimer.singleShot(0, self._expand_table_to_fullscreen)
+            self._queue_table_layout_refresh()
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Escape, Qt.Key_F11): self.close()

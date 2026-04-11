@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -105,6 +106,9 @@ from app.ui.tabs.tcra_tab_workspace import (
     build_workspace_snapshot,
 )
 from app.ui.tabs.tcra_tab_view_support import (
+    MAIN_TABLE_BOLD_COLUMNS,
+    MAIN_TABLE_HEADERS,
+    MAIN_TABLE_STATUS_COLUMN,
     build_agenda_overview_rows,
     build_main_table_rows,
     build_quality_overview_rows,
@@ -123,6 +127,123 @@ SUPPORTED_AGENDA_SCOPES = (
     AGENDA_SCOPE_PENDENTES,
 )
 EXPORTED_AGENDA_SCOPE_TODOS = AGENDA_SCOPE_TODOS
+
+
+class TcraRecordDetailsDialog(QDialog):
+    def __init__(self, parent, *, record: Tcra, today: date):
+        super().__init__(parent)
+        self.record = record
+        self.edit_requested = False
+        panel_data = build_record_panel_data(record, today=today)
+
+        self.setWindowTitle(f"Detalhes do TCRA - {panel_data.title}")
+        self.resize(760, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel(panel_data.title)
+        title.setObjectName("FormStateLabel")
+        meta = QLabel(panel_data.meta)
+        meta.setWordWrap(True)
+        meta.setObjectName("FormStateLabel")
+        layout.addWidget(title)
+        layout.addWidget(meta)
+
+        tabs = QTabWidget(self)
+        tabs.setDocumentMode(True)
+        tabs.addTab(self._build_text_page(panel_data.details), "Resumo")
+        tabs.addTab(self._build_text_page(self._build_deadline_text(record)), "Prazos")
+        tabs.addTab(self._build_events_page(record), "Eventos")
+        tabs.addTab(self._build_text_page(self._build_notes_text(record)), "Observações")
+        layout.addWidget(tabs, 1)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        self.btn_edit = QPushButton("Abrir cadastro")
+        self.btn_edit.setProperty("kind", "primary")
+        self.btn_close = QPushButton("Fechar")
+        self.btn_close.setProperty("kind", "secondary")
+        self.btn_edit.clicked.connect(self._request_edit)
+        self.btn_close.clicked.connect(self.reject)
+        button_layout.addWidget(self.btn_edit)
+        button_layout.addWidget(self.btn_close)
+        layout.addLayout(button_layout)
+
+    def _request_edit(self) -> None:
+        self.edit_requested = True
+        self.accept()
+
+    def _build_text_page(self, text: str) -> QPlainTextEdit:
+        page = QPlainTextEdit(self)
+        page.setReadOnly(True)
+        page.setPlainText(text)
+        return page
+
+    def _build_deadline_text(self, record: Tcra) -> str:
+        return "\n".join(
+            [
+                f"Status: {record.status or '--'}",
+                f"Data de assinatura: {_format_date(record.data_assinatura)}",
+                f"Prazo final: {_format_date(record.prazo_final)}",
+                f"Periodicidade de relatório: {record.periodicidade_relatorio_meses or '--'} mês(es)",
+                f"Último relatório: {_format_date(record.data_ultimo_relatorio)}",
+                f"Próximo relatório: {_format_date(record.data_proximo_relatorio)}",
+                "",
+                f"Responsável: {record.responsavel_execucao or '--'}",
+                f"Órgão: {normalize_orgao_label(record.orgao_acompanhamento) or record.orgao_acompanhamento or '--'}",
+                f"MPSP: {record.mpsp_relacionado or '--'}",
+                f"Inquérito civil: {record.inquerito_civil or '--'}",
+            ]
+        )
+
+    def _build_notes_text(self, record: Tcra) -> str:
+        return "\n\n".join(
+            [
+                f"Serviços exigidos:\n{record.servicos_exigidos or '--'}",
+                f"Observações:\n{record.observacoes or '--'}",
+                f"Endereço:\n{record.endereco or '--'}",
+                f"Bairro:\n{record.bairro or '--'}",
+                f"Área / mudas:\n{record.area_m2 if record.area_m2 is not None else '--'} m² | {record.numero_mudas_previsto if record.numero_mudas_previsto is not None else '--'} muda(s)",
+            ]
+        )
+
+    def _build_events_page(self, record: Tcra) -> QWidget:
+        page = QWidget(self)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        table = QTableWidget(0, 5, page)
+        table.setHorizontalHeaderLabels(["Data", "Tipo", "Descrição", "Prazo", "Status"])
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(True)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        eventos = sorted(record.eventos, key=lambda item: (item.data_evento or date.min, item.sequence), reverse=True)
+        table.setRowCount(len(eventos))
+        for row_index, evento in enumerate(eventos):
+            values = (
+                _format_date(evento.data_evento),
+                evento.tipo_evento or "--",
+                evento.descricao or "--",
+                _format_date(evento.prazo_resultante),
+                evento.status_resultante or "--",
+            )
+            for column_index, value in enumerate(values):
+                table.setItem(row_index, column_index, QTableWidgetItem(value))
+        if not eventos:
+            table.setRowCount(1)
+            table.setSpan(0, 0, 1, 5)
+            table.setItem(0, 0, QTableWidgetItem("Nenhum evento registrado para este TCRA."))
+        layout.addWidget(table)
+        return page
 
 
 class TcraTab(QWidget):
@@ -260,7 +381,7 @@ class TcraTab(QWidget):
         header_title = QLabel("Acompanhamento operacional dos termos")
         header_title.setProperty("role", "page-title")
         self.header_subtitle = QLabel(
-            "Use a lista para triagem, o painel lateral para contexto rápido e o cadastro dedicado para atualizar prazos, relatórios e eventos."
+            "Use a lista para triagem, abra detalhes em janela quando precisar de contexto e use o cadastro dedicado apenas para atualizar prazos, relatórios e eventos."
         )
         self.header_subtitle.setProperty("role", "page-subtitle")
         self.header_subtitle.setWordWrap(True)
@@ -637,6 +758,10 @@ class TcraTab(QWidget):
         self.btn_open_selected.setProperty("kind", "secondary")
         self.btn_open_selected.setEnabled(False)
         self.btn_open_selected.setToolTip("Abre o termo selecionado diretamente no cadastro.")
+        self.btn_record_details = QPushButton("Detalhes")
+        self.btn_record_details.setProperty("kind", "secondary")
+        self.btn_record_details.setEnabled(False)
+        self.btn_record_details.setToolTip("Abre uma janela de consulta com resumo, prazos, eventos e observações do TCRA selecionado.")
         self.btn_bulk_alerts = QPushButton("Selecionar alertas")
         self.btn_bulk_alerts.setProperty("kind", "chip-quiet")
         self.btn_bulk_alerts.setToolTip("Seleciona em lote os TCRAs marcados como alerta.")
@@ -649,6 +774,7 @@ class TcraTab(QWidget):
         self.btn_bulk_action.setEnabled(False)
         self.btn_bulk_action.setToolTip("Aplica uma ação em lote aos TCRAs selecionados.")
         primary_actions_layout.addWidget(self.lbl_selection_summary)
+        primary_actions_layout.addWidget(self.btn_record_details)
         primary_actions_layout.addWidget(self.btn_open_selected)
         primary_actions_layout.addWidget(self.btn_bulk_action)
         primary_actions_layout.addWidget(self.btn_clear_selection)
@@ -672,26 +798,44 @@ class TcraTab(QWidget):
         filters_layout.addLayout(secondary_actions_layout, 5, 0, 1, 7)
         self.list_content_layout.addWidget(filters_frame)
 
-        self.table = QTableWidget(0, 8, self)
-        self.table.setHorizontalHeaderLabels(
-            ["Processo", "TCRA", "Local", "Status", "Prazo", "Próx. Relatório", "Órgão", "MPSP"]
-        )
+        self.table = QTableWidget(0, len(MAIN_TABLE_HEADERS), self)
+        self.table.setHorizontalHeaderLabels(list(MAIN_TABLE_HEADERS))
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(True)
         self.table.setSortingEnabled(False)
+        self.table.setWordWrap(False)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(int(28 * self.sf))
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(9, QHeaderView.Stretch)
+        for column_index, tooltip in enumerate(
+            [
+                "Prioridade calculada a partir de prazo, relatório e qualidade cadastral.",
+                "Número do processo relacionado ao termo.",
+                "Número oficial do TCRA, quando já informado.",
+                "Status operacional calculado para orientar a triagem.",
+                "Ação sugerida para o próximo passo de acompanhamento.",
+                "Prazo final do termo.",
+                "Próxima data de relatório periódico.",
+                "Responsável pela execução/acompanhamento.",
+                "Órgão de acompanhamento e indicação de MPSP quando aplicável.",
+                "Local principal do termo.",
+            ]
+        ):
+            header_item = self.table.horizontalHeaderItem(column_index)
+            if header_item is not None:
+                header_item.setToolTip(tooltip)
         self.table.setMinimumHeight(0)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.list_content_layout.addWidget(self.table, 1)
@@ -1142,6 +1286,7 @@ class TcraTab(QWidget):
         self.action_import_legacy.triggered.connect(self.import_legacy_workbook)
         self.btn_new_list.clicked.connect(self.new_tcra)
         self.btn_open_selected.clicked.connect(self._open_selected_record_in_editor)
+        self.btn_record_details.clicked.connect(self._open_selected_record_details)
         self.btn_bulk_alerts.clicked.connect(self._select_alert_rows)
         self.btn_clear_selection.clicked.connect(self._clear_table_selection)
         self.btn_bulk_action.clicked.connect(self.apply_bulk_action)
@@ -1174,7 +1319,7 @@ class TcraTab(QWidget):
         self.btn_quick_despacho.clicked.connect(lambda: self._add_event_with_preset("despacho"))
         self.btn_quick_done.clicked.connect(lambda: self._add_event_with_preset("cumprimento"))
         self.table.itemSelectionChanged.connect(self._refresh_selection)
-        self.table.itemDoubleClicked.connect(lambda *_args: self._open_selected_record_in_editor())
+        self.table.itemDoubleClicked.connect(lambda *_args: self._open_selected_record_details())
         self.events_table.itemSelectionChanged.connect(self._refresh_event_actions)
         self._connect_form_tracking()
         self._set_record_panel_placeholder()
@@ -1238,12 +1383,14 @@ class TcraTab(QWidget):
         self.lbl_event_hint.setVisible(not tight_mode)
 
         self.btn_new_list.setText("Novo" if compact_mode else "Novo termo")
+        self.btn_record_details.setText("Ver" if compact_mode else "Detalhes")
         self.btn_open_selected.setText("Abrir" if compact_mode else "Abrir no cadastro")
         self.btn_bulk_action.setText("Lote" if compact_mode else "Ações em lote")
         self.btn_back_to_list.setText("Voltar" if compact_mode else "Voltar para Lista")
         self.btn_more_actions.setText("Ações" if compact_mode else "Mais ações")
         self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar")
         self.btn_summary_upcoming.setText(f"{UPCOMING_REPORT_WINDOW_DAYS}d" if compact_mode else f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d")
+        self._apply_table_column_visibility(compact_mode=compact_mode, tight_mode=tight_mode)
 
         self.overview_panel.setMinimumWidth(max(int((260 if compact_mode else 320) * self.sf), 220))
         self.overview_panel.setMaximumWidth(max(int((340 if compact_mode else 420) * self.sf), 280))
@@ -1261,6 +1408,14 @@ class TcraTab(QWidget):
         self.overview_tabs.setTabText(0, self._overview_tab_label("selection"))
         self.overview_tabs.setTabText(1, self._overview_tab_label("inbox", len(self.agenda_items)))
         self.overview_tabs.setTabText(2, self._overview_tab_label("quality", len(self.quality_items)))
+
+    def _apply_table_column_visibility(self, *, compact_mode: bool, tight_mode: bool) -> None:
+        if not hasattr(self, "table"):
+            return
+        hide_support_columns = tight_mode or (compact_mode and self._overview_panel_visible)
+        self.table.setColumnHidden(7, hide_support_columns)
+        self.table.setColumnHidden(8, hide_support_columns)
+        self.table.setColumnHidden(2, tight_mode)
 
     def _connect_form_tracking(self):
         widgets = [
@@ -1434,6 +1589,7 @@ class TcraTab(QWidget):
         self.lbl_quality_summary.setText("Fila de qualidade disponível ao abrir o módulo.")
         self.btn_export_excel.setEnabled(False)
         self.btn_export_pdf.setEnabled(False)
+        self.btn_record_details.setEnabled(False)
         self.btn_open_selected.setEnabled(False)
         self._set_selection_actions_visible(False)
         self._set_import_status(self.IMPORT_STATUS_IDLE_TEXT, visible=False)
@@ -1521,6 +1677,16 @@ class TcraTab(QWidget):
         self._load_record_into_form(record, mark_clean=True)
         self._switch_to_editor_view()
 
+    def _open_selected_record_details(self) -> None:
+        record = self._current_selected_record()
+        if record is None:
+            return
+        self._update_record_panel(record)
+        dialog = TcraRecordDetailsDialog(self, record=record, today=self.today)
+        dialog.exec()
+        if getattr(dialog, "edit_requested", False):
+            self._open_record_by_uid_in_editor(record.uid)
+
     def _open_record_by_uid_in_editor(self, uid: str) -> Tcra | None:
         target_uid = _stringify(uid)
         if not target_uid:
@@ -1548,6 +1714,7 @@ class TcraTab(QWidget):
         self.lbl_record_meta.setText("Selecione um TCRA na grade para ver detalhes e abrir o cadastro quando quiser.")
         self.record_details.setPlainText("Use a grade para consultar termos e abra o cadastro apenas quando for editar.")
         self.record_timeline.setPlainText("Nenhum evento para exibir.")
+        self.btn_record_details.setEnabled(False)
         self.btn_record_edit.setEnabled(False)
 
     def _build_record_event_lines(self, eventos: list[TcraEvento], *, limit: int = 6) -> list[str]:
@@ -1767,6 +1934,10 @@ class TcraTab(QWidget):
     def _set_overview_panel_visible(self, visible: bool) -> None:
         self._overview_panel_visible = bool(visible)
         self.overview_panel.setVisible(self._overview_panel_visible)
+        self._apply_table_column_visibility(
+            compact_mode=self._is_compact_layout(),
+            tight_mode=self._is_tight_layout(),
+        )
         if self._overview_panel_visible:
             self._update_overview_panel_height()
             compact_mode = self._is_compact_layout()
@@ -1911,6 +2082,7 @@ class TcraTab(QWidget):
             self._set_import_status("Importação: indisponível por falha na leitura do banco local.", visible=True)
             self.btn_export_excel.setEnabled(False)
             self.btn_export_pdf.setEnabled(False)
+            self.btn_record_details.setEnabled(False)
             self.btn_open_selected.setEnabled(False)
             self._set_selection_actions_visible(False)
             for card in [
@@ -2443,7 +2615,7 @@ class TcraTab(QWidget):
                 item = QTableWidgetItem(value)
                 if column_index == 0:
                     item.setData(Qt.UserRole, row_data.uid)
-                if column_index == 3:
+                if column_index == MAIN_TABLE_STATUS_COLUMN:
                     badge_color, badge_foreground = self._status_badge_palette(row_data.record)
                     self._apply_item_palette(
                         item,
@@ -2454,14 +2626,15 @@ class TcraTab(QWidget):
                 else:
                     self._apply_item_palette(item, None, row_index=row_index)
                 item.setToolTip(row_data.tooltip)
-                if column_index in {3, 4, 5}:
+                if column_index in MAIN_TABLE_BOLD_COLUMNS:
                     item.setFont(bold_font)
-                if column_index == 3:
+                if column_index in {0, MAIN_TABLE_STATUS_COLUMN}:
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row_index, column_index, item)
 
         if not self.filtered_tcras:
             self.selected_uid = ""
+            self.btn_record_details.setEnabled(False)
             self.btn_open_selected.setEnabled(False)
             self._set_selection_actions_visible(False)
             if not self.has_pending_form_changes() and not self.current_form_uid:
@@ -2476,6 +2649,7 @@ class TcraTab(QWidget):
             finally:
                 self._restoring_selection = False
             self.selected_uid = ""
+            self.btn_record_details.setEnabled(False)
             self.btn_open_selected.setEnabled(False)
             self._set_selection_actions_visible(False)
             if not self.has_pending_form_changes() and not self.current_form_uid:
@@ -2511,7 +2685,7 @@ class TcraTab(QWidget):
                 item = self.table.item(row_index, column_index)
                 if item is None:
                     continue
-                if column_index == 3:
+                if column_index == MAIN_TABLE_STATUS_COLUMN:
                     badge_color, badge_foreground = self._status_badge_palette(record)
                     self._apply_item_palette(
                         item,
@@ -2671,9 +2845,11 @@ class TcraTab(QWidget):
             finally:
                 self._restoring_selection = False
             self.selected_uid = uid
+            self.btn_record_details.setEnabled(True)
+            self.btn_open_selected.setEnabled(True)
+            self.btn_record_edit.setEnabled(True)
             self._update_record_panel(record)
             self.overview_tabs.setCurrentIndex(0)
-            self._set_overview_panel_visible(True)
             return
 
     def _refresh_selection(self):
@@ -2696,6 +2872,7 @@ class TcraTab(QWidget):
             self.btn_bulk_action.setText("Ações em lote")
             self.lbl_selection_summary.setText(selection_state.selection_summary)
             self._set_selection_actions_visible(False)
+            self.btn_record_details.setEnabled(False)
             self.btn_record_edit.setEnabled(False)
             self.selected_uid = ""
             self._set_record_panel_placeholder()
@@ -2713,16 +2890,17 @@ class TcraTab(QWidget):
         if record is None:
             return
         self.selected_uid = record.uid
+        self.btn_record_details.setEnabled(True)
         self.btn_open_selected.setEnabled(selection_state.open_selected_enabled)
         self.btn_open_selected.setText("Editar selecionado")
         self.btn_record_edit.setEnabled(True)
         self._update_record_panel(record)
         self.overview_tabs.setCurrentIndex(0)
-        self._set_overview_panel_visible(True)
 
     def _load_record_into_form(self, record: Tcra, *, mark_clean: bool):
         self.current_form_uid = record.uid
         self.selected_uid = record.uid
+        self.btn_record_details.setEnabled(True)
         self.btn_open_selected.setEnabled(True)
         self.btn_open_selected.setText("Editar selecionado")
         self.lbl_selection_summary.setText("1 termo selecionado")
@@ -2746,6 +2924,7 @@ class TcraTab(QWidget):
     def _clear_form(self, *, mark_clean: bool):
         self.current_form_uid = ""
         self.selected_uid = ""
+        self.btn_record_details.setEnabled(False)
         self.btn_open_selected.setEnabled(False)
         self.btn_open_selected.setText("Editar selecionado")
         self.lbl_selection_summary.setText("Nenhum termo selecionado")

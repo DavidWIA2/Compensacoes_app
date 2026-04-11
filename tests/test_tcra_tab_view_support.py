@@ -4,6 +4,8 @@ from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.tcra_records_service import TcraAgendaItem, TcraQualityQueueItem
 from app.ui.tabs.tcra_tab_view_support import (
+    MAIN_TABLE_HEADERS,
+    MAIN_TABLE_STATUS_COLUMN,
     build_agenda_overview_rows,
     build_main_table_rows,
     build_quality_overview_rows,
@@ -59,10 +61,14 @@ def test_view_support_builds_main_table_rows_with_operational_values():
 
     assert len(rows) == 2
     assert rows[0].uid == "tcra-1"
-    assert rows[0].values[0] == "26207/2019"
+    assert MAIN_TABLE_HEADERS[MAIN_TABLE_STATUS_COLUMN] == "Status"
+    assert rows[0].values[0] == "Vencido"
+    assert rows[0].values[1] == "26207/2019"
     assert rows[0].values[3]
-    assert rows[0].values[7] == "Sim"
+    assert rows[0].values[4] == "Cobrar cumprimento / revisar prazo"
+    assert rows[0].values[8] == "CETESB + MPSP"
     assert "Status operacional:" in rows[0].tooltip
+    assert "Próxima ação:" in rows[0].tooltip
 
 
 def test_view_support_builds_agenda_and_quality_rows():

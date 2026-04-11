@@ -5,8 +5,31 @@ from datetime import date
 from typing import Sequence
 
 from app.models.tcra import Tcra
-from app.services.tcra_records_service import TcraAgendaItem, TcraQualityQueueItem, resolve_operational_status, tcra_is_mpsp_related
-from app.ui.tabs.tcra_tab_support import build_row_hint, format_date, stringify
+from app.services.tcra_records_service import TcraAgendaItem, TcraQualityQueueItem, resolve_operational_status
+from app.ui.tabs.tcra_tab_support import (
+    build_row_hint,
+    format_date,
+    format_orgao_context,
+    resolve_record_next_action,
+    resolve_record_priority_label,
+    stringify,
+)
+
+
+MAIN_TABLE_HEADERS = (
+    "Prioridade",
+    "Processo",
+    "TCRA",
+    "Status",
+    "Próx. ação",
+    "Prazo",
+    "Próx. relatório",
+    "Responsável",
+    "Órgão/MPSP",
+    "Local",
+)
+MAIN_TABLE_STATUS_COLUMN = 3
+MAIN_TABLE_BOLD_COLUMNS = frozenset({0, MAIN_TABLE_STATUS_COLUMN, 4, 5, 6})
 
 
 @dataclass(frozen=True)
@@ -51,22 +74,37 @@ def build_main_table_rows(records: Sequence[Tcra], *, today: date) -> tuple[Tcra
     rows: list[TcraGridRowData] = []
     for record in records:
         operational_status = resolve_operational_status(record, today=today)
+        priority_label = resolve_record_priority_label(record, today=today)
+        next_action = resolve_record_next_action(record, today=today)
+        tooltip = "\n".join(
+            part
+            for part in (
+                build_row_hint(record, today=today),
+                f"Prioridade: {priority_label}",
+                f"Próxima ação: {next_action}",
+                f"Responsável: {stringify(record.responsavel_execucao) or '--'}",
+                f"Órgão: {format_orgao_context(record)}",
+            )
+            if part
+        )
         rows.append(
             TcraGridRowData(
                 record=record,
                 uid=stringify(record.uid),
                 operational_status=operational_status,
                 values=(
+                    priority_label,
                     stringify(record.numero_processo) or "--",
                     stringify(record.numero_tcra) or "--",
-                    stringify(record.local) or "--",
                     operational_status or "--",
+                    next_action,
                     format_date(record.prazo_final),
                     format_date(record.data_proximo_relatorio),
-                    stringify(record.orgao_acompanhamento) or "--",
-                    "Sim" if tcra_is_mpsp_related(record) else "Não",
+                    stringify(record.responsavel_execucao) or "--",
+                    format_orgao_context(record),
+                    stringify(record.local or record.endereco or record.bairro) or "--",
                 ),
-                tooltip=build_row_hint(record, today=today),
+                tooltip=tooltip,
             )
         )
     return tuple(rows)

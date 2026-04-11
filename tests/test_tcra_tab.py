@@ -146,6 +146,11 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     get_app().processEvents()
 
     assert tab.table.rowCount() == 2
+    assert tab.table.columnCount() == 10
+    assert tab.table.horizontalHeaderItem(0).text() == "Prioridade"
+    assert tab.table.horizontalHeaderItem(3).text() == "Status"
+    assert tab.table.horizontalHeaderItem(4).text() == "Próx. ação"
+    assert tab.table.item(0, 4).text()
     assert tab.card_total.lbl_value.text() == "2"
     assert tab.card_cumpridos.lbl_value.text() == "1"
     assert tab.card_mpsp.lbl_value.text() == "1"
@@ -165,6 +170,9 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
 
     assert tab.current_form_uid == ""
     assert tab.selected_uid == "tcra-2"
+    assert tab.overview_panel.isHidden() is True
+    assert tab.btn_record_details.isEnabled() is True
+    assert "Próxima ação:" in tab.record_details.toPlainText()
     assert "Varjao" in tab.record_details.toPlainText()
     assert tab.events_table.rowCount() == 0
     assert tab.selection_actions_frame.isHidden() is False
@@ -1044,8 +1052,10 @@ def test_tcra_tab_open_selected_button_switches_to_cadastro(tmp_path):
     get_app().processEvents()
 
     assert tab.btn_open_selected.isEnabled() is True
+    assert tab.btn_record_details.isEnabled() is True
     assert tab.selection_actions_frame.isHidden() is False
     assert tab.current_form_uid == ""
+    assert tab.overview_panel.isHidden() is True
     assert tab.record_details.toPlainText()
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Lista"
 
@@ -1053,6 +1063,37 @@ def test_tcra_tab_open_selected_button_switches_to_cadastro(tmp_path):
     get_app().processEvents()
 
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
+
+
+def test_tcra_tab_record_details_opens_in_dialog_without_side_panel(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+    opened = []
+
+    class DetailsDialog:
+        edit_requested = False
+
+        def __init__(self, parent, *, record, today):
+            opened.append((record.uid, today))
+
+        def exec(self):
+            opened.append(("exec", None))
+            return True
+
+    monkeypatch.setattr(tcra_tab_module, "TcraRecordDetailsDialog", DetailsDialog)
+
+    tab.table.selectRow(0)
+    get_app().processEvents()
+    assert tab.overview_panel.isHidden() is True
+
+    tab.btn_record_details.click()
+    get_app().processEvents()
+
+    assert opened == [("tcra-1", date(2026, 4, 3)), ("exec", None)]
+    assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Lista"
+    assert tab.overview_panel.isHidden() is True
 
 
 def test_tcra_tab_quick_event_buttons_apply_presets(tmp_path, monkeypatch):

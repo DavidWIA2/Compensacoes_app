@@ -88,7 +88,6 @@ class WindowJobRunner:
         self._cancel_callback = cancel_callback if cancellable else None
         self.window.progress_cancel_button.setVisible(bool(cancellable and cancel_callback))
         self.window.statusBar().showMessage(message)
-        QApplication.processEvents()
 
     def update_busy_operation(self, value: int, message: Optional[str] = None) -> None:
         if self.window.progress_bar.maximum() != 0:
@@ -101,7 +100,6 @@ class WindowJobRunner:
                 progress_value=int(value),
                 detail_message=message,
             )
-        QApplication.processEvents()
 
     def end_busy_operation(self, message: str = "Pronto", *, job_name: Optional[str] = None) -> None:
         self._busy_depth = max(self._busy_depth - 1, 0)
@@ -117,7 +115,6 @@ class WindowJobRunner:
             if QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
         self.window.statusBar().showMessage(message)
-        QApplication.processEvents()
 
     def cancel_active_operation(self) -> None:
         if self._cancel_callback is not None:

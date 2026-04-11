@@ -166,8 +166,12 @@ def test_operations_tab_refreshes_cards_and_recent_events(ui_window_factory, mon
     window.refresh_operations_overview()
 
     assert window.tabs.count() == 4
-    assert window.tabs.tabText(2) == "Operações"
-    assert window.tabs.tabText(3) == "TCRAs"
+    assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
+        "Compensações",
+        "TCRAs",
+        "Painel",
+        "Operações",
+    ]
     assert window.operations_tab.card_total.lbl_value.text() == "2"
     assert window.operations_tab.card_today.lbl_value.text() == "1"
     assert window.operations_tab.card_backups.lbl_value.text() == "1"

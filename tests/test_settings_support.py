@@ -132,7 +132,7 @@ def test_ensure_window_fits_available_geometry_remaximizes_overflowing_maximized
     assert window.windowState() & Qt.WindowMaximized
 
 
-def test_ensure_window_fits_available_geometry_maximizes_nearly_fullscreen_window():
+def test_ensure_window_fits_available_geometry_keeps_nearly_fullscreen_window_when_it_fits():
     window = FakeWindow(
         state=Qt.WindowNoState,
         frame_geometry=FakeGeometry(0, 0, 1590, 890),
@@ -141,9 +141,8 @@ def test_ensure_window_fits_available_geometry_maximizes_nearly_fullscreen_windo
 
     changed = ensure_window_fits_available_geometry(window)
 
-    assert changed is True
-    assert window.applied_states
-    assert window.windowState() & Qt.WindowMaximized
+    assert changed is False
+    assert window.applied_states == []
 
 
 def test_ensure_window_fits_available_geometry_trims_small_bottom_overlap():

@@ -204,6 +204,27 @@ def test_loading_microbacias_layer_does_not_force_embedded_map_startup(monkeypat
     window.close()
 
 
+def test_map_loaded_keeps_main_window_size_stable(monkeypatch):
+    window = MainWindow()
+    window.showNormal()
+    window.resize(1320, 860)
+    settle_window(window)
+    expected_size = window.size()
+    calls = []
+
+    monkeypatch.setattr(
+        "app.ui.controllers.map_controller.apply_widget_responsive_layout",
+        lambda widget, **kwargs: calls.append((widget, kwargs)) or True,
+    )
+
+    window.map_controller.on_map_loaded(True)
+    settle_window(window)
+
+    assert calls == [(window.data_tab, {"finalize": True})]
+    assert window.size() == expected_size
+    window.close()
+
+
 def test_main_window_uses_readable_core_labels(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
@@ -217,9 +238,9 @@ def test_main_window_uses_readable_core_labels(monkeypatch):
     assert window.session_file_label.text() == "Fonte: Banco local"
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
         "Compensações",
+        "TCRAs",
         "Painel",
         "Operações",
-        "TCRAs",
     ]
 
     assert window.data_tab.kpi_model.horizontalHeaderItem(0).text() == "Métrica"
@@ -356,6 +377,13 @@ def test_main_window_adds_admin_tab_for_production_admin(monkeypatch):
 
     tab_titles = [window.tabs.tabText(index) for index in range(window.tabs.count())]
 
+    assert tab_titles == [
+        "Compensações",
+        "TCRAs",
+        "Painel",
+        "Operações",
+        "Administração",
+    ]
     assert "Administração" in tab_titles
     assert getattr(window, "admin_users_tab", None) is not None
     assert window.session_user_label.text() == "Conta: admin@prefeitura.sp.gov.br"
@@ -505,7 +533,7 @@ def test_main_window_tcra_tab_disables_global_search_and_refreshes_on_activation
     window.close()
 
 
-def test_main_window_non_tcra_tab_change_reapplies_window_fit(monkeypatch):
+def test_main_window_non_tcra_tab_change_reapplies_responsive_layout_without_window_fit(monkeypatch):
     import app.ui.controllers.window_navigation_controller as nav_module
 
     window = MainWindow()
@@ -531,6 +559,7 @@ def test_main_window_non_tcra_tab_change_reapplies_window_fit(monkeypatch):
         nav_module,
         "schedule_window_fit",
         lambda target, **kwargs: calls.append(("fit", target, kwargs)) or True,
+        raising=False,
     )
 
     window._dashboard_dirty = False
@@ -542,8 +571,31 @@ def test_main_window_non_tcra_tab_change_reapplies_window_fit(monkeypatch):
         window,
         {"include_active_tab": False, "finalize_active_tab": False},
     ) in calls
+    assert (
+        "responsive",
+        window,
+        {"include_active_tab": True, "finalize_active_tab": True},
+    ) in calls
     assert ("refresh-official", None) in calls
-    assert ("fit", window, {}) in calls
+    assert not any(call[0] == "fit" for call in calls)
+    window.close()
+
+
+def test_main_window_tab_change_keeps_window_geometry_stable():
+    window = MainWindow()
+    window.showNormal()
+    window.resize(1320, 860)
+    settle_window(window)
+    expected_geometry = window.geometry()
+
+    window.tabs.setCurrentWidget(window.dash_tab)
+    settle_window(window)
+    window.tabs.setCurrentWidget(window.operations_tab)
+    settle_window(window)
+    window.tabs.setCurrentWidget(window.data_tab)
+    settle_window(window)
+
+    assert window.geometry() == expected_geometry
     window.close()
 
 
@@ -1908,17 +1960,27 @@ def test_delete_shortcut_uses_current_table_row(monkeypatch):
     window.close()
 
 
-def test_open_table_fullscreen_restores_splitter_sizes(monkeypatch):
+def test_open_table_fullscreen_uses_mirror_table_without_reparenting_main_panel(monkeypatch):
     window = MainWindow()
     splitter = window.data_tab.splitter
     splitter.setSizes([420, 680])
     expected_sizes = splitter.sizes()
     captured = {}
+    preserved_geometry = ("geometry-token", "state-token")
 
     class FakeDialog:
         def __init__(self, parent, content_widget, on_close_callback):
             self._content_widget = content_widget
             self._on_close_callback = on_close_callback
+            captured["content_widget"] = content_widget
+            captured["left_panel_index_during_dialog"] = splitter.indexOf(window.data_tab.left_panel)
+            captured["splitter_count_during_dialog"] = splitter.count()
+            tables = content_widget.findChildren(QtWidgets.QTableView)
+            totals_group = content_widget.findChild(QtWidgets.QGroupBox, "TableFullscreenTotals")
+            captured["mirror_table_model"] = tables[0].model() if tables else None
+            captured["summary_models"] = {table.model() for table in tables[1:]}
+            captured["totals_group_height"] = totals_group.height() if totals_group else 0
+            captured["totals_group_max_height"] = totals_group.maximumHeight() if totals_group else 0
 
         def exec(self):
             self._on_close_callback(self._content_widget)
@@ -1926,11 +1988,27 @@ def test_open_table_fullscreen_restores_splitter_sizes(monkeypatch):
 
     monkeypatch.setattr("app.ui.controllers.map_controller.TableFullScreenDialog", FakeDialog)
     monkeypatch.setattr("app.ui.controllers.map_controller.QTimer.singleShot", lambda _ms, fn: fn())
-    monkeypatch.setattr(splitter, "setSizes", lambda sizes: captured.setdefault("sizes", list(sizes)))
+    monkeypatch.setattr(window.map_controller, "_capture_main_window_geometry", lambda: preserved_geometry)
+    monkeypatch.setattr(
+        window.map_controller,
+        "_restore_main_window_geometry",
+        lambda geometry: captured.setdefault("geometry", geometry),
+    )
 
     window.open_table_fullscreen()
 
-    assert captured["sizes"] == expected_sizes
+    assert splitter.sizes() == expected_sizes
+    assert captured["geometry"] == preserved_geometry
+    assert captured["content_widget"] is not window.data_tab.left_panel
+    assert captured["left_panel_index_during_dialog"] >= 0
+    assert captured["splitter_count_during_dialog"] == 2
+    assert captured["mirror_table_model"] is window.data_tab.table.model()
+    assert window.data_tab.kpi_model in captured["summary_models"]
+    assert window.data_tab.micro_model in captured["summary_models"]
+    assert captured["totals_group_height"] >= 144
+    assert captured["totals_group_max_height"] == captured["totals_group_height"]
+    assert splitter.count() == 2
+    assert splitter.indexOf(window.data_tab.left_panel) >= 0
     window.close()
 
 
@@ -1966,6 +2044,32 @@ def test_table_fullscreen_dialog_prioritizes_address_columns(monkeypatch):
     dialog._restore_table_layout()
 
     assert main_header.sectionResizeMode(0) == QtWidgets.QHeaderView.Interactive
+    dialog.close()
+
+
+def test_table_fullscreen_dialog_reserves_footer_space(monkeypatch):
+    container = QtWidgets.QWidget()
+    layout = QtWidgets.QVBoxLayout(container)
+
+    table = QtWidgets.QTableView()
+    table.setModel(QStandardItemModel(20, 9))
+    footer = QtWidgets.QGroupBox("Indicadores do recorte")
+    footer.setObjectName("TableFullscreenTotals")
+    footer.setFixedHeight(160)
+
+    layout.addWidget(table, 1)
+    layout.addWidget(footer, 0)
+
+    monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: self.resize(1440, 852))
+    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
+
+    dialog = TableFullScreenDialog(QtWidgets.QWidget(), container, lambda widget: None)
+    dialog.resize(1440, 852)
+    dialog._expand_table_to_fullscreen()
+
+    assert table.maximumHeight() <= container.height() - footer.height() - 28
+    assert table.minimumHeight() == 0
+
     dialog.close()
 
 

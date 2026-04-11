@@ -255,14 +255,16 @@ class WindowShellController:
         if hasattr(self.window.tcra_tab, "search_input"):
             self.window.tcra_tab.search_input.textChanged.connect(self._on_tcra_search_changed)
         self.window.tabs.addTab(self.window.data_tab, "Compensações")
+        self.window.tabs.addTab(self.window.tcra_tab, "TCRAs")
         self.window.tabs.addTab(self.window.dash_tab, "Painel")
         self.window.tabs.addTab(self.window.operations_tab, "Opera\u00e7\u00f5es")
-        self.window.tabs.addTab(self.window.tcra_tab, "TCRAs")
         if self.window.admin_users_tab is not None:
             self.window.tabs.addTab(self.window.admin_users_tab, "Administração")
         layout.addWidget(self.window.tabs)
         self.window.tabs.setTabText(0, "Compensações")
-        self.window.tabs.setTabText(2, "Operações")
+        self.window.tabs.setTabText(self.window.tabs.indexOf(self.window.tcra_tab), "TCRAs")
+        self.window.tabs.setTabText(self.window.tabs.indexOf(self.window.dash_tab), "Painel")
+        self.window.tabs.setTabText(self.window.tabs.indexOf(self.window.operations_tab), "Operações")
         if self.window.admin_users_tab is not None:
             self.window.tabs.setTabText(self.window.tabs.indexOf(self.window.admin_users_tab), "Administração")
 
@@ -1085,14 +1087,18 @@ class WindowShellController:
         self.window._update_form_action_buttons()
 
     def finalize_startup_layout(self):
-        self.window._startup_layout_pending = False
-        self.window.data_tab.align_splitter_to_table_width()
-        self.window.data_tab._sync_left_panel_heights()
-        self.window.data_tab._update_form_group_height()
-        self.window.data_tab._update_responsive_constraints()
-        if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
-            self.window.data_tab._finalize_responsive_layout()
-        fit_window_to_available_geometry(self.window)
+        try:
+            self.window._startup_layout_pending = False
+            data_tab = self.window.data_tab
+            data_tab.align_splitter_to_table_width()
+            data_tab._sync_left_panel_heights()
+            data_tab._update_form_group_height()
+            data_tab._update_responsive_constraints()
+            if hasattr(data_tab, "_finalize_responsive_layout"):
+                data_tab._finalize_responsive_layout()
+            fit_window_to_available_geometry(self.window)
+        except RuntimeError:
+            return
 
     def apply_theme(self):
         theme = THEME_DARK if self.window.is_dark_mode else THEME_LIGHT

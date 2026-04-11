@@ -90,6 +90,22 @@ def test_start_background_job_tracks_worker_and_routes_cancel_callback(ui_window
     window.close()
 
 
+def test_busy_operation_does_not_force_nested_qt_event_processing(ui_window_factory, monkeypatch):
+    import app.ui.components.job_runner as job_runner_module
+
+    window = ui_window_factory()
+    calls = []
+    monkeypatch.setattr(job_runner_module.QApplication, "processEvents", lambda *args, **kwargs: calls.append("process"))
+
+    window.begin_busy_operation("Processando...", total=2, cancellable=True, cancel_callback=lambda: None)
+    window.update_busy_operation(1, "Metade")
+    window.end_busy_operation("Pronto")
+
+    assert calls == []
+    assert window.progress_bar.isHidden() is True
+    window.close()
+
+
 def test_start_background_job_cleans_up_when_worker_start_fails(ui_window_factory):
     window = ui_window_factory()
 

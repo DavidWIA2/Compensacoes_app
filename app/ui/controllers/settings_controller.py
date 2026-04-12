@@ -349,3 +349,33 @@ class SettingsController:
             self.window.settings.set_tcra_filter_state(clean_state)
         else:
             self._set_value("tcra_filter_state", clean_state)
+
+    def tcra_saved_views(self) -> dict:
+        if hasattr(self.window.settings, "tcra_saved_views"):
+            state = self.window.settings.tcra_saved_views()
+        else:
+            raw_state = self._value("tcra_saved_views", {})
+            state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        return dict(state or {})
+
+    def set_tcra_saved_views(self, views: dict):
+        clean_views = dict(views or {})
+        if hasattr(self.window.settings, "set_tcra_saved_views"):
+            self.window.settings.set_tcra_saved_views(clean_views)
+        else:
+            self._set_value("tcra_saved_views", clean_views)
+
+    def tcra_operational_rules(self) -> dict:
+        if hasattr(self.window.settings, "tcra_operational_rules"):
+            state = self.window.settings.tcra_operational_rules()
+        else:
+            raw_state = self._value("tcra_operational_rules", {})
+            state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        return dict(state or {})
+
+    def set_tcra_operational_rules(self, rules: dict):
+        clean_rules = dict(rules or {})
+        if hasattr(self.window.settings, "set_tcra_operational_rules"):
+            self.window.settings.set_tcra_operational_rules(clean_rules)
+        else:
+            self._set_value("tcra_operational_rules", clean_rules)

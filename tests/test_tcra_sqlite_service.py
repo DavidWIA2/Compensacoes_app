@@ -37,6 +37,8 @@ def make_tcra(**overrides) -> Tcra:
                 descricao="Relatorio periodico protocolado",
                 prazo_resultante=date(2025, 3, 10),
                 status_resultante="Em acompanhamento",
+                protocolo="SEI-123",
+                documento_ref="docs/relatorio.pdf",
             )
         ],
     }
@@ -75,6 +77,8 @@ def test_upsert_tcra_roundtrips_with_nested_eventos(tmp_path):
     assert len(loaded.eventos) == 1
     assert loaded.eventos[0].tipo_evento == "Relatório"
     assert loaded.eventos[0].prazo_resultante == date(2025, 3, 10)
+    assert loaded.eventos[0].protocolo == "SEI-123"
+    assert loaded.eventos[0].documento_ref == "docs/relatorio.pdf"
 
 
 def test_tcra_sqlite_service_get_tcra_returns_record_by_uid(tmp_path):

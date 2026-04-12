@@ -291,6 +291,32 @@ def test_tcra_module_operations_applies_bulk_event_action(tmp_path):
     assert audit_calls[-1]["action"] == "TCRA_BULK_UPDATE"
 
 
+def test_tcra_module_operations_generates_bulk_campaign_and_links_documents(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(uid="tcra-1", data_proximo_relatorio=date(2026, 4, 1)),
+            make_tcra(uid="tcra-2", numero_tcra="TCRA-2", numero_processo="7205/2014", data_proximo_relatorio=date(2026, 4, 2)),
+        ]
+    )
+    audit_calls: list[dict] = []
+    operations = make_operations(service, audit_calls)
+
+    result = operations.create_cobranca_campaign(
+        service.list_tcras(),
+        directory=tmp_path / "campanha",
+        response_deadline=date(2026, 4, 20),
+        register_event=True,
+    )
+
+    assert len(result.document_paths) == 2
+    assert Path(result.manifest_path).exists() is True
+    updated_records = service.get_tcras_by_uids(result.updated_uids)
+    assert all(record.eventos[-1].tipo_evento == "Cobranca" for record in updated_records)
+    assert all(record.eventos[-1].documento_ref for record in updated_records)
+    assert audit_calls[-1]["action"] == "TCRA_BULK_CAMPAIGN"
+
+
 def test_tcra_module_operations_imports_and_exports_reports(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     audit_calls: list[dict] = []

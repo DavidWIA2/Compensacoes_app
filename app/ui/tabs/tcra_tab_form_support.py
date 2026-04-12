@@ -88,6 +88,8 @@ def capture_form_state_snapshot(
                 stringify(evento.descricao),
                 format_date_text(evento.prazo_resultante),
                 stringify(evento.status_resultante),
+                stringify(getattr(evento, "protocolo", "")),
+                stringify(getattr(evento, "documento_ref", "")),
             )
             for evento in eventos
         ),
@@ -165,6 +167,8 @@ def restore_form_eventos_snapshot(
                 descricao=stringify(row[3]),
                 prazo_resultante=parse_date(prazo_resultante, "Prazo resultante") if prazo_resultante else None,
                 status_resultante=normalize_status_label(stringify(row[5])),
+                protocolo=stringify(row[6]) if len(row) > 6 else "",
+                documento_ref=stringify(row[7]) if len(row) > 7 else "",
             )
         )
     return eventos

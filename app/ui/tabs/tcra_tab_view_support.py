@@ -5,7 +5,13 @@ from datetime import date
 from typing import Sequence
 
 from app.models.tcra import Tcra
-from app.services.tcra_records_service import TcraAgendaItem, TcraQualityQueueItem, resolve_operational_status
+from app.services.tcra_records_service import (
+    TcraAgendaItem,
+    TcraOperationalRules,
+    TcraQualityQueueItem,
+    resolve_operational_status,
+    resolve_tcra_risk_profile,
+)
 from app.ui.tabs.tcra_tab_support import (
     build_row_hint,
     format_date,
@@ -70,17 +76,25 @@ class TcraSelectionState:
         return self.primary_record is not None
 
 
-def build_main_table_rows(records: Sequence[Tcra], *, today: date) -> tuple[TcraGridRowData, ...]:
+def build_main_table_rows(
+    records: Sequence[Tcra],
+    *,
+    today: date,
+    rules: TcraOperationalRules | None = None,
+) -> tuple[TcraGridRowData, ...]:
     rows: list[TcraGridRowData] = []
     for record in records:
         operational_status = resolve_operational_status(record, today=today)
-        priority_label = resolve_record_priority_label(record, today=today)
+        risk_profile = resolve_tcra_risk_profile(record, today=today, rules=rules)
+        priority_label = f"{resolve_record_priority_label(record, today=today)} ({risk_profile.score})"
         next_action = resolve_record_next_action(record, today=today)
         tooltip = "\n".join(
             part
             for part in (
                 build_row_hint(record, today=today),
                 f"Prioridade: {priority_label}",
+                f"Risco: {risk_profile.band} | score {risk_profile.score}",
+                "Fatores: " + ", ".join(risk_profile.drivers) if risk_profile.drivers else "",
                 f"Próxima ação: {next_action}",
                 f"Responsável: {stringify(record.responsavel_execucao) or '--'}",
                 f"Órgão: {format_orgao_context(record)}",
@@ -115,12 +129,15 @@ def build_agenda_overview_rows(items: Sequence[TcraAgendaItem]) -> tuple[TcraOve
         TcraOverviewRowData(
             uid=stringify(item.uid),
             values=(
-                stringify(item.prioridade_label) or "--",
+                f"{stringify(item.prioridade_label) or '--'} ({int(item.risk_score or 0)})",
                 stringify(item.termo_label) or "--",
                 stringify(item.local) or "--",
                 stringify(item.detalhe) or "--",
             ),
-            tooltip=stringify(item.detalhe) or stringify(item.prioridade_label) or "--",
+            tooltip=(
+                f"Risco {int(item.risk_score or 0)}\n"
+                + (stringify(item.detalhe) or stringify(item.prioridade_label) or "--")
+            ),
             rank=int(item.priority_rank),
         )
         for item in items

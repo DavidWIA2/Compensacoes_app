@@ -13,6 +13,7 @@ import openpyxl
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
+from app.services.tcra_insights_service import find_potential_duplicate_tcras
 from app.services.tcra_records_service import normalize_status_label
 from app.services.tcra_sqlite_service import TcraSqliteService
 
@@ -81,6 +82,9 @@ class TcraWorkbookAnalysis:
     worksheet_name: str
     importable_count: int
     skipped_count: int
+    new_count: int = 0
+    update_count: int = 0
+    potential_duplicate_count: int = 0
     missing_columns: tuple[str, ...] = ()
     issues: tuple[TcraImportIssue, ...] = ()
     tcras: tuple[Tcra, ...] = ()
@@ -110,6 +114,9 @@ class TcraWorkbookAnalysis:
     def summary_lines(self, *, max_issue_codes: int = 4) -> tuple[str, ...]:
         lines = [
             f"TCRAs importaveis: {self.importable_count}",
+            f"Novos previstos: {self.new_count}",
+            f"Atualizações previstas: {self.update_count}",
+            f"Possíveis duplicados: {self.potential_duplicate_count}",
             f"Linhas descartadas: {self.skipped_count}",
             f"Avisos encontrados: {len(self.issues)}",
         ]
@@ -216,11 +223,32 @@ class TcraExcelService:
                 continue
             tcras.append(tcra)
 
+        existing_records = tuple(self.sqlite_service.list_tcras())
+        for offset, imported_record in enumerate(tcras, start=2):
+            potential_duplicates = find_potential_duplicate_tcras(imported_record, existing_records, limit=2)
+            if not potential_duplicates:
+                continue
+            issues.append(
+                TcraImportIssue(
+                    row_index=offset,
+                    severity="warning",
+                    code="possivel_duplicidade_contextual",
+                    message=(
+                        "Linha semelhante a TCRA(s) ja existente(s): "
+                        + " | ".join(f"{match.label} (score {match.score})" for match in potential_duplicates)
+                    ),
+                )
+            )
+
+        new_count, update_count, duplicate_count = self._classify_import_records(tcras)
         return TcraWorkbookAnalysis(
             workbook_path=workbook_path,
             worksheet_name=worksheet_name,
             importable_count=len(tcras),
             skipped_count=skipped_count,
+            new_count=new_count,
+            update_count=update_count,
+            potential_duplicate_count=duplicate_count,
             missing_columns=missing_columns,
             issues=tuple(issues),
             tcras=tuple(tcras),
@@ -229,6 +257,33 @@ class TcraExcelService:
     def import_workbook(self, path: str | Path) -> int:
         analysis = self.analyze_workbook(path)
         return self.sqlite_service.replace_all(list(analysis.tcras))
+
+    def _classify_import_records(self, records: Sequence[Tcra]) -> tuple[int, int, int]:
+        new_count = 0
+        update_count = 0
+        duplicate_count = 0
+        seen_signatures: set[tuple[str, str, str]] = set()
+        for record in records:
+            signature = (
+                _stringify(record.numero_tcra).casefold(),
+                _stringify(record.numero_processo).casefold(),
+                _stringify(record.local).casefold(),
+            )
+            if signature in seen_signatures:
+                duplicate_count += 1
+            seen_signatures.add(signature)
+            existing = self.sqlite_service.find_duplicate_tcra(
+                numero_processo=record.numero_processo,
+                numero_tcra=record.numero_tcra,
+                local=record.local,
+            )
+            if existing is None:
+                new_count += 1
+            else:
+                update_count += 1
+            if existing is None and find_potential_duplicate_tcras(record, self.sqlite_service.list_tcras(), limit=1):
+                duplicate_count += 1
+        return new_count, update_count, duplicate_count
 
     def merge_workbook(self, source: str | Path | TcraWorkbookAnalysis) -> TcraImportMergeResult:
         analysis = source if isinstance(source, TcraWorkbookAnalysis) else self.analyze_workbook(source)
@@ -477,6 +532,8 @@ class TcraExcelService:
                 _stringify(evento.descricao).casefold(),
                 evento.prazo_resultante,
                 _stringify(evento.status_resultante).casefold(),
+                _stringify(getattr(evento, "protocolo", "")).casefold(),
+                _stringify(getattr(evento, "documento_ref", "")).casefold(),
             )
             for evento in existing_eventos
         }
@@ -487,6 +544,8 @@ class TcraExcelService:
                 _stringify(evento.descricao).casefold(),
                 evento.prazo_resultante,
                 _stringify(evento.status_resultante).casefold(),
+                _stringify(getattr(evento, "protocolo", "")).casefold(),
+                _stringify(getattr(evento, "documento_ref", "")).casefold(),
             )
             if signature in seen:
                 continue
@@ -508,6 +567,8 @@ class TcraExcelService:
                 descricao=_stringify(evento.descricao),
                 prazo_resultante=evento.prazo_resultante,
                 status_resultante=_stringify(evento.status_resultante),
+                protocolo=_stringify(getattr(evento, "protocolo", "")),
+                documento_ref=_stringify(getattr(evento, "documento_ref", "")),
             )
             for index, evento in enumerate(merged, start=1)
         ]

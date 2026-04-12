@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
+from app.services.tcra_insights_service import resolve_tcra_sla_profile
 from app.services.tcra_records_service import (
     STATUS_CUMPRIDO,
     STATUS_EM_ACOMPANHAMENTO,
@@ -25,6 +26,7 @@ from app.services.tcra_records_service import (
     tcra_has_prazo_vencido,
     tcra_has_relatorio_pendente,
     tcra_has_report_due_soon,
+    tcra_has_stale_movement,
     tcra_is_mpsp_related,
 )
 
@@ -65,6 +67,8 @@ def resolve_record_priority_label(record: Tcra, *, today: date) -> str:
         return "Relatório"
     if tcra_has_report_due_soon(record, today=today):
         return "30 dias"
+    if tcra_has_stale_movement(record, today=today):
+        return "Sem mov."
     if tcra_has_missing_identity(record) or tcra_has_missing_responsavel(record) or tcra_has_missing_orgao(record):
         return "Cadastro"
     if operational_status == STATUS_CUMPRIDO:
@@ -76,16 +80,23 @@ def resolve_record_priority_label(record: Tcra, *, today: date) -> str:
 
 def resolve_record_next_action(record: Tcra, *, today: date) -> str:
     operational_status = resolve_operational_status(record, today=today)
+    sla_profile = resolve_tcra_sla_profile(record, today=today)
     if tcra_has_prazo_vencido(record, today=today):
+        if sla_profile.status == "escalated":
+            return "Cobrar cumprimento, revisar prazo e escalar coordenação"
+        if sla_profile.status == "overdue":
+            return "Cobrar cumprimento / revisar prazo com urgência"
         return "Cobrar cumprimento / revisar prazo"
     if tcra_has_relatorio_pendente(record, today=today):
-        return "Cobrar relatório"
+        return "Cobrar relatório e registrar protocolo"
     if tcra_has_report_due_soon(record, today=today):
         return f"Preparar relatório para {format_date(record.data_proximo_relatorio)}"
+    if tcra_has_stale_movement(record, today=today):
+        return "Registrar movimentação, cobrança ou vistoria"
     if tcra_has_missing_identity(record):
         return "Completar número do TCRA"
     if tcra_has_missing_responsavel(record):
-        return "Definir responsável"
+        return "Definir responsável e distribuir fila"
     if tcra_has_missing_orgao(record):
         return "Definir órgão"
     if operational_status == STATUS_CUMPRIDO:
@@ -103,6 +114,8 @@ def serialize_tcra_evento(evento: TcraEvento) -> dict[str, object]:
         "descricao": _stringify(evento.descricao),
         "prazo_resultante": _format_date_text(evento.prazo_resultante),
         "status_resultante": _stringify(evento.status_resultante),
+        "protocolo": _stringify(getattr(evento, "protocolo", "")),
+        "documento_ref": _stringify(getattr(evento, "documento_ref", "")),
     }
 
 
@@ -147,6 +160,10 @@ def build_event_lines(
             parts.append(evento.status_resultante)
         if evento.prazo_resultante is not None:
             parts.append(f"prazo {_format_date(evento.prazo_resultante)}")
+        if getattr(evento, "protocolo", ""):
+            parts.append(f"protocolo {evento.protocolo}")
+        if getattr(evento, "documento_ref", ""):
+            parts.append(f"doc {evento.documento_ref}")
         if evento.descricao:
             parts.append(evento.descricao)
         lines.append(separator.join(parts))
@@ -167,6 +184,7 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     consistency_issues = resolve_record_consistency_issues(record, today=today)
     priority_label = resolve_record_priority_label(record, today=today)
     next_action = resolve_record_next_action(record, today=today)
+    sla_profile = resolve_tcra_sla_profile(record, today=today)
     flags: list[str] = []
     if tcra_is_mpsp_related(record):
         flags.append("MPSP")
@@ -186,6 +204,7 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     details_lines = [
         f"Prioridade: {priority_label}",
         f"Próxima ação: {next_action}",
+        f"SLA operacional: {sla_profile.summary}",
         "",
         f"Processo: {record.numero_processo or '--'}",
         f"TCRA: {record.numero_tcra or '--'}",
@@ -270,7 +289,7 @@ def agenda_row_color(*, priority_rank: int, is_dark_mode: bool) -> QColor | None
             return QColor("#5B3D20")
         if priority_rank == 2:
             return QColor("#5A5324")
-        if priority_rank in {3, 4, 5, 6}:
+        if priority_rank in {3, 4, 5, 6, 7}:
             return QColor("#233A58")
         return None
     if priority_rank == 0:
@@ -279,7 +298,7 @@ def agenda_row_color(*, priority_rank: int, is_dark_mode: bool) -> QColor | None
         return QColor("#FFF1DD")
     if priority_rank == 2:
         return QColor("#FFF8CC")
-    if priority_rank in {3, 4, 5, 6}:
+    if priority_rank in {3, 4, 5, 6, 7}:
         return QColor("#EEF5FF")
     return None
 
@@ -299,12 +318,17 @@ def build_row_hint(record: Tcra, *, today: date) -> str:
         hints.append("Relatório pendente.")
     if tcra_has_report_due_soon(record, today=today):
         hints.append(f"Relatório previsto para os próximos {UPCOMING_REPORT_WINDOW_DAYS} dias.")
+    if tcra_has_stale_movement(record, today=today):
+        hints.append("Sem movimentação recente registrada.")
     if tcra_has_missing_identity(record):
         hints.append("Sem número de TCRA informado.")
     if tcra_has_missing_responsavel(record):
         hints.append("Sem responsável de execução.")
     if tcra_has_missing_orgao(record):
         hints.append("Sem órgão de acompanhamento informado.")
+    sla_profile = resolve_tcra_sla_profile(record, today=today)
+    if sla_profile.issue_key:
+        hints.append(f"SLA: {sla_profile.summary}")
     return "\n".join(hints)
 
 
@@ -318,6 +342,10 @@ def build_event_timeline_text(eventos: list[TcraEvento]) -> str:
             parts.append(evento.status_resultante)
         if evento.prazo_resultante is not None:
             parts.append(f"prazo {_format_date(evento.prazo_resultante)}")
+        if getattr(evento, "protocolo", ""):
+            parts.append(f"protocolo {evento.protocolo}")
+        if getattr(evento, "documento_ref", ""):
+            parts.append(f"doc {evento.documento_ref}")
         if evento.descricao:
             parts.append(evento.descricao)
         lines.append(" - ".join(parts))

@@ -13,6 +13,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.tcra import Tcra
+from app.services.tcra_insights_service import build_sla_summary, build_workload_snapshot
 from app.services.tcra_records_service import (
     AGENDA_SCOPE_30D,
     AGENDA_SCOPE_7D,
@@ -56,6 +57,12 @@ def _format_date(value: date | None) -> str:
 def _build_summary_rows(records: Sequence[Tcra], *, today: date | None = None) -> list[tuple[str, Any]]:
     metrics = compute_metrics(records, today=today)
     overview = build_record_overview(records, today=today)
+    sla_summary = build_sla_summary(records, today=today)
+    workload_snapshot = build_workload_snapshot(records, today=today)
+    workload_text = "--"
+    if workload_snapshot.entries:
+        top = workload_snapshot.entries[0]
+        workload_text = f"{top.responsavel} ({top.total_count} termo(s), score {top.workload_score})"
     return [
         ("Total de TCRAs", metrics["count_total"]),
         ("Ativos", metrics["count_ativos"]),
@@ -67,6 +74,9 @@ def _build_summary_rows(records: Sequence[Tcra], *, today: date | None = None) -
         ("Relacionados ao MPSP", metrics["count_mpsp_relacionados"]),
         ("Sem número TCRA", metrics["count_sem_numero_tcra"]),
         ("Sem responsável", metrics["count_sem_responsavel"]),
+        ("SLA atrasado", sla_summary.overdue_count),
+        ("SLA escalado", sla_summary.escalated_count),
+        ("Maior carga", workload_text),
         ("Com eventos", overview.com_eventos_count),
     ]
 
@@ -97,7 +107,19 @@ def _build_data_rows(records: Sequence[Tcra], *, today: date | None = None) -> l
                     filter(
                         None,
                         (
-                            f"{_format_date(evento.data_evento)} {evento.tipo_evento}: {evento.descricao}".strip()
+                            " | ".join(
+                                part
+                                for part in (
+                                    f"{_format_date(evento.data_evento)} {evento.tipo_evento}: {evento.descricao}".strip(),
+                                    f"Protocolo {getattr(evento, 'protocolo', '')}".strip()
+                                    if getattr(evento, "protocolo", "")
+                                    else "",
+                                    f"Doc {getattr(evento, 'documento_ref', '')}".strip()
+                                    if getattr(evento, "documento_ref", "")
+                                    else "",
+                                )
+                                if part
+                            )
                             for evento in record.eventos
                         ),
                     )

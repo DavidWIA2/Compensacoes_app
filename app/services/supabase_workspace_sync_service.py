@@ -232,6 +232,8 @@ class SupabaseWorkspaceSyncService:
                     descricao=repair_mojibake_text(row.get("descricao", "")),
                     prazo_resultante=cls._parse_date(row.get("prazo_resultante")),
                     status_resultante=repair_mojibake_text(row.get("status_resultante", "")),
+                    protocolo=repair_mojibake_text(row.get("protocolo", "")),
+                    documento_ref=repair_mojibake_text(row.get("documento_ref", "")),
                 )
             )
 

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
+from app.services.tcra_insights_service import TcraPotentialDuplicate, find_potential_duplicate_tcras
 from app.services.tcra_excel_service import TcraExcelService, TcraImportMergeResult, TcraWorkbookAnalysis
+from app.services.tcra_document_service import write_tcra_document
 from app.services.tcra_records_service import (
     AGENDA_SCOPE_HOJE,
     STATUS_ARQUIVADO,
     STATUS_CUMPRIDO,
+    STATUS_EM_ACOMPANHAMENTO,
     build_record_overview,
     build_record_search_index,
     build_work_agenda,
@@ -48,6 +51,8 @@ def _serialize_tcra_evento(evento: TcraEvento) -> dict[str, object]:
         "descricao": _stringify(evento.descricao),
         "prazo_resultante": _format_date_text(evento.prazo_resultante),
         "status_resultante": _stringify(evento.status_resultante),
+        "protocolo": _stringify(getattr(evento, "protocolo", "")),
+        "documento_ref": _stringify(getattr(evento, "documento_ref", "")),
     }
 
 
@@ -85,6 +90,13 @@ def _record_label(record: Tcra | None) -> str:
     return _stringify(record.numero_tcra or record.numero_processo or record.local or record.uid)
 
 
+def _changed_tcra_fields(before: Tcra | None, after: Tcra | None) -> tuple[str, ...]:
+    before_payload = _serialize_tcra(before) or {}
+    after_payload = _serialize_tcra(after) or {}
+    keys = sorted(set(before_payload) | set(after_payload))
+    return tuple(key for key in keys if before_payload.get(key) != after_payload.get(key))
+
+
 @dataclass(frozen=True)
 class TcraLoadResult:
     records: tuple[Tcra, ...]
@@ -117,6 +129,17 @@ class TcraDeleteResult:
 @dataclass(frozen=True)
 class TcraBulkActionResult:
     action: str
+    updated_uids: tuple[str, ...] = ()
+    updated_records: tuple[Tcra, ...] = ()
+    authority_source: str = "local"
+    sync_issues: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TcraBulkCampaignResult:
+    directory: str
+    manifest_path: str
+    document_paths: tuple[str, ...]
     updated_uids: tuple[str, ...] = ()
     updated_records: tuple[Tcra, ...] = ()
     authority_source: str = "local"
@@ -334,6 +357,10 @@ class TcraModuleOperations:
             agenda_items=tuple(build_work_agenda(records, scope=AGENDA_SCOPE_HOJE, today=self.today, limit=5)),
         )
 
+    def find_potential_duplicates(self, record: Tcra, *, limit: int = 3) -> tuple[TcraPotentialDuplicate, ...]:
+        candidates = tuple(self.sqlite_service.list_tcras())
+        return find_potential_duplicate_tcras(record, candidates, limit=limit)
+
     def save_record(
         self,
         record: Tcra,
@@ -368,6 +395,7 @@ class TcraModuleOperations:
             action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
             verb = "atualizado" if previous_record is not None else "cadastrado"
             metadata = {"uid": _stringify(record.uid), "authority": "supabase_remote", "environment": "production"}
+            metadata["changed_fields"] = list(_changed_tcra_fields(previous_record, record))
             metadata.update(dict(pending_audit_metadata or {}))
             remote_result = self.remote_tcra_service.save_record(
                 client,
@@ -402,6 +430,7 @@ class TcraModuleOperations:
         action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
         verb = "atualizado" if previous_record is not None else "cadastrado"
         metadata = {"uid": saved_uid}
+        metadata["changed_fields"] = list(_changed_tcra_fields(previous_record, saved_record))
         metadata.update(dict(pending_audit_metadata or {}))
         self._append_audit_event(
             action=action,
@@ -484,6 +513,8 @@ class TcraModuleOperations:
                 else None
             ),
             status_resultante=normalize_status_label((selected_preset or {}).get("status_resultante")),
+            protocolo=_stringify(values.get("event_protocol")),
+            documento_ref=_stringify(values.get("event_document")),
         )
 
     def _apply_event_effects_to_record(self, record: Tcra, evento: TcraEvento) -> Tcra:
@@ -504,6 +535,10 @@ class TcraModuleOperations:
             data_ultimo_relatorio=data_ultimo_relatorio,
             data_proximo_relatorio=data_proximo_relatorio,
         )
+
+    def append_event_to_record(self, record: Tcra, evento: TcraEvento) -> Tcra:
+        base_record = replace(record, eventos=list(record.eventos) + [evento])
+        return self._apply_event_effects_to_record(base_record, evento)
 
     def _apply_bulk_action_to_record(
         self,
@@ -545,8 +580,7 @@ class TcraModuleOperations:
                 parse_date=parse_date,
                 event_presets=event_presets,
             )
-            base_record = replace(record, eventos=list(record.eventos) + [evento])
-            return self._apply_event_effects_to_record(base_record, evento)
+            return self.append_event_to_record(record, evento)
         return record
 
     def apply_bulk_action(
@@ -620,6 +654,137 @@ class TcraModuleOperations:
             action=action,
             updated_uids=tuple(updated_uids),
             updated_records=updated_records,
+        )
+
+    @staticmethod
+    def _safe_document_stem(value: object) -> str:
+        raw_value = _stringify(value) or "tcra"
+        cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in raw_value)
+        while "__" in cleaned:
+            cleaned = cleaned.replace("__", "_")
+        return cleaned.strip("_") or "tcra"
+
+    def create_cobranca_campaign(
+        self,
+        records: Sequence[Tcra],
+        *,
+        directory: str | Path,
+        response_deadline: date | None = None,
+        register_event: bool = True,
+    ) -> TcraBulkCampaignResult:
+        target_dir = Path(directory)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        document_paths: list[str] = []
+        manifest_lines = [
+            f"Campanha de cobranca gerada em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"Qtd. de TCRAs: {len(records)}",
+            f"Retorno esperado: {_format_date_text(response_deadline) or '--'}",
+            "",
+        ]
+
+        updated_records: list[Tcra] = []
+        for index, record in enumerate(records, start=1):
+            file_name = f"{index:02d}_{self._safe_document_stem(_record_label(record))}_cobranca.txt"
+            document_path = target_dir / file_name
+            write_tcra_document(document_path, record, kind="cobranca", today=self.today)
+            document_paths.append(str(document_path))
+            manifest_lines.append(f"- {_record_label(record)} | {document_path}")
+
+            if not register_event:
+                continue
+            event_description = "Cobranca em lote registrada."
+            if response_deadline is not None:
+                event_description = (
+                    f"Cobranca em lote registrada. Retorno esperado ate {_format_date_text(response_deadline)}."
+                )
+            evento = TcraEvento(
+                sequence=max((evento.sequence for evento in record.eventos), default=0) + 1,
+                data_evento=self.today,
+                tipo_evento="Cobranca",
+                descricao=event_description,
+                prazo_resultante=response_deadline,
+                status_resultante=normalize_status_label(record.status) or STATUS_EM_ACOMPANHAMENTO,
+                documento_ref=str(document_path),
+            )
+            updated_records.append(self.append_event_to_record(record, evento))
+
+        manifest_path = target_dir / "manifesto_campanha_cobranca.txt"
+        manifest_path.write_text("\n".join(manifest_lines).strip() + "\n", encoding="utf-8")
+
+        if not register_event:
+            self._append_audit_event(
+                action="TCRA_BULK_CAMPAIGN",
+                summary=f"Campanha de cobranca gerada para {len(records)} TCRA(s)",
+                metadata={
+                    "count": len(records),
+                    "directory": str(target_dir),
+                    "manifest_path": str(manifest_path),
+                    "document_paths": document_paths[:20],
+                },
+            )
+            return TcraBulkCampaignResult(
+                directory=str(target_dir),
+                manifest_path=str(manifest_path),
+                document_paths=tuple(document_paths),
+            )
+
+        if self._can_use_remote_tcra_write():
+            client = self._create_remote_client()
+            self.remote_tcra_service.save_records(
+                client,
+                records=updated_records,
+                workbook_path=self._session_path(),
+                action="TCRA_BULK_CAMPAIGN",
+                summary=f"Campanha de cobranca gerada para {len(updated_records)} TCRA(s)",
+                metadata={
+                    "count": len(updated_records),
+                    "directory": str(target_dir),
+                    "manifest_path": str(manifest_path),
+                    "uids": [_stringify(record.uid) for record in updated_records[:20]],
+                    "authority": "supabase_remote",
+                    "environment": "production",
+                },
+                before=[_serialize_tcra(record) for record in records[:20]],
+                after=[_serialize_tcra(record) for record in updated_records[:20]],
+            )
+            sync_issues = self._sync_remote_cache_after_write(
+                client=client,
+                operation="tcra_bulk_campaign",
+                fallback_local_apply=lambda: [self.sqlite_service.upsert_tcra(record) for record in updated_records],
+            )
+            updated_uids = tuple(_stringify(record.uid) for record in updated_records if _stringify(record.uid))
+            cached_records = tuple(self.sqlite_service.get_tcras_by_uids(updated_uids)) if updated_uids else tuple(updated_records)
+            return TcraBulkCampaignResult(
+                directory=str(target_dir),
+                manifest_path=str(manifest_path),
+                document_paths=tuple(document_paths),
+                updated_uids=updated_uids,
+                updated_records=cached_records or tuple(updated_records),
+                authority_source="remote",
+                sync_issues=sync_issues,
+            )
+
+        updated_uids: list[str] = []
+        for updated_record in updated_records:
+            updated_uids.append(self.sqlite_service.upsert_tcra(updated_record))
+        persisted_records = tuple(self.sqlite_service.get_tcras_by_uids(updated_uids))
+        self._append_audit_event(
+            action="TCRA_BULK_CAMPAIGN",
+            summary=f"Campanha de cobranca gerada para {len(updated_uids)} TCRA(s)",
+            metadata={
+                "count": len(updated_uids),
+                "directory": str(target_dir),
+                "manifest_path": str(manifest_path),
+                "uids": updated_uids[:20],
+            },
+        )
+        return TcraBulkCampaignResult(
+            directory=str(target_dir),
+            manifest_path=str(manifest_path),
+            document_paths=tuple(document_paths),
+            updated_uids=tuple(updated_uids),
+            updated_records=persisted_records,
         )
 
     def analyze_import_workbook(self, path: str | Path) -> TcraWorkbookAnalysis:
@@ -737,3 +902,7 @@ class TcraModuleOperations:
     def export_pdf_report(self, path: str, records: Sequence[Tcra], *, filter_summary: str) -> TcraExportResult:
         export_tcra_pdf_report(path, records, filter_summary=filter_summary, today=self.today)
         return TcraExportResult(export_format="pdf", path=str(path), record_count=len(list(records)))
+
+    def export_record_document(self, path: str, record: Tcra, *, kind: str = "cobranca") -> TcraExportResult:
+        write_tcra_document(path, record, kind=kind, today=self.today)
+        return TcraExportResult(export_format=kind or "documento", path=str(path), record_count=1)

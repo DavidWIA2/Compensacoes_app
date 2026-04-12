@@ -224,6 +224,8 @@ def serialize_tcra_evento(evento: TcraEvento) -> dict[str, object]:
         "descricao": _stringify(evento.descricao),
         "prazo_resultante": _date_to_json(evento.prazo_resultante),
         "status_resultante": _stringify(evento.status_resultante),
+        "protocolo": _stringify(getattr(evento, "protocolo", "")),
+        "documento_ref": _stringify(getattr(evento, "documento_ref", "")),
     }
 
 

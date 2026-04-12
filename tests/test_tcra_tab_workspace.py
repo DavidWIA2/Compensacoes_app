@@ -107,3 +107,37 @@ def test_build_workspace_snapshot_handles_empty_database():
     assert snapshot.agenda_items == ()
     assert snapshot.quality_items == ()
     assert snapshot.upcoming_button_enabled is False
+
+
+def test_build_workspace_snapshot_filters_by_responsavel_and_stale_movement():
+    records = [
+        make_tcra(
+            uid="tcra-1",
+            numero_processo="111/2026",
+            responsavel_execucao="Equipe Norte",
+            data_ultimo_relatorio=date(2026, 3, 1),
+            data_proximo_relatorio=date(2026, 12, 1),
+        ),
+        make_tcra(
+            uid="tcra-2",
+            numero_processo="222/2026",
+            responsavel_execucao="Equipe Sul",
+            data_ultimo_relatorio=date(2025, 1, 1),
+            data_proximo_relatorio=date(2026, 12, 1),
+            eventos=[],
+        ),
+    ]
+
+    snapshot = build_workspace_snapshot(
+        records,
+        filters=TcraWorkspaceFilters(selected_responsaveis=("Equipe Sul",), quick_filter_mode="sem_movimentacao"),
+        search_index=build_record_search_index(records),
+        agenda_scope=AGENDA_SCOPE_HOJE,
+        agenda_expanded=False,
+        quality_expanded=False,
+        preview_limit=3,
+        today=date(2026, 4, 3),
+    )
+
+    assert [record.uid for record in snapshot.filtered_records] == ["tcra-2"]
+    assert "Sem mov. (1)" in snapshot.quick_filter_labels["sem_movimentacao"]

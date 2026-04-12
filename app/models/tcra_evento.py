@@ -12,3 +12,5 @@ class TcraEvento:
     descricao: str = ""
     prazo_resultante: date | None = None
     status_resultante: str = ""
+    protocolo: str = ""
+    documento_ref: str = ""

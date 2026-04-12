@@ -159,6 +159,8 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
                     "descricao": "RelatÃ³rio recebido",
                     "prazo_resultante": "2026-09-01",
                     "status_resultante": "Em acompanhamento",
+                    "protocolo": "SEI-123",
+                    "documento_ref": "docs/relatorio.pdf",
                 }
             ],
         }
@@ -192,4 +194,6 @@ def test_sync_authenticated_client_resets_local_cache_and_loads_remote_snapshot(
     assert tcras[0].local == "Parque Ecológico"
     assert tcras[0].observacoes == "Relatório pendente de protocolo"
     assert tcras[0].eventos[0].tipo_evento == "Relatório"
+    assert tcras[0].eventos[0].protocolo == "SEI-123"
+    assert tcras[0].eventos[0].documento_ref == "docs/relatorio.pdf"
     assert len(tcras[0].eventos) == 1

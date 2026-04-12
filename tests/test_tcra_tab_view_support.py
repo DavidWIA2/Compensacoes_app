@@ -62,7 +62,7 @@ def test_view_support_builds_main_table_rows_with_operational_values():
     assert len(rows) == 2
     assert rows[0].uid == "tcra-1"
     assert MAIN_TABLE_HEADERS[MAIN_TABLE_STATUS_COLUMN] == "Status"
-    assert rows[0].values[0] == "Vencido"
+    assert rows[0].values[0].startswith("Vencido (")
     assert rows[0].values[1] == "26207/2019"
     assert rows[0].values[3]
     assert rows[0].values[4] == "Cobrar cumprimento / revisar prazo"
@@ -81,6 +81,7 @@ def test_view_support_builds_agenda_and_quality_rows():
                 termo_label="26207/2019",
                 local="Itamarati",
                 detalhe="Prazo final vencido",
+                risk_score=80,
             ),
         )
     )
@@ -98,8 +99,9 @@ def test_view_support_builds_agenda_and_quality_rows():
         )
     )
 
-    assert agenda_rows[0].values[0] == "Prazo vencido"
-    assert agenda_rows[0].tooltip == "Prazo final vencido"
+    assert agenda_rows[0].values[0] == "Prazo vencido (80)"
+    assert "Prazo final vencido" in agenda_rows[0].tooltip
+    assert "Risco 80" in agenda_rows[0].tooltip
     assert quality_rows[0].values[1] == "7205/2014"
     assert "Sem responsável de execução." in quality_rows[0].tooltip
 

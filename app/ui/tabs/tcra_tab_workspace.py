@@ -5,6 +5,7 @@ from datetime import date
 from typing import Sequence
 
 from app.models.tcra import Tcra
+from app.services.tcra_insights_service import build_priority_route, build_sla_summary, build_workload_snapshot
 from app.services.tcra_records_service import (
     AGENDA_SCOPE_30D,
     AGENDA_SCOPE_7D,
@@ -14,12 +15,13 @@ from app.services.tcra_records_service import (
     QUICK_FILTER_ALERTAS,
     QUICK_FILTER_ALL,
     QUICK_FILTER_PROXIMOS,
+    QUICK_FILTER_SEM_MOVIMENTACAO,
     QUICK_FILTER_SEM_NUMERO,
     QUICK_FILTER_SEM_RESPONSAVEL,
     TcraAgendaItem,
+    TcraOperationalRules,
     TcraQualityQueueItem,
     TcraRecordOverview,
-    UPCOMING_REPORT_WINDOW_DAYS,
     apply_quick_filter,
     build_quality_queue,
     build_record_overview,
@@ -27,7 +29,6 @@ from app.services.tcra_records_service import (
     compute_metrics,
     filter_tcras,
     operational_sort_key,
-    resolve_quick_filter_count,
     tcra_has_report_due_soon,
 )
 from app.ui.tabs.tcra_tab_support import format_date
@@ -48,6 +49,7 @@ class TcraWorkspaceFilters:
     status: str = "Todos"
     selected_orgaos: tuple[str, ...] = ()
     selected_bairros: tuple[str, ...] = ()
+    selected_responsaveis: tuple[str, ...] = ()
     selected_year: str = "Todos"
     only_mpsp: bool = False
     only_relatorio_pendente: bool = False
@@ -77,6 +79,10 @@ class TcraWorkspaceSnapshot:
     context_text: str
     radar_summary_text: str
     data_quality_text: str
+    sla_summary_text: str
+    workload_summary_text: str
+    route_summary_text: str
+    executive_summary_text: str
     upcoming_summary_text: str
     upcoming_button_text: str
     upcoming_button_enabled: bool
@@ -84,18 +90,35 @@ class TcraWorkspaceSnapshot:
     quick_filter_labels: dict[str, str]
 
 
-def _sort_records(records: Sequence[Tcra], *, today: date) -> tuple[Tcra, ...]:
-    return tuple(sorted(records, key=lambda record: operational_sort_key(record, today=today)))
+def _sort_records(
+    records: Sequence[Tcra],
+    *,
+    today: date,
+    rules: TcraOperationalRules | None = None,
+) -> tuple[Tcra, ...]:
+    return tuple(sorted(records, key=lambda record: operational_sort_key(record, today=today, rules=rules)))
 
 
-def _build_quick_filter_labels(records: Sequence[Tcra], *, today: date) -> dict[str, str]:
+def _build_quick_filter_labels(
+    records: Sequence[Tcra],
+    *,
+    today: date,
+    rules: TcraOperationalRules | None = None,
+) -> dict[str, str]:
+    rule_set = rules or TcraOperationalRules()
     return {
         QUICK_FILTER_ALL: f"Todos ({len(records)})",
-        QUICK_FILTER_ALERTAS: f"Alertas ({resolve_quick_filter_count(records, QUICK_FILTER_ALERTAS, today=today)})",
-        QUICK_FILTER_PROXIMOS: f"Próx. 30d ({resolve_quick_filter_count(records, QUICK_FILTER_PROXIMOS, today=today)})",
-        QUICK_FILTER_SEM_NUMERO: f"Sem número ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_NUMERO, today=today)})",
+        QUICK_FILTER_ALERTAS: f"Alertas ({len(apply_quick_filter(records, mode=QUICK_FILTER_ALERTAS, today=today, rules=rule_set))})",
+        QUICK_FILTER_PROXIMOS: (
+            f"Próx. {rule_set.upcoming_report_window_days}d "
+            f"({len(apply_quick_filter(records, mode=QUICK_FILTER_PROXIMOS, today=today, rules=rule_set))})"
+        ),
+        QUICK_FILTER_SEM_NUMERO: f"Sem número ({len(apply_quick_filter(records, mode=QUICK_FILTER_SEM_NUMERO, today=today, rules=rule_set))})",
         QUICK_FILTER_SEM_RESPONSAVEL: (
-            f"Sem responsável ({resolve_quick_filter_count(records, QUICK_FILTER_SEM_RESPONSAVEL, today=today)})"
+            f"Sem responsável ({len(apply_quick_filter(records, mode=QUICK_FILTER_SEM_RESPONSAVEL, today=today, rules=rule_set))})"
+        ),
+        QUICK_FILTER_SEM_MOVIMENTACAO: (
+            f"Sem mov. ({len(apply_quick_filter(records, mode=QUICK_FILTER_SEM_MOVIMENTACAO, today=today, rules=rule_set))})"
         ),
     }
 
@@ -139,7 +162,9 @@ def build_workspace_snapshot(
     quality_expanded: bool,
     preview_limit: int,
     today: date,
+    rules: TcraOperationalRules | None = None,
 ) -> TcraWorkspaceSnapshot:
+    rule_set = rules or TcraOperationalRules()
     base_filtered_records = _sort_records(
         filter_tcras(
             all_records,
@@ -147,6 +172,7 @@ def build_workspace_snapshot(
             status=filters.status,
             selected_orgaos=filters.selected_orgaos,
             selected_bairros=filters.selected_bairros,
+            selected_responsaveis=filters.selected_responsaveis,
             selected_year=filters.selected_year,
             only_mpsp=filters.only_mpsp,
             only_relatorio_pendente=filters.only_relatorio_pendente,
@@ -155,23 +181,34 @@ def build_workspace_snapshot(
             today=today,
         ),
         today=today,
+        rules=rule_set,
     )
     filtered_records = _sort_records(
-        apply_quick_filter(base_filtered_records, mode=filters.quick_filter_mode, today=today),
+        apply_quick_filter(base_filtered_records, mode=filters.quick_filter_mode, today=today, rules=rule_set),
         today=today,
+        rules=rule_set,
     )
-    metrics = compute_metrics(filtered_records, today=today)
-    base_metrics = compute_metrics(base_filtered_records, today=today)
-    overview = build_record_overview(all_records, today=today) if all_records else None
+    metrics = compute_metrics(filtered_records, today=today, rules=rule_set)
+    base_metrics = compute_metrics(base_filtered_records, today=today, rules=rule_set)
+    overview = build_record_overview(all_records, today=today, rules=rule_set) if all_records else None
 
-    base_agenda_items = tuple(build_work_agenda(base_filtered_records, scope=agenda_scope, today=today, limit=0))
+    base_agenda_items = tuple(
+        build_work_agenda(base_filtered_records, scope=agenda_scope, today=today, limit=0, rules=rule_set)
+    )
     base_quality_items = tuple(build_quality_queue(base_filtered_records, today=today, limit=0))
-    agenda_all_items = tuple(build_work_agenda(filtered_records, scope=agenda_scope, today=today, limit=0))
+    agenda_all_items = tuple(
+        build_work_agenda(filtered_records, scope=agenda_scope, today=today, limit=0, rules=rule_set)
+    )
     quality_all_items = tuple(build_quality_queue(filtered_records, today=today, limit=0))
     agenda_items = agenda_all_items if agenda_expanded or len(agenda_all_items) <= preview_limit else agenda_all_items[:preview_limit]
     quality_items = quality_all_items if quality_expanded or len(quality_all_items) <= preview_limit else quality_all_items[:preview_limit]
 
-    upcoming_records = tuple(record for record in base_filtered_records if tcra_has_report_due_soon(record, today=today))
+    upcoming_records = tuple(
+        record for record in base_filtered_records if tcra_has_report_due_soon(record, today=today, rules=rule_set)
+    )
+    sla_summary = build_sla_summary(base_filtered_records, today=today, rules=rule_set)
+    workload_snapshot = build_workload_snapshot(base_filtered_records, today=today, rules=rule_set)
+    route_plan = build_priority_route(base_filtered_records, today=today, rules=rule_set, limit=6)
     upcoming_count = len(upcoming_records)
     if upcoming_records:
         upcoming_text = " | ".join(
@@ -184,9 +221,13 @@ def build_workspace_snapshot(
     if not all_records:
         context_text = "Banco local de TCRA sem registros."
         radar_summary_text = (
-            f"Alertas 0 | Revisões 0 | Relatórios pendentes 0 | Próx. {UPCOMING_REPORT_WINDOW_DAYS}d 0"
+            f"Alertas 0 | Revisões 0 | Relatórios pendentes 0 | Próx. {rule_set.upcoming_report_window_days}d 0"
         )
         data_quality_text = "Qualidade cadastral: sem registros."
+        sla_summary_text = "SLA: sem pendências no recorte."
+        workload_summary_text = "Carga: sem responsáveis distribuídos."
+        route_summary_text = "Rota: sem paradas priorizadas."
+        executive_summary_text = "Painel executivo: sem registros no banco local."
     else:
         assert overview is not None
         context_text = (
@@ -197,15 +238,29 @@ def build_workspace_snapshot(
             f"Foco do recorte: {base_metrics['count_alertas']} alertas | "
             f"{base_metrics['count_relatorio_pendente']} relatórios pendentes | "
             f"{len(base_quality_items)} revisões | "
-            f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d {upcoming_count}"
+            f"Próx. {rule_set.upcoming_report_window_days}d {upcoming_count} | "
+            f"Sem mov. {base_metrics['count_sem_movimentacao']} | "
+            f"SLA atrasado {sla_summary.overdue_count}"
         )
         data_quality_text = (
             f"Qualidade: {base_metrics['count_sem_numero_tcra']} sem número | "
             f"{base_metrics['count_sem_responsavel']} sem responsável | "
-            f"{base_metrics['count_sem_orgao']} sem órgão"
+            f"{base_metrics['count_sem_orgao']} sem órgão | "
+            f"{base_metrics['count_sem_movimentacao']} sem movimentação há {rule_set.stale_movement_window_days}d"
+        )
+        sla_summary_text = sla_summary.summary_text
+        workload_summary_text = workload_snapshot.summary_text
+        route_summary_text = route_plan.summary_text
+        executive_summary_text = (
+            f"Painel executivo: risco alto {base_metrics['count_risco_alto']} | "
+            f"risco médio {base_metrics['count_risco_medio']} | "
+            f"score médio {base_metrics['risk_score_medio']} | "
+            f"fila {len(base_agenda_items)} | revisões {len(base_quality_items)} | "
+            f"SLA escalado {sla_summary.escalated_count}"
         )
 
-    upcoming_button_text = f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d ({upcoming_count})" if upcoming_count else f"Próx. {UPCOMING_REPORT_WINDOW_DAYS}d"
+    upcoming_button_label = f"Próx. {rule_set.upcoming_report_window_days}d"
+    upcoming_button_text = f"{upcoming_button_label} ({upcoming_count})" if upcoming_count else upcoming_button_label
 
     return TcraWorkspaceSnapshot(
         base_filtered_records=base_filtered_records,
@@ -235,6 +290,10 @@ def build_workspace_snapshot(
         context_text=context_text,
         radar_summary_text=radar_summary_text,
         data_quality_text=data_quality_text,
+        sla_summary_text=sla_summary_text,
+        workload_summary_text=workload_summary_text,
+        route_summary_text=route_summary_text,
+        executive_summary_text=executive_summary_text,
         upcoming_summary_text=f"Próximos relatórios: {upcoming_text}",
         upcoming_button_text=upcoming_button_text,
         upcoming_button_enabled=bool(upcoming_count),
@@ -242,5 +301,5 @@ def build_workspace_snapshot(
             f"{len(filtered_records)} exibidos | {len(base_filtered_records)} no recorte base | "
             f"{len(all_records)} no banco"
         ),
-        quick_filter_labels=_build_quick_filter_labels(base_filtered_records, today=today),
+        quick_filter_labels=_build_quick_filter_labels(base_filtered_records, today=today, rules=rule_set),
     )

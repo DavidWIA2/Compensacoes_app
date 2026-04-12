@@ -23,6 +23,7 @@ QUICK_FILTER_ALERTAS = "alertas"
 QUICK_FILTER_PROXIMOS = "proximos"
 QUICK_FILTER_SEM_NUMERO = "sem_numero"
 QUICK_FILTER_SEM_RESPONSAVEL = "sem_responsavel"
+QUICK_FILTER_SEM_MOVIMENTACAO = "sem_movimentacao"
 
 AGENDA_SCOPE_TODOS = "todos"
 AGENDA_SCOPE_HOJE = "hoje"
@@ -32,6 +33,29 @@ AGENDA_SCOPE_VENCIDOS = "vencidos"
 AGENDA_SCOPE_PENDENTES = "pendentes"
 
 UPCOMING_REPORT_WINDOW_DAYS = 30
+STALE_MOVEMENT_WINDOW_DAYS = 180
+TCRA_WORKFLOW_EVENT_SNOOZE = "Adiamento de pendência"
+TCRA_WORKFLOW_EVENT_RESOLVED = "Pendência tratada"
+
+
+@dataclass(frozen=True)
+class TcraOperationalRules:
+    upcoming_report_window_days: int = UPCOMING_REPORT_WINDOW_DAYS
+    stale_movement_window_days: int = STALE_MOVEMENT_WINDOW_DAYS
+    medium_risk_threshold: int = 35
+    high_risk_threshold: int = 70
+    treatment_sla_days: int = 5
+    escalation_sla_days: int = 10
+
+
+DEFAULT_OPERATIONAL_RULES = TcraOperationalRules()
+
+
+@dataclass(frozen=True)
+class TcraRiskProfile:
+    score: int
+    band: str
+    drivers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,6 +87,9 @@ class TcraAgendaItem:
     detalhe: str
     data_referencia: date | None = None
     status_operacional: str = ""
+    risk_score: int = 0
+    workflow_state: str = ""
+    workflow_until: date | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +116,10 @@ class TcraRecordOverview:
     upcoming_30d_count: int = 0
     sem_responsavel_count: int = 0
     alertas_count: int = 0
+    sem_movimentacao_count: int = 0
+    risco_alto_count: int = 0
+    risco_medio_count: int = 0
+    risco_medio_score: int = 0
     top_statuses: tuple[tuple[str, int], ...] = ()
     top_orgaos: tuple[tuple[str, int], ...] = ()
     upcoming_reports: tuple[TcraUpcomingReportSample, ...] = ()
@@ -96,6 +127,19 @@ class TcraRecordOverview:
 
 def _stringify(value: object) -> str:
     return str(value or "").strip()
+
+
+def _rules_or_default(rules: TcraOperationalRules | None) -> TcraOperationalRules:
+    if rules is None:
+        return DEFAULT_OPERATIONAL_RULES
+    return TcraOperationalRules(
+        upcoming_report_window_days=max(int(rules.upcoming_report_window_days or 0), 0),
+        stale_movement_window_days=max(int(rules.stale_movement_window_days or 0), 0),
+        medium_risk_threshold=max(int(rules.medium_risk_threshold or 0), 0),
+        high_risk_threshold=max(int(rules.high_risk_threshold or 0), 0),
+        treatment_sla_days=max(int(getattr(rules, "treatment_sla_days", 5) or 0), 0),
+        escalation_sla_days=max(int(getattr(rules, "escalation_sla_days", 10) or 0), 0),
+    )
 
 
 def remove_accents(value: object) -> str:
@@ -229,7 +273,15 @@ def build_search_blob(record: Tcra) -> str:
         record.inquerito_civil,
     ]
     for evento in record.eventos:
-        parts.extend((evento.tipo_evento, evento.descricao, evento.status_resultante))
+        parts.extend(
+            (
+                evento.tipo_evento,
+                evento.descricao,
+                evento.status_resultante,
+                getattr(evento, "protocolo", ""),
+                getattr(evento, "documento_ref", ""),
+            )
+        )
     return remove_accents(" ".join(part for part in parts if part)).lower()
 
 
@@ -263,14 +315,17 @@ def tcra_has_report_due_soon(
     record: Tcra,
     *,
     today: date | None = None,
-    within_days: int = UPCOMING_REPORT_WINDOW_DAYS,
+    within_days: int | None = None,
+    rules: TcraOperationalRules | None = None,
 ) -> bool:
     if tcra_is_cumprido(record):
         return False
     current_day = today or date.today()
     if record.data_proximo_relatorio is None:
         return False
-    limit_day = current_day + timedelta(days=max(int(within_days or 0), 0))
+    rule_set = _rules_or_default(rules)
+    resolved_window = rule_set.upcoming_report_window_days if within_days is None else within_days
+    limit_day = current_day + timedelta(days=max(int(resolved_window or 0), 0))
     return current_day <= record.data_proximo_relatorio <= limit_day
 
 
@@ -286,6 +341,37 @@ def tcra_has_missing_orgao(record: Tcra) -> bool:
     return not normalize_orgao_label(record.orgao_acompanhamento)
 
 
+def tcra_last_movement_date(record: Tcra) -> date | None:
+    dates = [
+        evento.data_evento
+        for evento in record.eventos
+        if evento.data_evento is not None
+    ]
+    if record.data_ultimo_relatorio is not None:
+        dates.append(record.data_ultimo_relatorio)
+    if record.data_assinatura is not None:
+        dates.append(record.data_assinatura)
+    return max(dates) if dates else None
+
+
+def tcra_has_stale_movement(
+    record: Tcra,
+    *,
+    today: date | None = None,
+    stale_days: int | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> bool:
+    if tcra_is_cumprido(record):
+        return False
+    current_day = today or date.today()
+    rule_set = _rules_or_default(rules)
+    resolved_stale_days = rule_set.stale_movement_window_days if stale_days is None else stale_days
+    last_movement = tcra_last_movement_date(record)
+    if last_movement is None:
+        return True
+    return last_movement < current_day - timedelta(days=max(int(resolved_stale_days or 0), 0))
+
+
 def tcra_is_mpsp_related(record: Tcra) -> bool:
     explicit_flag = normalize_key(record.mpsp_relacionado)
     if explicit_flag in {"SIM", "S", "YES", "Y", "1", "VERDADEIRO"}:
@@ -293,6 +379,121 @@ def tcra_is_mpsp_related(record: Tcra) -> bool:
     if "MPSP" in normalize_key(record.orgao_acompanhamento):
         return True
     return bool(str(record.inquerito_civil or "").strip())
+
+
+def resolve_tcra_risk_profile(
+    record: Tcra,
+    *,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> TcraRiskProfile:
+    current_day = today or date.today()
+    rule_set = _rules_or_default(rules)
+    score = 0
+    drivers: list[str] = []
+
+    if tcra_is_cumprido(record):
+        return TcraRiskProfile(score=0, band="Concluido", drivers=())
+
+    if tcra_has_prazo_vencido(record, today=current_day):
+        score += 35
+        drivers.append("Prazo vencido")
+    if tcra_has_relatorio_pendente(record, today=current_day):
+        score += 30
+        drivers.append("Relatório pendente")
+    elif tcra_has_report_due_soon(record, today=current_day, rules=rule_set):
+        score += 15
+        drivers.append(f"Relatório em {rule_set.upcoming_report_window_days} dias")
+    if tcra_has_stale_movement(record, today=current_day, rules=rule_set):
+        score += 20
+        drivers.append(f"Sem movimentação há {rule_set.stale_movement_window_days} dias")
+    if tcra_has_missing_identity(record):
+        score += 10
+        drivers.append("Sem número TCRA")
+    if tcra_has_missing_responsavel(record):
+        score += 8
+        drivers.append("Sem responsável")
+    if tcra_has_missing_orgao(record):
+        score += 8
+        drivers.append("Sem órgão")
+    consistency_issues = resolve_record_consistency_issues(record, today=current_day)
+    if consistency_issues:
+        score += 25
+        drivers.append("Inconsistencia cadastral")
+    if tcra_is_mpsp_related(record):
+        score += 5
+        drivers.append("MPSP")
+
+    score = min(max(score, 0), 100)
+    if score >= rule_set.high_risk_threshold:
+        band = "Alto"
+    elif score >= rule_set.medium_risk_threshold:
+        band = "Médio"
+    elif score > 0:
+        band = "Baixo"
+    else:
+        band = "Rotina"
+    return TcraRiskProfile(score=score, band=band, drivers=tuple(drivers))
+
+
+def tcra_workflow_issue_key(value: object) -> str:
+    return normalize_key(value).lower().replace(" ", "_")
+
+
+def _workflow_event_matches(evento: object, *, event_type: str, issue_key: str) -> bool:
+    tipo = normalize_key(getattr(evento, "tipo_evento", ""))
+    if normalize_key(event_type) != tipo:
+        return False
+    descricao = normalize_key(getattr(evento, "descricao", ""))
+    return normalize_key(issue_key) in descricao
+
+
+def tcra_agenda_snoozed_until(
+    record: Tcra,
+    *,
+    issue_key: str,
+    today: date | None = None,
+) -> date | None:
+    current_day = today or date.today()
+    candidates = [
+        evento.prazo_resultante
+        for evento in record.eventos
+        if _workflow_event_matches(evento, event_type=TCRA_WORKFLOW_EVENT_SNOOZE, issue_key=issue_key)
+        and evento.prazo_resultante is not None
+        and evento.prazo_resultante >= current_day
+    ]
+    return max(candidates) if candidates else None
+
+
+def tcra_agenda_workflow_state(
+    record: Tcra,
+    *,
+    issue_key: str,
+    today: date | None = None,
+) -> tuple[str, date | None]:
+    current_day = today or date.today()
+    matching_events = [
+        evento
+        for evento in record.eventos
+        if _workflow_event_matches(evento, event_type=TCRA_WORKFLOW_EVENT_SNOOZE, issue_key=issue_key)
+        or _workflow_event_matches(evento, event_type=TCRA_WORKFLOW_EVENT_RESOLVED, issue_key=issue_key)
+    ]
+    if not matching_events:
+        return "", None
+
+    latest_event = max(
+        matching_events,
+        key=lambda evento: (evento.data_evento or date.min, int(getattr(evento, "sequence", 0) or 0)),
+    )
+    if _workflow_event_matches(latest_event, event_type=TCRA_WORKFLOW_EVENT_RESOLVED, issue_key=issue_key):
+        return "resolved", latest_event.data_evento
+    if (
+        _workflow_event_matches(latest_event, event_type=TCRA_WORKFLOW_EVENT_SNOOZE, issue_key=issue_key)
+        and latest_event.prazo_resultante is not None
+        and latest_event.prazo_resultante >= current_day
+    ):
+        return "snoozed", latest_event.prazo_resultante
+    return "", None
 
 
 def resolve_operational_status(record: Tcra, *, today: date | None = None) -> str:
@@ -319,14 +520,26 @@ def resolve_operational_status(record: Tcra, *, today: date | None = None) -> st
     return STATUS_SEM_STATUS
 
 
-def resolve_operational_issues(record: Tcra, *, today: date | None = None) -> tuple[str, ...]:
+def resolve_operational_issues(
+    record: Tcra,
+    *,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> tuple[str, ...]:
     issues: list[str] = []
+    rule_set = _rules_or_default(rules)
+    has_timed_issue = False
     if tcra_has_prazo_vencido(record, today=today):
         issues.append("Prazo final vencido")
+        has_timed_issue = True
     if tcra_has_relatorio_pendente(record, today=today):
         issues.append("Relatório pendente")
-    elif tcra_has_report_due_soon(record, today=today):
-        issues.append(f"Relatório nos próximos {UPCOMING_REPORT_WINDOW_DAYS} dias")
+        has_timed_issue = True
+    elif tcra_has_report_due_soon(record, today=today, rules=rule_set):
+        issues.append(f"Relatório nos próximos {rule_set.upcoming_report_window_days} dias")
+        has_timed_issue = True
+    if not has_timed_issue and tcra_has_stale_movement(record, today=today, rules=rule_set):
+        issues.append(f"Sem movimentação há {rule_set.stale_movement_window_days} dias")
     if tcra_has_missing_identity(record):
         issues.append("Sem número TCRA")
     if tcra_has_missing_responsavel(record):
@@ -391,7 +604,7 @@ def build_quality_queue(
 
         detalhe = issues[0]
         if len(issues) > 1:
-            detalhe = f"{detalhe} | +{len(issues) - 1} pendencia(s)"
+            detalhe = f"{detalhe} | +{len(issues) - 1} pendência(s)"
 
         queue.append(
             TcraQualityQueueItem(
@@ -423,9 +636,11 @@ def build_operational_agenda(
     *,
     today: date | None = None,
     limit: int = 8,
+    rules: TcraOperationalRules | None = None,
 ) -> tuple[TcraAgendaItem, ...]:
     agenda_rows: list[TcraAgendaItem] = []
     current_day = today or date.today()
+    rule_set = _rules_or_default(rules)
 
     for record in records:
         priority_rank: int | None = None
@@ -443,38 +658,61 @@ def build_operational_agenda(
             prioridade_label = "Relatório pendente"
             data_referencia = record.data_proximo_relatorio
             detalhe_principal = f"Relatório previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
-        elif tcra_has_report_due_soon(record, today=current_day):
+        elif tcra_has_report_due_soon(record, today=current_day, rules=rule_set):
             priority_rank = 2
             prioridade_label = "Relatório próximo"
             data_referencia = record.data_proximo_relatorio
             detalhe_principal = f"Relatório previsto em {_format_agenda_date(record.data_proximo_relatorio)}."
-        elif tcra_has_missing_identity(record):
+        elif tcra_has_stale_movement(record, today=current_day, rules=rule_set):
             priority_rank = 3
+            prioridade_label = "Sem movimentação"
+            data_referencia = tcra_last_movement_date(record)
+            if data_referencia is None:
+                detalhe_principal = (
+                    f"Sem evento ou relatório registrado nos últimos {rule_set.stale_movement_window_days} dias."
+                )
+            else:
+                detalhe_principal = (
+                    f"Última movimentação em {_format_agenda_date(data_referencia)}; "
+                    f"registre cobrança, vistoria ou andamento."
+                )
+        elif tcra_has_missing_identity(record):
+            priority_rank = 4
             prioridade_label = "Cadastro incompleto"
             detalhe_principal = "Sem número TCRA informado."
         elif tcra_has_missing_responsavel(record):
-            priority_rank = 4
+            priority_rank = 5
             prioridade_label = "Sem responsável"
             detalhe_principal = "Defina um responsável de execução."
         elif tcra_has_missing_orgao(record):
-            priority_rank = 5
+            priority_rank = 6
             prioridade_label = "Sem órgão"
             detalhe_principal = "Informe o órgão de acompanhamento."
         else:
             consistency_issues = resolve_record_consistency_issues(record, today=current_day)
             if consistency_issues:
-                priority_rank = 6
+                priority_rank = 7
                 prioridade_label = "Revisar cadastro"
                 detalhe_principal = consistency_issues[0]
 
         if priority_rank is None:
             continue
 
-        extra_issues = [issue for issue in resolve_operational_issues(record, today=current_day) if issue not in detalhe_principal]
+        issue_key = tcra_workflow_issue_key(prioridade_label)
+        workflow_state, workflow_until = tcra_agenda_workflow_state(record, issue_key=issue_key, today=current_day)
+        if workflow_state:
+            continue
+
+        extra_issues = [
+            issue
+            for issue in resolve_operational_issues(record, today=current_day, rules=rule_set)
+            if issue not in detalhe_principal
+        ]
         if extra_issues:
             detalhe = f"{detalhe_principal} {' | '.join(extra_issues[:2])}".strip()
         else:
             detalhe = detalhe_principal
+        risk_profile = resolve_tcra_risk_profile(record, today=current_day, rules=rule_set)
         agenda_rows.append(
             TcraAgendaItem(
                 uid=record.uid,
@@ -485,6 +723,9 @@ def build_operational_agenda(
                 detalhe=detalhe,
                 data_referencia=data_referencia,
                 status_operacional=resolve_operational_status(record, today=current_day),
+                risk_score=risk_profile.score,
+                workflow_state=workflow_state,
+                workflow_until=workflow_until,
             )
         )
 
@@ -492,6 +733,7 @@ def build_operational_agenda(
         agenda_rows,
         key=lambda item: (
             item.priority_rank,
+            -int(item.risk_score or 0),
             item.data_referencia or date.max,
             item.termo_label.lower(),
             item.uid.lower(),
@@ -518,13 +760,13 @@ def filter_agenda_items_by_scope(
         if normalized_scope == AGENDA_SCOPE_VENCIDOS:
             return item.priority_rank == 0
         if normalized_scope == AGENDA_SCOPE_PENDENTES:
-            return item.priority_rank in {1, 3, 4, 5, 6}
+            return item.priority_rank in {1, 3, 4, 5, 6, 7}
         if normalized_scope == AGENDA_SCOPE_HOJE:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6}:
+            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
                 return True
             return bool(item.priority_rank == 2 and item.data_referencia and item.data_referencia <= current_day)
         if normalized_scope == AGENDA_SCOPE_7D:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6}:
+            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
                 return True
             return bool(
                 item.priority_rank == 2
@@ -532,7 +774,7 @@ def filter_agenda_items_by_scope(
                 and item.data_referencia <= current_day + timedelta(days=7)
             )
         if normalized_scope == AGENDA_SCOPE_30D:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6}:
+            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
                 return True
             return bool(
                 item.priority_rank == 2
@@ -550,9 +792,10 @@ def build_work_agenda(
     scope: str = AGENDA_SCOPE_TODOS,
     today: date | None = None,
     limit: int = 8,
+    rules: TcraOperationalRules | None = None,
 ) -> tuple[TcraAgendaItem, ...]:
     scoped_items = filter_agenda_items_by_scope(
-        build_operational_agenda(records, today=today, limit=0),
+        build_operational_agenda(records, today=today, limit=0, rules=rules),
         scope=scope,
         today=today,
     )
@@ -596,7 +839,14 @@ def resolve_quick_filter_count(records: Sequence[Tcra], mode: str, *, today: dat
     return len(apply_quick_filter(records, mode=mode, today=today))
 
 
-def apply_quick_filter(records: Sequence[Tcra], *, mode: str, today: date | None = None) -> List[Tcra]:
+def apply_quick_filter(
+    records: Sequence[Tcra],
+    *,
+    mode: str,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> List[Tcra]:
+    rule_set = _rules_or_default(rules)
     if mode == QUICK_FILTER_ALERTAS:
         return [
             record
@@ -604,40 +854,58 @@ def apply_quick_filter(records: Sequence[Tcra], *, mode: str, today: date | None
             if tcra_has_prazo_vencido(record, today=today) or tcra_has_relatorio_pendente(record, today=today)
         ]
     if mode == QUICK_FILTER_PROXIMOS:
-        return [record for record in records if tcra_has_report_due_soon(record, today=today)]
+        return [record for record in records if tcra_has_report_due_soon(record, today=today, rules=rule_set)]
     if mode == QUICK_FILTER_SEM_NUMERO:
         return [record for record in records if tcra_has_missing_identity(record)]
     if mode == QUICK_FILTER_SEM_RESPONSAVEL:
         return [record for record in records if tcra_has_missing_responsavel(record)]
+    if mode == QUICK_FILTER_SEM_MOVIMENTACAO:
+        return [record for record in records if tcra_has_stale_movement(record, today=today, rules=rule_set)]
     return list(records)
 
 
-def operational_sort_key(record: Tcra, *, today: date | None = None) -> tuple[int, date, str, str]:
+def operational_sort_key(
+    record: Tcra,
+    *,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> tuple[int, int, date, str, str]:
+    rule_set = _rules_or_default(rules)
     if tcra_has_prazo_vencido(record, today=today):
         priority = 0
     elif tcra_has_relatorio_pendente(record, today=today):
         priority = 1
-    elif tcra_has_report_due_soon(record, today=today):
+    elif tcra_has_report_due_soon(record, today=today, rules=rule_set):
         priority = 2
-    elif tcra_has_missing_identity(record) or tcra_has_missing_responsavel(record):
+    elif tcra_has_stale_movement(record, today=today, rules=rule_set):
         priority = 3
-    elif resolve_operational_status(record, today=today) == STATUS_CUMPRIDO:
-        priority = 5
-    elif resolve_operational_status(record, today=today) == STATUS_SEM_VALIDADE:
-        priority = 6
-    else:
+    elif tcra_has_missing_identity(record) or tcra_has_missing_responsavel(record):
         priority = 4
+    elif resolve_operational_status(record, today=today) == STATUS_CUMPRIDO:
+        priority = 6
+    elif resolve_operational_status(record, today=today) == STATUS_SEM_VALIDADE:
+        priority = 7
+    else:
+        priority = 5
 
-    deadline = record.data_proximo_relatorio or record.prazo_final or date.max
+    deadline = record.data_proximo_relatorio or record.prazo_final or tcra_last_movement_date(record) or date.max
+    risk_profile = resolve_tcra_risk_profile(record, today=today, rules=rule_set)
     return (
         priority,
+        -risk_profile.score,
         deadline,
         _stringify(record.numero_processo or record.numero_tcra or record.local).lower(),
         _stringify(record.uid).lower(),
     )
 
 
-def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Dict[str, object]:
+def compute_metrics(
+    records: Sequence[Tcra],
+    *,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> Dict[str, object]:
+    rule_set = _rules_or_default(rules)
     status_counter: Counter[str] = Counter()
     orgao_counter: Counter[str] = Counter()
     total_count = len(records)
@@ -649,11 +917,17 @@ def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Di
     sem_numero_tcra_count = 0
     sem_responsavel_count = 0
     sem_orgao_count = 0
+    sem_movimentacao_count = 0
     relatorio_proximo_30d_count = 0
     alertas_count = 0
+    risco_alto_count = 0
+    risco_medio_count = 0
+    total_risk_score = 0
 
     for record in records:
         operational_status = resolve_operational_status(record, today=today)
+        risk_profile = resolve_tcra_risk_profile(record, today=today, rules=rule_set)
+        total_risk_score += risk_profile.score
         status_counter[operational_status] += 1
         orgao_counter[normalize_orgao_label(record.orgao_acompanhamento) or "(Sem órgão)"] += 1
 
@@ -667,7 +941,7 @@ def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Di
             relatorio_pendente_count += 1
         if has_prazo_vencido or has_relatorio_pendente:
             alertas_count += 1
-        if tcra_has_report_due_soon(record, today=today):
+        if tcra_has_report_due_soon(record, today=today, rules=rule_set):
             relatorio_proximo_30d_count += 1
         if tcra_is_mpsp_related(record):
             mpsp_relacionados_count += 1
@@ -679,6 +953,12 @@ def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Di
             sem_responsavel_count += 1
         if not normalize_orgao_label(record.orgao_acompanhamento):
             sem_orgao_count += 1
+        if tcra_has_stale_movement(record, today=today, rules=rule_set):
+            sem_movimentacao_count += 1
+        if risk_profile.band == "Alto":
+            risco_alto_count += 1
+        elif risk_profile.band == "Médio":
+            risco_medio_count += 1
 
     return {
         "count_total": total_count,
@@ -691,8 +971,12 @@ def compute_metrics(records: Sequence[Tcra], *, today: date | None = None) -> Di
         "count_sem_numero_tcra": sem_numero_tcra_count,
         "count_sem_responsavel": sem_responsavel_count,
         "count_sem_orgao": sem_orgao_count,
+        "count_sem_movimentacao": sem_movimentacao_count,
         "count_relatorio_proximo_30d": relatorio_proximo_30d_count,
         "count_alertas": alertas_count,
+        "count_risco_alto": risco_alto_count,
+        "count_risco_medio": risco_medio_count,
+        "risk_score_medio": int(round(total_risk_score / total_count)) if total_count else 0,
         "status_sorted": tuple(status_counter.most_common()),
         "orgaos_sorted": tuple(orgao_counter.most_common()),
     }
@@ -705,6 +989,7 @@ def filter_tcras(
     status: str,
     selected_orgaos: Sequence[str],
     selected_bairros: Sequence[str],
+    selected_responsaveis: Sequence[str] = (),
     selected_year: str = STATUS_TODOS,
     only_mpsp: bool = False,
     only_relatorio_pendente: bool = False,
@@ -716,6 +1001,7 @@ def filter_tcras(
     status_key = normalize_key(status)
     selected_orgaos_set = {normalize_key(item) for item in selected_orgaos or []}
     selected_bairros_set = {normalize_key(item) for item in selected_bairros or []}
+    selected_responsaveis_set = {normalize_key(item) for item in selected_responsaveis or []}
 
     filtered: list[Tcra] = []
     for position, record in enumerate(records, start=1):
@@ -742,6 +1028,10 @@ def filter_tcras(
 
         if selected_bairros_set:
             if normalize_key(record.bairro) not in selected_bairros_set:
+                continue
+
+        if selected_responsaveis_set:
+            if normalize_key(record.responsavel_execucao) not in selected_responsaveis_set:
                 continue
 
         if only_mpsp and not tcra_is_mpsp_related(record):
@@ -772,8 +1062,13 @@ def build_filter_facets(records: Sequence[Tcra], *, today: date | None = None) -
     )
 
 
-def build_record_overview(records: Sequence[Tcra], *, today: date | None = None) -> TcraRecordOverview:
-    metrics = compute_metrics(records, today=today)
+def build_record_overview(
+    records: Sequence[Tcra],
+    *,
+    today: date | None = None,
+    rules: TcraOperationalRules | None = None,
+) -> TcraRecordOverview:
+    metrics = compute_metrics(records, today=today, rules=rules)
     upcoming_candidates = sorted(
         (
             record
@@ -795,6 +1090,10 @@ def build_record_overview(records: Sequence[Tcra], *, today: date | None = None)
         upcoming_30d_count=int(metrics["count_relatorio_proximo_30d"]),
         sem_responsavel_count=int(metrics["count_sem_responsavel"]),
         alertas_count=int(metrics["count_alertas"]),
+        sem_movimentacao_count=int(metrics["count_sem_movimentacao"]),
+        risco_alto_count=int(metrics["count_risco_alto"]),
+        risco_medio_count=int(metrics["count_risco_medio"]),
+        risco_medio_score=int(metrics["risk_score_medio"]),
         top_statuses=tuple(metrics["status_sorted"]),
         top_orgaos=tuple(metrics["orgaos_sorted"]),
         upcoming_reports=tuple(

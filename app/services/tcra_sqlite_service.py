@@ -150,6 +150,7 @@ class TcraSqliteService:
         status: str = "Todos",
         selected_orgaos: Sequence[str] = (),
         selected_bairros: Sequence[str] = (),
+        selected_responsaveis: Sequence[str] = (),
         selected_year: str = "Todos",
         only_mpsp: bool = False,
         only_relatorio_pendente: bool = False,
@@ -163,6 +164,7 @@ class TcraSqliteService:
             status=status,
             selected_orgaos=selected_orgaos,
             selected_bairros=selected_bairros,
+            selected_responsaveis=selected_responsaveis,
             selected_year=selected_year,
             only_mpsp=only_mpsp,
             only_relatorio_pendente=only_relatorio_pendente,
@@ -181,6 +183,7 @@ class TcraSqliteService:
         status: str = "Todos",
         selected_orgaos: Sequence[str] = (),
         selected_bairros: Sequence[str] = (),
+        selected_responsaveis: Sequence[str] = (),
         selected_year: str = "Todos",
         only_mpsp: bool = False,
         only_relatorio_pendente: bool = False,
@@ -192,6 +195,7 @@ class TcraSqliteService:
             status=status,
             selected_orgaos=selected_orgaos,
             selected_bairros=selected_bairros,
+            selected_responsaveis=selected_responsaveis,
             selected_year=selected_year,
             only_mpsp=only_mpsp,
             only_relatorio_pendente=only_relatorio_pendente,
@@ -434,14 +438,16 @@ class TcraSqliteService:
         for index, evento in enumerate(eventos, start=1):
             sequence = int(evento.sequence or index)
             normalized.append(
-                TcraEvento(
-                    sequence=sequence,
-                    data_evento=evento.data_evento,
-                    tipo_evento=normalize_event_type_label(evento.tipo_evento),
-                    descricao=_stringify(evento.descricao),
-                    prazo_resultante=evento.prazo_resultante,
-                    status_resultante=normalize_status_label(evento.status_resultante),
-                )
+            TcraEvento(
+                sequence=sequence,
+                data_evento=evento.data_evento,
+                tipo_evento=normalize_event_type_label(evento.tipo_evento),
+                descricao=_stringify(evento.descricao),
+                prazo_resultante=evento.prazo_resultante,
+                status_resultante=normalize_status_label(evento.status_resultante),
+                protocolo=_stringify(getattr(evento, "protocolo", "")),
+                documento_ref=_stringify(getattr(evento, "documento_ref", "")),
+            )
             )
         normalized.sort(key=lambda item: (item.sequence, item.data_evento or date.min, item.tipo_evento))
         return normalized
@@ -469,9 +475,11 @@ class TcraSqliteService:
                     descricao,
                     prazo_resultante,
                     status_resultante,
+                    protocolo,
+                    documento_ref,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tcra_uid,
@@ -481,6 +489,8 @@ class TcraSqliteService:
                     evento.descricao,
                     _date_to_storage(evento.prazo_resultante),
                     evento.status_resultante,
+                    evento.protocolo,
+                    evento.documento_ref,
                     timestamp,
                     timestamp,
                 ),
@@ -494,7 +504,7 @@ class TcraSqliteService:
     ) -> dict[str, tuple[TcraEvento, ...]]:
         normalized_uids = [_stringify(uid) for uid in (tcra_uids or ()) if _stringify(uid)]
         query = """
-            SELECT tcra_uid, sequence, data_evento, tipo_evento, descricao, prazo_resultante, status_resultante
+            SELECT tcra_uid, sequence, data_evento, tipo_evento, descricao, prazo_resultante, status_resultante, protocolo, documento_ref
             FROM tcra_eventos
         """
         params: tuple[object, ...] = ()
@@ -515,6 +525,8 @@ class TcraSqliteService:
                     descricao=_stringify(row["descricao"]),
                     prazo_resultante=_date_from_storage(row["prazo_resultante"]),
                     status_resultante=_stringify(row["status_resultante"]),
+                    protocolo=_stringify(row["protocolo"]),
+                    documento_ref=_stringify(row["documento_ref"]),
                 )
             )
         return {uid: tuple(eventos) for uid, eventos in eventos_by_uid.items()}
@@ -522,7 +534,7 @@ class TcraSqliteService:
     def _load_eventos_for_uid(self, conn: sqlite3.Connection, tcra_uid: str) -> tuple[TcraEvento, ...]:
         rows = conn.execute(
             """
-            SELECT sequence, data_evento, tipo_evento, descricao, prazo_resultante, status_resultante
+            SELECT sequence, data_evento, tipo_evento, descricao, prazo_resultante, status_resultante, protocolo, documento_ref
             FROM tcra_eventos
             WHERE tcra_uid = ?
             ORDER BY sequence ASC
@@ -537,6 +549,8 @@ class TcraSqliteService:
                 descricao=_stringify(row["descricao"]),
                 prazo_resultante=_date_from_storage(row["prazo_resultante"]),
                 status_resultante=_stringify(row["status_resultante"]),
+                protocolo=_stringify(row["protocolo"]),
+                documento_ref=_stringify(row["documento_ref"]),
             )
             for row in rows
         )
@@ -652,6 +666,8 @@ class TcraSqliteService:
                 descricao TEXT NOT NULL DEFAULT '',
                 prazo_resultante TEXT NOT NULL DEFAULT '',
                 status_resultante TEXT NOT NULL DEFAULT '',
+                protocolo TEXT NOT NULL DEFAULT '',
+                documento_ref TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (tcra_uid) REFERENCES tcras(uid) ON DELETE CASCADE,
@@ -665,3 +681,13 @@ class TcraSqliteService:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tcras_prazo_final ON tcras(prazo_final)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tcras_search_blob_norm ON tcras(search_blob_norm)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tcra_eventos_uid_sequence ON tcra_eventos(tcra_uid, sequence)")
+        self._ensure_column(conn, "tcra_eventos", "protocolo", "TEXT NOT NULL DEFAULT ''")
+        self._ensure_column(conn, "tcra_eventos", "documento_ref", "TEXT NOT NULL DEFAULT ''")
+
+    def _ensure_column(self, conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+        columns = {
+            _stringify(row["name"])
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")

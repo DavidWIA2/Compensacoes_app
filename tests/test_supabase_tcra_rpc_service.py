@@ -58,6 +58,8 @@ def _make_tcra() -> Tcra:
                 descricao="Relatorio recebido",
                 prazo_resultante=date(2026, 1, 1),
                 status_resultante="Em acompanhamento",
+                protocolo="SEI-123",
+                documento_ref="docs/relatorio.pdf",
             )
         ],
     )
@@ -69,6 +71,8 @@ def test_serialize_tcra_includes_dates_and_events():
     assert payload["uid"] == "tcra-001"
     assert payload["data_assinatura"] == "2024-01-10"
     assert payload["eventos"][0]["prazo_resultante"] == "2026-01-01"
+    assert payload["eventos"][0]["protocolo"] == "SEI-123"
+    assert payload["eventos"][0]["documento_ref"] == "docs/relatorio.pdf"
 
 
 def test_save_record_calls_tcra_rpc_with_serialized_payload():

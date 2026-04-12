@@ -11,12 +11,15 @@ from app.services.tcra_records_service import (
     QUICK_FILTER_ALERTAS,
     QUICK_FILTER_PROXIMOS,
     QUICK_FILTER_SEM_NUMERO,
+    QUICK_FILTER_SEM_MOVIMENTACAO,
     QUICK_FILTER_SEM_RESPONSAVEL,
     TcraAgendaItem,
+    TcraOperationalRules,
     TcraQualityQueueItem,
     STATUS_CUMPRIDO,
     STATUS_PRAZO_VENCIDO,
     STATUS_RELATORIO_PENDENTE,
+    TCRA_WORKFLOW_EVENT_RESOLVED,
     apply_quick_filter,
     build_operational_agenda,
     build_work_agenda,
@@ -273,6 +276,7 @@ def test_tcra_normalization_quick_filters_and_operational_sort():
     assert [record.uid for record in apply_quick_filter(records, mode=QUICK_FILTER_PROXIMOS, today=today)] == ["tcra-3"]
     assert [record.uid for record in apply_quick_filter(records, mode=QUICK_FILTER_SEM_NUMERO, today=today)] == ["tcra-1"]
     assert [record.uid for record in apply_quick_filter(records, mode=QUICK_FILTER_SEM_RESPONSAVEL, today=today)] == ["tcra-1"]
+    assert [record.uid for record in apply_quick_filter(records, mode=QUICK_FILTER_SEM_MOVIMENTACAO, today=today)] == ["tcra-1", "tcra-3"]
 
     sorted_records = sorted(records, key=lambda record: operational_sort_key(record, today=today))
     assert [record.uid for record in sorted_records] == ["tcra-1", "tcra-3", "tcra-2"]
@@ -304,6 +308,51 @@ def test_tcra_operational_agenda_and_consistency_rules():
 
     consistency = resolve_record_consistency_issues(records[2], today=today)
     assert consistency == ("TCRA cumprido/arquivado não deve manter próximo relatório em aberto.",)
+
+
+def test_tcra_operational_agenda_honors_custom_rules_and_resolved_workflow():
+    today = date(2026, 4, 3)
+    recent_event = TcraEvento(
+        sequence=1,
+        data_evento=date(2026, 3, 30),
+        tipo_evento="Relatorio",
+        descricao="Relatorio recente",
+        prazo_resultante=date(2026, 4, 20),
+        status_resultante="Em acompanhamento",
+    )
+    upcoming = make_tcra(
+        uid="tcra-window",
+        prazo_final=date(2026, 12, 1),
+        data_ultimo_relatorio=date(2026, 3, 30),
+        data_proximo_relatorio=date(2026, 4, 20),
+        eventos=[recent_event],
+    )
+    assert [item.uid for item in build_operational_agenda([upcoming], today=today, limit=10)] == ["tcra-window"]
+    assert (
+        build_operational_agenda(
+            [upcoming],
+            today=today,
+            limit=10,
+            rules=TcraOperationalRules(upcoming_report_window_days=7, stale_movement_window_days=180),
+        )
+        == ()
+    )
+
+    resolved = make_tcra(
+        uid="tcra-resolved",
+        prazo_final=date(2026, 3, 20),
+        data_proximo_relatorio=date(2026, 4, 10),
+        eventos=[
+            TcraEvento(
+                sequence=1,
+                data_evento=today,
+                tipo_evento=TCRA_WORKFLOW_EVENT_RESOLVED,
+                descricao="issue=prazo_vencido; pendencia tratada",
+                status_resultante="Em acompanhamento",
+            )
+        ],
+    )
+    assert build_operational_agenda([resolved], today=today, limit=10) == ()
 
 
 def test_tcra_work_agenda_scopes_and_issue_suggestions():

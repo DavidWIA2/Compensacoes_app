@@ -622,6 +622,8 @@ class TcraEventoEditorDialog(QDialog):
         descricao: str = "",
         prazo_resultante: str = "",
         status_resultante: str = "",
+        protocolo: str = "",
+        documento_ref: str = "",
         preset_key: str = "",
         apply_preset_on_start: bool = False,
     ):
@@ -649,6 +651,16 @@ class TcraEventoEditorDialog(QDialog):
         self.in_status_resultante = QLineEdit(str(status_resultante or ""))
         self.in_prazo_resultante = QLineEdit(str(prazo_resultante or ""))
         self.in_prazo_resultante.setPlaceholderText("dd/mm/aaaa")
+        self.in_protocolo = QLineEdit(str(protocolo or ""))
+        self.in_protocolo.setPlaceholderText("Número de protocolo, SEI ou referência administrativa")
+        self.in_documento_ref = QLineEdit(str(documento_ref or ""))
+        self.in_documento_ref.setPlaceholderText("Caminho, link ou identificação do documento")
+        document_row = QHBoxLayout()
+        document_row.setContentsMargins(0, 0, 0, 0)
+        self.btn_choose_document = QPushButton("Escolher arquivo")
+        self.btn_choose_document.setProperty("kind", "chip-quiet")
+        document_row.addWidget(self.in_documento_ref, 1)
+        document_row.addWidget(self.btn_choose_document)
         self.in_descricao = QPlainTextEdit(str(descricao or ""))
         self.in_descricao.setTabChangesFocus(True)
         self.in_descricao.setMinimumHeight(120)
@@ -659,6 +671,8 @@ class TcraEventoEditorDialog(QDialog):
         form.addRow("Tipo do evento:", self.in_tipo_evento)
         form.addRow("Status resultante:", self.in_status_resultante)
         form.addRow("Prazo resultante:", self.in_prazo_resultante)
+        form.addRow("Protocolo:", self.in_protocolo)
+        form.addRow("Documento/link:", document_row)
         form.addRow("Descricao:", self.in_descricao)
         layout.addLayout(form)
 
@@ -672,6 +686,7 @@ class TcraEventoEditorDialog(QDialog):
         if preset_index >= 0:
             self.combo_preset.setCurrentIndex(preset_index)
         self.combo_preset.currentIndexChanged.connect(self._apply_selected_preset)
+        self.btn_choose_document.clicked.connect(self._choose_document_ref)
         if apply_preset_on_start and resolved_preset_key and resolved_preset_key != "personalizado":
             self._apply_selected_preset()
 
@@ -708,6 +723,11 @@ class TcraEventoEditorDialog(QDialog):
         self.in_status_resultante.setText(str(preset["status_resultante"]))
         self.in_descricao.setPlainText(str(preset["descricao"]))
 
+    def _choose_document_ref(self):
+        path, _selected_filter = QFileDialog.getOpenFileName(self, "Selecionar documento do evento", "", "Todos os arquivos (*.*)")
+        if path:
+            self.in_documento_ref.setText(path)
+
     def values(self):
         return {
             "preset_key": str(self.combo_preset.currentData() or ""),
@@ -716,6 +736,8 @@ class TcraEventoEditorDialog(QDialog):
             "descricao": self.in_descricao.toPlainText().strip(),
             "prazo_resultante": self.in_prazo_resultante.text().strip(),
             "status_resultante": self.in_status_resultante.text().strip(),
+            "protocolo": self.in_protocolo.text().strip(),
+            "documento_ref": self.in_documento_ref.text().strip(),
         }
 
 
@@ -776,6 +798,10 @@ class TcraBulkActionDialog(QDialog):
         self.in_event_date.setPlaceholderText("dd/mm/aaaa")
         self.in_event_deadline = QLineEdit(self)
         self.in_event_deadline.setPlaceholderText("dd/mm/aaaa")
+        self.in_event_protocol = QLineEdit(self)
+        self.in_event_protocol.setPlaceholderText("Opcional")
+        self.in_event_document = QLineEdit(self)
+        self.in_event_document.setPlaceholderText("Opcional")
 
         form.addRow("Acao:", self.combo_action)
         form.addRow("Status:", self.combo_status)
@@ -784,6 +810,8 @@ class TcraBulkActionDialog(QDialog):
         form.addRow("Preset de evento:", self.combo_event_preset)
         form.addRow("Data do evento:", self.in_event_date)
         form.addRow("Prazo resultante:", self.in_event_deadline)
+        form.addRow("Protocolo:", self.in_event_protocol)
+        form.addRow("Documento/link:", self.in_event_document)
         layout.addLayout(form)
 
         self.lbl_mode_hint = QLabel(self)
@@ -807,6 +835,8 @@ class TcraBulkActionDialog(QDialog):
         self.combo_event_preset.setVisible(action == "evento")
         self.in_event_date.setVisible(action == "evento")
         self.in_event_deadline.setVisible(action == "evento")
+        self.in_event_protocol.setVisible(action == "evento")
+        self.in_event_document.setVisible(action == "evento")
 
         if action == "status":
             self.lbl_mode_hint.setText("Atualiza o status operacional informado dos termos selecionados.")
@@ -830,6 +860,8 @@ class TcraBulkActionDialog(QDialog):
             "event_preset": str(self.combo_event_preset.currentData() or ""),
             "event_date": self.in_event_date.text().strip(),
             "event_deadline": self.in_event_deadline.text().strip(),
+            "event_protocol": self.in_event_protocol.text().strip(),
+            "event_document": self.in_event_document.text().strip(),
         }
 
 

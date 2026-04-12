@@ -140,6 +140,18 @@ class AppSettings:
     def set_tcra_filter_state(self, state: dict):
         self.setValue("tcra_filter_state", dict(state or {}))
 
+    def tcra_saved_views(self) -> dict:
+        return self._read_mapping("tcra_saved_views")
+
+    def set_tcra_saved_views(self, views: dict):
+        self.setValue("tcra_saved_views", dict(views or {}))
+
+    def tcra_operational_rules(self) -> dict:
+        return self._read_mapping("tcra_operational_rules")
+
+    def set_tcra_operational_rules(self, rules: dict):
+        self.setValue("tcra_operational_rules", dict(rules or {}))
+
     def tcra_form_draft(self) -> dict:
         return self._read_mapping("tcra_form_draft")
 

@@ -682,6 +682,12 @@ def test_tcra_tab_agenda_selects_record_and_events_update_form(tmp_path, monkeyp
     tab.agenda_table.selectRow(0)
     get_app().processEvents()
 
+    assert tab.current_form_uid == ""
+    assert tab.btn_agenda_open.isEnabled() is True
+
+    tab.btn_agenda_open.click()
+    get_app().processEvents()
+
     assert tab.current_form_uid == "tcra-1"
 
     tab.new_tcra()
@@ -740,6 +746,69 @@ def test_tcra_tab_agenda_selects_record_and_events_update_form(tmp_path, monkeyp
     assert tab.in_status.currentText() == "Cumprido"
     assert tab.in_data_proximo_relatorio.text() == ""
     assert tab.in_prazo_final.text() == "10/04/2026"
+
+
+def test_tcra_tab_agenda_quick_actions_update_records_without_opening_editor(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-1",
+                prazo_final=date(2026, 3, 1),
+                data_proximo_relatorio=date(2026, 4, 10),
+                responsavel_execucao="",
+                eventos=[],
+            )
+        ]
+    )
+
+    class InboxEventDialog:
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return True
+
+        def values(self):
+            return {
+                "preset_key": self.kwargs.get("preset_key", ""),
+                "data_evento": "05/04/2026",
+                "tipo_evento": "Despacho",
+                "descricao": "Cobrança feita pela Inbox.",
+                "prazo_resultante": "20/04/2026",
+                "status_resultante": "Em acompanhamento",
+                "protocolo": "SEI-123",
+                "documento_ref": "docs/relatorio.pdf",
+            }
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+    monkeypatch.setattr(tcra_tab_module, "TcraEventoEditorDialog", InboxEventDialog)
+
+    tab.agenda_table.selectRow(0)
+    get_app().processEvents()
+    tab.btn_agenda_quick_event.click()
+    get_app().processEvents()
+
+    updated = service.get_tcra("tcra-1")
+    assert tab.current_form_uid == ""
+    assert updated.eventos[0].protocolo == "SEI-123"
+    assert updated.eventos[0].documento_ref == "docs/relatorio.pdf"
+    assert updated.prazo_final == date(2026, 4, 20)
+
+    monkeypatch.setattr(
+        tcra_tab_module.QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("Equipe TCRA", True),
+    )
+    tab.agenda_scope_buttons[tcra_tab_module.AGENDA_SCOPE_7D].click()
+    get_app().processEvents()
+    tab.agenda_table.selectRow(0)
+    get_app().processEvents()
+    tab.btn_agenda_assign_responsavel.click()
+    get_app().processEvents()
+
+    assert service.get_tcra("tcra-1").responsavel_execucao == "Equipe TCRA"
 
 
 def test_tcra_tab_blocks_inconsistent_save(tmp_path, monkeypatch):
@@ -1213,6 +1282,8 @@ def test_tcra_tab_restores_and_persists_filter_state(tmp_path):
     assert saved_states
     assert saved_states[-1]["quick_filter_mode"] == "all"
     assert saved_states[-1]["only_mpsp"] is True
+    assert "selected_responsaveis" in saved_states[-1]
+    assert "responsaveis_all_selected" in saved_states[-1]
 
 
 def test_tcra_tab_bulk_action_updates_selected_records(tmp_path, monkeypatch):

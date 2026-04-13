@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from difflib import SequenceMatcher
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento

@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
 from PySide6.QtWidgets import QApplication, QMessageBox, QBoxLayout
-from PySide6.QtCore import Qt, QObject, Signal, QThread, QTimer, QRect
+from PySide6.QtCore import Qt, QObject, Signal, QThread, QRect
 from PySide6.QtGui import QCloseEvent, QPalette, QStandardItemModel
 
 from app.application.use_cases.persistence_monitoring import (

@@ -3,7 +3,6 @@ from typing import Optional, Sequence
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QFrame,
     QHeaderView,
     QHBoxLayout,

@@ -1,5 +1,3 @@
-import os
-from types import SimpleNamespace
 
 def run_debug():
     state = {"last_excel_path": "stub_path.xlsx"}
@@ -19,7 +17,7 @@ def run_debug():
         try:
             # Simular o erro do excel.load
             raise RuntimeError("planilha corrompida")
-        except Exception as exc:
+        except Exception:
             settings.remove("last_excel_path")
             print("Removido no except")
             

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Sequence
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 
 from app.application.use_cases.operation_history_presenter import OperationHistoryFilterState, OperationHistoryPresenter
 from app.services.audit_service import AuditEvent

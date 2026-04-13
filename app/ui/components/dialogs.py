@@ -1,5 +1,3 @@
-import json
-import os
 from datetime import date, datetime
 from typing import Dict, List, Optional
 from PySide6.QtCore import Qt, QUrl, QTimer, QDate
@@ -7,7 +5,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, 
     QLineEdit, QComboBox, QMessageBox, QCheckBox, QFileDialog, QDateEdit,
-    QTableView, QHeaderView, QDialogButtonBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QDialogButtonBox, QTableWidget, QTableWidgetItem,
     QFormLayout, QPlainTextEdit,
     QAbstractItemView, QWidget
 )
@@ -23,7 +21,6 @@ from app.application.use_cases.operation_history_presenter import (
     OperationHistoryPresenter,
 )
 from app.application.use_cases.plantios_dialog_presenter import (
-    PlantioRowView,
     PlantiosDialogPresenter,
 )
 from app.application.use_cases.table_fullscreen_filters import (
@@ -41,6 +38,8 @@ from app.services.tcra_records_service import (
     STATUS_ARQUIVADO,
     STATUS_CUMPRIDO,
     STATUS_EM_ACOMPANHAMENTO,
+    STATUS_PRAZO_VENCIDO,
+    STATUS_RELATORIO_PENDENTE,
     normalize_status_label,
 )
 from app.ui.components.import_preview_dialog_support import (
@@ -1424,7 +1423,6 @@ class TableFullScreenDialog(QDialog):
         if not self._table:
             return None
 
-        header = self._table.horizontalHeader()
         visible_columns = self._fullscreen_visible_columns()
         available_width = self._table.viewport().width()
         header_widths = build_fullscreen_header_widths(self._table, visible_columns)

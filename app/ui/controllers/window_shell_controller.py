@@ -3,7 +3,7 @@
 import os
 from typing import List, Sequence
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,

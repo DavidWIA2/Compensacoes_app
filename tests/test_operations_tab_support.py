@@ -14,7 +14,6 @@ from app.ui.tabs.operations_tab_support import (
     build_mutation_sync_text,
     build_no_results_details_text,
     build_persistence_status_text,
-    build_read_source_text,
     build_record_integrity_text,
     build_record_overview_text,
     build_remote_sync_text,

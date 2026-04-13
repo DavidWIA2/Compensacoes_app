@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Callable, Optional, Protocol, Sequence
 
 from app.application.use_cases.workbook_session_support import (
-    ImportConflictDetail,
+    ImportConflictDetail,  # noqa: F401
     ImportSessionAnalysis,
-    ImportValidationIssue,
+    ImportValidationIssue,  # noqa: F401
     LoadSessionResult,
     analyze_import_records,
     build_load_session_result,

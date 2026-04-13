@@ -50,7 +50,6 @@ from app.services.tcra_insights_service import (
     build_priority_route,
     build_record_change_timeline_text,
     build_responsavel_digests,
-    build_sla_summary,
     build_workload_snapshot,
 )
 from app.services.tcra_records_service import (
@@ -162,7 +161,7 @@ SUPPORTED_AGENDA_SCOPES = (
 EXPORTED_AGENDA_SCOPE_TODOS = AGENDA_SCOPE_TODOS
 
 
-class TcraRecordDetailsDialog(QDialog):
+class _LegacyTcraRecordDetailsDialog(QDialog):
     def __init__(self, parent, *, record: Tcra, today: date):
         super().__init__(parent)
         self.record = record

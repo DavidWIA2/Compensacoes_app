@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 
 from app.application.use_cases.support_operations import UpdateJobOutcome
 from app.ui.controllers.support_controller_support import (

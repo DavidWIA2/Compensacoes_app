@@ -1,7 +1,7 @@
 ﻿import os
 from typing import List, Dict, Optional
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QHeaderView,
@@ -20,6 +20,7 @@ from app.ui.components.widgets import (
     LockedSplitter,
 )
 from app.ui.components.model import CompensacoesTableModel
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.ui_utils import resource_path
 from app.ui.tabs.data_tab_support import (
     build_column_texts_for_records,
@@ -98,8 +99,8 @@ class DataTab(QWidget):
         self._sync_left_panel_heights()
         self._apply_responsive_layout()
         self._update_responsive_constraints()
-        QTimer.singleShot(0, self._finalize_responsive_layout)
-        QTimer.singleShot(0, self.align_splitter_to_table_width)
+        schedule_owned_single_shot(self, 0, self._finalize_responsive_layout)
+        schedule_owned_single_shot(self, 0, self.align_splitter_to_table_width)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -107,7 +108,7 @@ class DataTab(QWidget):
         self._sync_left_panel_heights()
         self._apply_responsive_layout()
         self._update_responsive_constraints()
-        QTimer.singleShot(0, self._finalize_responsive_layout)
+        schedule_owned_single_shot(self, 0, self._finalize_responsive_layout)
 
     def setup_ui(self):
         panel_gap = max(int(10 * self.sf), 8)
@@ -317,9 +318,9 @@ class DataTab(QWidget):
         self._update_responsive_constraints()
         self._apply_responsive_layout()
         self.splitter.setSizes([max(int(980 * self.sf), 720), self.right_panel.minimumWidth()])
-        QTimer.singleShot(0, self._sync_left_panel_heights)
-        QTimer.singleShot(0, self._update_responsive_constraints)
-        QTimer.singleShot(0, self.align_splitter_to_table_width)
+        schedule_owned_single_shot(self, 0, self._sync_left_panel_heights)
+        schedule_owned_single_shot(self, 0, self._update_responsive_constraints)
+        schedule_owned_single_shot(self, 0, self.align_splitter_to_table_width)
 
     def _current_root_dimensions(self) -> tuple[int, int]:
         try:

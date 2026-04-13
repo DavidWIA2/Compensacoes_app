@@ -54,6 +54,7 @@ from app.ui.components.map_fullscreen_dialog_support import (
     build_fullscreen_heatmap_sync_view,
     run_fullscreen_map_script,
 )
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.operation_history_dialog_support import (
     BACKUP_FILTER_OPTIONS,
     PERIOD_FILTER_OPTIONS,
@@ -1258,7 +1259,7 @@ class MapFullScreenDialog(QDialog):
 
     def _on_loaded(self, ok):
         if not ok: return
-        QTimer.singleShot(500, self._initial_sync_fs)
+        schedule_owned_single_shot(self, 500, self._initial_sync_fs)
 
     def _initial_sync_fs(self):
         commands = self.fullscreen_use_cases.build_initial_sync_commands(
@@ -1585,7 +1586,7 @@ class TableFullScreenDialog(QDialog):
         self._table_late_layout_timer.stop()
         if self._on_close_callback:
             self._on_close_callback(self._content)
-        QTimer.singleShot(0, self._restore_table_layout)
+        schedule_owned_single_shot(self, 0, self._restore_table_layout)
         super().closeEvent(event)
 
     def resizeEvent(self, event):

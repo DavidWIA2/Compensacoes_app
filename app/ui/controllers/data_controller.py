@@ -28,6 +28,7 @@ from app.services.records_service import (
 from app.services.session_spreadsheet_adapter import ExternalSpreadsheetAdapter
 from app.ui.components.dialogs import OperationHistoryDialog
 from app.ui.components.job_specs import BlockingJobSpec
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.controllers.data_controller_support import (
     FilterStateSnapshot,
     PreviousDataState,
@@ -319,8 +320,8 @@ class DataController:
         self.load_gis()
         self.apply_filter()
         self.window.data_tab.align_splitter_to_table_width()
-        QTimer.singleShot(0, self.window.data_tab.align_splitter_to_table_width)
-        QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
+        schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab.align_splitter_to_table_width)
+        schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab._sync_left_panel_heights)
         self.window.data_tab.table.clearSelection()
         self.window.clear_form(force=True)
         navigation = getattr(self.window, "navigation_controller", None)
@@ -498,7 +499,7 @@ class DataController:
         self.window.data_tab._sync_left_panel_heights()
         if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
             self.window.data_tab._finalize_responsive_layout()
-        QTimer.singleShot(0, self.window.data_tab._sync_left_panel_heights)
+        schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab._sync_left_panel_heights)
 
     def clear_filters(self):
         self.window.search.clear()

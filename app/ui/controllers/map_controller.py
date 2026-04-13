@@ -1,7 +1,7 @@
 import json
 from typing import Dict
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -32,6 +32,7 @@ from app.services.plantio_service import (
 )
 from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.ui_utils import msg_confirm, resource_path
 from app.ui.components.workers import GeocodeWorker
 from app.ui.controllers.window_layout_support import apply_widget_responsive_layout
@@ -333,7 +334,11 @@ class MapController:
             dialog = TableFullScreenDialog(self.window, content, lambda widget: widget.deleteLater())
             dialog.exec()
         finally:
-            QTimer.singleShot(0, lambda: self._restore_main_window_geometry(preserved_geometry))
+            schedule_owned_single_shot(
+                self.window,
+                0,
+                lambda: self._restore_main_window_geometry(preserved_geometry),
+            )
 
     def _build_table_fullscreen_content(self):
         source_table = self.window.data_tab.table

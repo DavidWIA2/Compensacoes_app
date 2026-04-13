@@ -1,8 +1,9 @@
 import os
 from typing import List
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.controllers.settings_support import (
     build_loaded_window_settings_state,
     coerce_recent_files,
@@ -141,8 +142,8 @@ class SettingsController:
             finalize_active_tab=False,
         )
         self.window._startup_layout_pending = True
-        QTimer.singleShot(0, self.window._finalize_startup_layout)
-        QTimer.singleShot(150, self.window._finalize_startup_layout)
+        schedule_owned_single_shot(self.window, 0, self.window._finalize_startup_layout)
+        schedule_owned_single_shot(self.window, 150, self.window._finalize_startup_layout)
 
     def load_sort_settings(self):
         if hasattr(self.window.settings, "sort_state"):

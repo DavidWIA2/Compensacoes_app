@@ -58,9 +58,9 @@ def test_schedule_window_fit_uses_requested_delays(monkeypatch):
         lambda target: calls.append(("fit", target)) or True,
     )
     monkeypatch.setattr(
-        layout_module.QTimer,
-        "singleShot",
-        lambda delay, fn: delays.append(delay) or fn(),
+        layout_module,
+        "schedule_owned_single_shot",
+        lambda _owner, delay, fn: delays.append(delay) or fn(),
     )
 
     changed = layout_module.schedule_window_fit(window, delays=(0, 180))

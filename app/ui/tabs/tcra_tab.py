@@ -103,6 +103,7 @@ from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
 from app.ui.components.widgets import ClickableComboBox
 from app.ui.controllers.window_layout_support import schedule_window_fit
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.tabs.tcra_tab_form_support import (
     TcraFormPreviewData,
     build_empty_form_snapshot,
@@ -2803,7 +2804,11 @@ class TcraTab(QWidget):
     def _queue_startup_deadline_alert(self) -> None:
         if self.main_window is None or self._startup_deadline_alert_shown:
             return
-        QTimer.singleShot(self.STARTUP_DEADLINE_ALERT_DELAY_MS, self._show_startup_deadline_alert)
+        schedule_owned_single_shot(
+            self,
+            self.STARTUP_DEADLINE_ALERT_DELAY_MS,
+            self._show_startup_deadline_alert,
+        )
 
     def _main_window_ready_for_startup_alert(self) -> bool:
         window = self.main_window
@@ -2827,7 +2832,11 @@ class TcraTab(QWidget):
         if not self._main_window_ready_for_startup_alert():
             self._startup_deadline_alert_attempts += 1
             if self._startup_deadline_alert_attempts <= self.STARTUP_DEADLINE_ALERT_MAX_ATTEMPTS:
-                QTimer.singleShot(self.STARTUP_DEADLINE_ALERT_RETRY_MS, self._show_startup_deadline_alert)
+                schedule_owned_single_shot(
+                    self,
+                    self.STARTUP_DEADLINE_ALERT_RETRY_MS,
+                    self._show_startup_deadline_alert,
+                )
             return
         self._startup_deadline_alert_shown = True
         title, message, has_overdue = alert
@@ -3029,7 +3038,11 @@ class TcraTab(QWidget):
             open_audit_callback=self._open_record_audit,
         )
         if event_preset:
-            QTimer.singleShot(0, lambda preset=event_preset, details_dialog=dialog: details_dialog.launch_add_event(preset))
+            schedule_owned_single_shot(
+                dialog,
+                0,
+                lambda preset=event_preset, details_dialog=dialog: details_dialog.launch_add_event(preset),
+            )
         dialog.exec()
         if getattr(dialog, "edit_requested", False):
             self._open_record_by_uid_in_editor(record.uid)

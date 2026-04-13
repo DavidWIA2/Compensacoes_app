@@ -3,8 +3,7 @@ from __future__ import annotations
 from functools import partial
 from typing import Iterable
 
-from PySide6.QtCore import QTimer
-
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.controllers.settings_support import ensure_window_fits_available_geometry
 
 _RESPONSIVE_METHOD_NAMES = ("apply_responsive_layout", "_apply_responsive_layout")
@@ -96,7 +95,8 @@ def schedule_window_fit(
         return False
 
     for delay in tuple(int(delay) for delay in delays):
-        QTimer.singleShot(
+        schedule_owned_single_shot(
+            window,
             delay,
             partial(
                 fit_window_to_available_geometry,

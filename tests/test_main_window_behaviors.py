@@ -26,6 +26,7 @@ from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.tabs.data_tab import DataTab
 from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.widgets import LockedSplitter
 from app.application.use_cases.local_record_queries import (
     LocalDuplicateCheckResult,
@@ -1301,7 +1302,11 @@ def test_batch_geocode_keeps_window_height_stable(monkeypatch):
 
         def start(self):
             self.progress_update.emit(1, "fake")
-            QTimer.singleShot(0, lambda: self.finished_process.emit({2: {"main": (-22.0, -47.0)}}))
+            schedule_owned_single_shot(
+                self,
+                0,
+                lambda: self.finished_process.emit({2: {"main": (-22.0, -47.0)}}),
+            )
 
         def isRunning(self):
             return False
@@ -1991,7 +1996,10 @@ def test_open_table_fullscreen_uses_mirror_table_without_reparenting_main_panel(
             return 0
 
     monkeypatch.setattr("app.ui.controllers.map_controller.TableFullScreenDialog", FakeDialog)
-    monkeypatch.setattr("app.ui.controllers.map_controller.QTimer.singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr(
+        "app.ui.controllers.map_controller.schedule_owned_single_shot",
+        lambda _owner, _ms, fn: fn(),
+    )
     monkeypatch.setattr(window.map_controller, "_capture_main_window_geometry", lambda: preserved_geometry)
     monkeypatch.setattr(
         window.map_controller,
@@ -2035,8 +2043,14 @@ def test_table_fullscreen_dialog_prioritizes_address_columns(monkeypatch):
     layout.addWidget(side_table)
 
     monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: self.resize(1600, 900))
-    monkeypatch.setattr("app.ui.controllers.map_controller.QTimer.singleShot", lambda _ms, fn: fn())
-    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr(
+        "app.ui.controllers.map_controller.schedule_owned_single_shot",
+        lambda _owner, _ms, fn: fn(),
+    )
+    monkeypatch.setattr(
+        "app.ui.components.dialogs.schedule_owned_single_shot",
+        lambda _owner, _ms, fn: fn(),
+    )
 
     dialog = TableFullScreenDialog(QtWidgets.QWidget(), container, lambda widget: None)
 
@@ -2065,7 +2079,10 @@ def test_table_fullscreen_dialog_reserves_footer_space(monkeypatch):
     layout.addWidget(footer, 0)
 
     monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: self.resize(1440, 852))
-    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr(
+        "app.ui.components.dialogs.schedule_owned_single_shot",
+        lambda _owner, _ms, fn: fn(),
+    )
 
     dialog = TableFullScreenDialog(QtWidgets.QWidget(), container, lambda widget: None)
     dialog.resize(1440, 852)
@@ -2094,7 +2111,10 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     window.apply_filter()
 
     monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: None)
-    monkeypatch.setattr("app.ui.components.dialogs.QTimer.singleShot", lambda _ms, fn: fn())
+    monkeypatch.setattr(
+        "app.ui.components.dialogs.schedule_owned_single_shot",
+        lambda _owner, _ms, fn: fn(),
+    )
 
     dialog = TableFullScreenDialog(window, window.data_tab.left_panel, lambda widget: None)
 

@@ -15,7 +15,9 @@ from app.services.tcra_records_service import (
 from app.ui.tabs.tcra_tab_support import (
     build_row_hint,
     format_date,
+    format_latest_event_label,
     format_orgao_context,
+    latest_event,
     resolve_record_next_action,
     resolve_record_priority_label,
     stringify,
@@ -27,15 +29,16 @@ MAIN_TABLE_HEADERS = (
     "Processo",
     "TCRA",
     "Status",
-    "Próx. ação",
+    "Ult. evento",
+    "Prox. acao",
     "Prazo",
-    "Próx. relatório",
-    "Responsável",
-    "Órgão/MPSP",
+    "Prox. relatorio",
+    "Responsavel",
+    "Orgao/MPSP",
     "Local",
 )
 MAIN_TABLE_STATUS_COLUMN = 3
-MAIN_TABLE_BOLD_COLUMNS = frozenset({0, MAIN_TABLE_STATUS_COLUMN, 4, 5, 6})
+MAIN_TABLE_BOLD_COLUMNS = frozenset({0, MAIN_TABLE_STATUS_COLUMN, 4, 5, 6, 7})
 
 
 @dataclass(frozen=True)
@@ -50,7 +53,7 @@ class TcraGridRowData:
 @dataclass(frozen=True)
 class TcraOverviewRowData:
     uid: str
-    values: tuple[str, str, str, str]
+    values: tuple[str, ...]
     tooltip: str
     rank: int
 
@@ -88,6 +91,23 @@ def build_main_table_rows(
         risk_profile = resolve_tcra_risk_profile(record, today=today, rules=rules)
         priority_label = f"{resolve_record_priority_label(record, today=today)} ({risk_profile.score})"
         next_action = resolve_record_next_action(record, today=today)
+        latest_record_event = latest_event(list(record.eventos))
+        latest_event_tooltip = "Ultimo evento: sem registro"
+        if latest_record_event is not None:
+            latest_event_tooltip = "Ultimo evento: " + " | ".join(
+                part
+                for part in (
+                    format_date(latest_record_event.data_evento),
+                    stringify(latest_record_event.tipo_evento) or "Evento",
+                    stringify(latest_record_event.status_resultante),
+                    (
+                        f"prazo {format_date(latest_record_event.prazo_resultante)}"
+                        if latest_record_event.prazo_resultante is not None
+                        else ""
+                    ),
+                )
+                if part
+            )
         tooltip = "\n".join(
             part
             for part in (
@@ -95,9 +115,10 @@ def build_main_table_rows(
                 f"Prioridade: {priority_label}",
                 f"Risco: {risk_profile.band} | score {risk_profile.score}",
                 "Fatores: " + ", ".join(risk_profile.drivers) if risk_profile.drivers else "",
-                f"Próxima ação: {next_action}",
-                f"Responsável: {stringify(record.responsavel_execucao) or '--'}",
-                f"Órgão: {format_orgao_context(record)}",
+                latest_event_tooltip,
+                f"Proxima acao: {next_action}",
+                f"Responsavel: {stringify(record.responsavel_execucao) or '--'}",
+                f"Orgao: {format_orgao_context(record)}",
             )
             if part
         )
@@ -111,6 +132,7 @@ def build_main_table_rows(
                     stringify(record.numero_processo) or "--",
                     stringify(record.numero_tcra) or "--",
                     operational_status or "--",
+                    format_latest_event_label(record),
                     next_action,
                     format_date(record.prazo_final),
                     format_date(record.data_proximo_relatorio),
@@ -125,23 +147,40 @@ def build_main_table_rows(
 
 
 def build_agenda_overview_rows(items: Sequence[TcraAgendaItem]) -> tuple[TcraOverviewRowData, ...]:
-    return tuple(
-        TcraOverviewRowData(
-            uid=stringify(item.uid),
-            values=(
-                f"{stringify(item.prioridade_label) or '--'} ({int(item.risk_score or 0)})",
-                stringify(item.termo_label) or "--",
-                stringify(item.local) or "--",
-                stringify(item.detalhe) or "--",
-            ),
-            tooltip=(
-                f"Risco {int(item.risk_score or 0)}\n"
-                + (stringify(item.detalhe) or stringify(item.prioridade_label) or "--")
-            ),
-            rank=int(item.priority_rank),
+    rows: list[TcraOverviewRowData] = []
+    for item in items:
+        workflow_parts = [
+            stringify(item.workflow_state),
+            f"ate {format_date(item.workflow_until)}" if item.workflow_until is not None else "",
+        ]
+        workflow_text = " ".join(part for part in workflow_parts if part) or "--"
+        tooltip = "\n".join(
+            part
+            for part in (
+                f"Risco {int(item.risk_score or 0)}",
+                f"Status: {stringify(item.status_operacional) or '--'}",
+                f"Referencia: {format_date(item.data_referencia)}",
+                f"Workflow: {workflow_text}",
+                stringify(item.detalhe) or stringify(item.prioridade_label) or "--",
+            )
+            if part
         )
-        for item in items
-    )
+        rows.append(
+            TcraOverviewRowData(
+                uid=stringify(item.uid),
+                values=(
+                    f"{stringify(item.prioridade_label) or '--'} ({int(item.risk_score or 0)})",
+                    stringify(item.termo_label) or "--",
+                    stringify(item.status_operacional) or "--",
+                    format_date(item.data_referencia),
+                    stringify(item.local) or "--",
+                    stringify(item.detalhe) or "--",
+                ),
+                tooltip=tooltip,
+                rank=int(item.priority_rank),
+            )
+        )
+    return tuple(rows)
 
 
 def build_quality_overview_rows(items: Sequence[TcraQualityQueueItem]) -> tuple[TcraOverviewRowData, ...]:
@@ -156,6 +195,7 @@ def build_quality_overview_rows(items: Sequence[TcraQualityQueueItem]) -> tuple[
                     stringify(item.termo_label) or "--",
                     stringify(item.local) or "--",
                     stringify(item.detalhe) or "--",
+                    " | ".join(item.issues[:3]) if item.issues else "--",
                 ),
                 tooltip=tooltip or stringify(item.severity_label) or "--",
                 rank=int(item.severity_rank),
@@ -176,7 +216,7 @@ def build_selection_state(
             selected_count=0,
             bulk_selected_uids=(),
             selection_summary="Nenhum termo selecionado",
-            bulk_action_text="Ações em lote",
+            bulk_action_text="Acoes em lote",
             primary_record=None,
         )
 
@@ -193,11 +233,11 @@ def build_selection_state(
     selected_count = len(selected_records)
     bulk_selected_uids = tuple(stringify(record.uid) for record in selected_records if stringify(record.uid))
     if selected_count > 1:
-        selection_summary = f"{selected_count} termos selecionados para ação em lote"
-        bulk_action_text = f"Ações em lote ({selected_count})"
+        selection_summary = f"{selected_count} termos selecionados para acao em lote"
+        bulk_action_text = f"Acoes em lote ({selected_count})"
     else:
         selection_summary = "1 termo selecionado"
-        bulk_action_text = "Ações em lote"
+        bulk_action_text = "Acoes em lote"
 
     return TcraSelectionState(
         selected_count=selected_count,

@@ -65,10 +65,11 @@ def test_view_support_builds_main_table_rows_with_operational_values():
     assert rows[0].values[0].startswith("Vencido (")
     assert rows[0].values[1] == "26207/2019"
     assert rows[0].values[3]
-    assert rows[0].values[4] == "Cobrar cumprimento / revisar prazo"
-    assert rows[0].values[8] == "CETESB + MPSP"
+    assert "Relat" in rows[0].values[4]
+    assert rows[0].values[5] == "Cobrar cumprimento / revisar prazo"
+    assert rows[0].values[9] == "CETESB + MPSP"
     assert "Status operacional:" in rows[0].tooltip
-    assert "Próxima ação:" in rows[0].tooltip
+    assert "Ultimo evento:" in rows[0].tooltip
 
 
 def test_view_support_builds_agenda_and_quality_rows():
@@ -100,9 +101,13 @@ def test_view_support_builds_agenda_and_quality_rows():
     )
 
     assert agenda_rows[0].values[0] == "Prazo vencido (80)"
+    assert len(agenda_rows[0].values) == 6
+    assert agenda_rows[0].values[5] == "Prazo final vencido"
     assert "Prazo final vencido" in agenda_rows[0].tooltip
     assert "Risco 80" in agenda_rows[0].tooltip
     assert quality_rows[0].values[1] == "7205/2014"
+    assert len(quality_rows[0].values) == 5
+    assert quality_rows[0].values[4] == "Sem responsável de execução."
     assert "Sem responsável de execução." in quality_rows[0].tooltip
 
 
@@ -136,5 +141,5 @@ def test_view_support_builds_selection_state_for_empty_single_and_bulk_selection
     assert single_state.has_selection is True
     assert single_state.selection_summary == "1 termo selecionado"
     assert single_state.primary_record is records[1]
-    assert bulk_state.bulk_action_text == "Ações em lote (2)"
+    assert bulk_state.bulk_action_text == "Acoes em lote (2)"
     assert bulk_state.primary_record is records[0]

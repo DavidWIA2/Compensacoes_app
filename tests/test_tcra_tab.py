@@ -146,11 +146,13 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     get_app().processEvents()
 
     assert tab.table.rowCount() == 2
-    assert tab.table.columnCount() == 10
+    assert tab.table.columnCount() == 11
     assert tab.table.horizontalHeaderItem(0).text() == "Prioridade"
     assert tab.table.horizontalHeaderItem(3).text() == "Status"
-    assert tab.table.horizontalHeaderItem(4).text() == "Próx. ação"
+    assert tab.table.horizontalHeaderItem(4).text() == "Ult. evento"
+    assert tab.table.horizontalHeaderItem(5).text() == "Prox. acao"
     assert tab.table.item(0, 4).text()
+    assert tab.table.item(0, 5).text()
     assert tab.card_total.lbl_value.text() == "2"
     assert tab.card_cumpridos.lbl_value.text() == "1"
     assert tab.card_mpsp.lbl_value.text() == "1"
@@ -162,7 +164,7 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert "Qualidade cadastral (" in tab.overview_tabs.tabText(2)
     assert tab.agenda_table.rowCount() >= 1
     assert "Hoje:" in tab.lbl_agenda_summary.text()
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
     assert tab.selection_actions_frame.isHidden() is True
 
     tab.table.selectRow(1)
@@ -170,11 +172,12 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
 
     assert tab.current_form_uid == ""
     assert tab.selected_uid == "tcra-2"
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
     assert tab.btn_record_details.isEnabled() is True
     assert "Próxima ação:" in tab.record_details.toPlainText()
     assert "Varjao" in tab.record_details.toPlainText()
     assert tab.events_table.rowCount() == 0
+    assert "nenhum registro" in tab.lbl_event_spotlight_title.text().lower()
     assert tab.selection_actions_frame.isHidden() is False
 
 
@@ -191,6 +194,127 @@ def test_tcra_tab_defers_initial_load_until_event_loop_runs(tmp_path):
 
     assert tab._records_loaded is True
     assert tab.table.rowCount() == 1
+
+
+def test_tcra_tab_surfaces_event_context_at_top_of_editor(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-1",
+                eventos=[
+                    TcraEvento(
+                        sequence=1,
+                        data_evento=date(2024, 4, 11),
+                        tipo_evento="Relatorio",
+                        descricao="Relatorio protocolado.",
+                        prazo_resultante=date(2025, 3, 10),
+                        status_resultante="Em acompanhamento",
+                        protocolo="SEI-321",
+                        documento_ref="C:/docs/relatorio.pdf",
+                    )
+                ],
+            )
+        ]
+    )
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+
+    tab.table.selectRow(0)
+    get_app().processEvents()
+    tab.btn_open_selected.click()
+    get_app().processEvents()
+
+    assert "Ultimo evento:" in tab.lbl_event_spotlight_title.text()
+    assert "SEI-321" in tab.lbl_event_spotlight_meta.text()
+    assert tab.editor_tabs.tabText(1).startswith("Eventos")
+    assert tab.btn_event_open_latest_document.isEnabled() is True
+
+
+def test_tcra_tab_compacts_list_header_by_default_but_can_expand_context(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-1",
+                numero_tcra="",
+                responsavel_execucao="",
+                eventos=[],
+            )
+        ]
+    )
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+
+    assert tab.header_kicker.isHidden() is True
+    assert tab.header_subtitle.isHidden() is True
+    assert tab.summary_details_frame.isHidden() is True
+    assert tab.filters_hint.isHidden() is True
+    assert "Alertas" in tab.lbl_workspace_digest.text()
+    assert "Sem responsavel" in tab.lbl_workspace_digest.text()
+
+    tab.btn_toggle_workspace_context.click()
+    get_app().processEvents()
+
+    assert tab.header_kicker.isHidden() is False
+    assert tab.header_subtitle.isHidden() is False
+    assert tab.summary_details_frame.isHidden() is False
+    assert tab.filters_hint.isHidden() is False
+    assert tab.btn_toggle_workspace_context.text() == "Menos contexto"
+
+
+def test_tcra_record_details_dialog_can_register_event_from_consulta(monkeypatch):
+    persisted = []
+
+    class EventDialog:
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def exec(self):
+            return True
+
+        def values(self):
+            return {
+                "preset_key": self.kwargs.get("preset_key", ""),
+                "data_evento": "06/04/2026",
+                "tipo_evento": "Despacho",
+                "descricao": "Cobranca registrada na janela de detalhes.",
+                "prazo_resultante": "10/05/2026",
+                "status_resultante": "Em acompanhamento",
+                "protocolo": "SEI-999",
+                "documento_ref": "C:/docs/oficio.pdf",
+            }
+
+    monkeypatch.setattr(tcra_tab_module, "TcraEventoEditorDialog", EventDialog)
+
+    dialog = tcra_tab_module.TcraRecordDetailsDialog(
+        None,
+        record=make_tcra(uid="tcra-1", eventos=[]),
+        today=date(2026, 4, 3),
+        build_event_from_values=lambda sequence, values: TcraEvento(
+            sequence=sequence,
+            data_evento=date(2026, 4, 6),
+            tipo_evento=values["tipo_evento"],
+            descricao=values["descricao"],
+            prazo_resultante=date(2026, 5, 10),
+            status_resultante=values["status_resultante"],
+            protocolo=values["protocolo"],
+            documento_ref=values["documento_ref"],
+        ),
+        apply_event_effects_to_record=lambda record: record,
+        persist_record_changes=lambda record, metadata: persisted.append((record, dict(metadata))) or record,
+    )
+
+    dialog._add_event_with_preset("despacho")
+    get_app().processEvents()
+
+    assert len(persisted) == 1
+    assert persisted[0][0].eventos[0].tipo_evento == "Despacho"
+    assert persisted[0][1]["event_change_action"] == "add"
+    assert dialog.events_table.rowCount() == 1
+    assert dialog.tabs.tabText(2).startswith("Eventos (1)")
 
 
 def test_tcra_tab_handle_tab_activated_schedules_window_fit(tmp_path, monkeypatch):
@@ -336,16 +460,20 @@ def test_tcra_tab_summary_actions_navigate_to_operational_views(tmp_path):
     )
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
 
     tab._open_inbox_overview()
     get_app().processEvents()
-    assert tab.overview_panel.isHidden() is False
+    assert tab.operational_dialog.isVisible() is True
     assert tab.overview_tabs.tabText(tab.overview_tabs.currentIndex()).startswith("Inbox")
+    assert tab.agenda_table.columnCount() == 6
+    assert tab.agenda_table.horizontalHeaderItem(5).text() == "Ação"
 
     tab._open_quality_overview()
     get_app().processEvents()
     assert tab.overview_tabs.tabText(tab.overview_tabs.currentIndex()).startswith("Qualidade")
+    assert tab.quality_table.columnCount() == 5
+    assert tab.quality_table.horizontalHeaderItem(4).text() == "Campos"
 
     tab.btn_summary_upcoming.click()
     get_app().processEvents()
@@ -372,27 +500,28 @@ def test_tcra_tab_advanced_filters_are_collapsible_and_count_active_flags(tmp_pa
     assert tab.btn_toggle_advanced_filters.text() == "Ocultar filtros"
 
 
-def test_tcra_tab_overview_panel_opens_and_closes_from_summary_actions(tmp_path):
+def test_tcra_tab_operational_dialog_opens_and_closes_from_summary_actions(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     service.replace_all([make_tcra(uid="tcra-1", prazo_final=date(2026, 3, 1), data_proximo_relatorio=date(2026, 4, 10))])
 
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
     get_app().processEvents()
 
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
 
     tab.btn_summary_inbox.click()
     get_app().processEvents()
-    assert tab.overview_panel.isHidden() is False
+    assert tab.operational_dialog.isVisible() is True
     assert tab.lbl_overview_title.text() == "Inbox operacional"
+    assert "Inbox operacional" in tab.operational_dialog.windowTitle()
 
     tab.btn_close_overview.click()
     get_app().processEvents()
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
 
     tab.btn_summary_quality.click()
     get_app().processEvents()
-    assert tab.overview_panel.isHidden() is False
+    assert tab.operational_dialog.isVisible() is True
     assert tab.lbl_overview_title.text() == "Qualidade cadastral"
 
 
@@ -1124,7 +1253,7 @@ def test_tcra_tab_open_selected_button_switches_to_cadastro(tmp_path):
     assert tab.btn_record_details.isEnabled() is True
     assert tab.selection_actions_frame.isHidden() is False
     assert tab.current_form_uid == ""
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
     assert tab.record_details.toPlainText()
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Lista"
 
@@ -1144,8 +1273,8 @@ def test_tcra_tab_record_details_opens_in_dialog_without_side_panel(tmp_path, mo
     class DetailsDialog:
         edit_requested = False
 
-        def __init__(self, parent, *, record, today):
-            opened.append((record.uid, today))
+        def __init__(self, parent, **kwargs):
+            opened.append((kwargs["record"].uid, kwargs["today"]))
 
         def exec(self):
             opened.append(("exec", None))
@@ -1155,56 +1284,37 @@ def test_tcra_tab_record_details_opens_in_dialog_without_side_panel(tmp_path, mo
 
     tab.table.selectRow(0)
     get_app().processEvents()
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
 
     tab.btn_record_details.click()
     get_app().processEvents()
 
     assert opened == [("tcra-1", date(2026, 4, 3)), ("exec", None)]
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Lista"
-    assert tab.overview_panel.isHidden() is True
+    assert tab.operational_dialog.isVisible() is False
 
 
 def test_tcra_tab_quick_event_buttons_apply_presets(tmp_path, monkeypatch):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
-    captured_kwargs = []
+    get_app().processEvents()
+    requested_presets = []
 
-    class QuickDialog:
-        def __init__(self, *args, **kwargs):
-            captured_kwargs.append(dict(kwargs))
-            self.kwargs = kwargs
+    monkeypatch.setattr(
+        tab,
+        "_open_current_form_record_details",
+        lambda *, event_preset="": requested_presets.append(event_preset),
+    )
 
-        def exec(self):
-            return True
-
-        def values(self):
-            preset_key = self.kwargs.get("preset_key", "")
-            mapping = {
-                "relatorio_entregue": ("Relatorio entregue", "Em acompanhamento"),
-                "cumprimento": ("Cumprimento", "Cumprido"),
-            }
-            tipo_evento, status_resultante = mapping.get(preset_key, ("Evento", "Em acompanhamento"))
-            return {
-                "preset_key": preset_key,
-                "data_evento": "05/04/2026",
-                "tipo_evento": tipo_evento,
-                "descricao": f"Preset aplicado: {preset_key}",
-                "prazo_resultante": "",
-                "status_resultante": status_resultante,
-            }
-
-    monkeypatch.setattr(tcra_tab_module, "TcraEventoEditorDialog", QuickDialog)
-
+    tab.table.selectRow(0)
+    get_app().processEvents()
     tab.btn_quick_report.click()
     get_app().processEvents()
     tab.btn_quick_done.click()
     get_app().processEvents()
 
-    assert [kwargs["preset_key"] for kwargs in captured_kwargs] == ["relatorio_entregue", "cumprimento"]
-    assert all(kwargs["apply_preset_on_start"] is True for kwargs in captured_kwargs)
-    assert [evento.tipo_evento for evento in tab.form_eventos] == ["Relatorio entregue", "Cumprimento"]
-    assert tab.in_status.currentText() == "Cumprido"
+    assert requested_presets == ["relatorio_entregue", "cumprimento"]
 
 
 def test_tcra_tab_exports_excel_and_pdf_reports(tmp_path, monkeypatch):

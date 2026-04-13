@@ -145,6 +145,38 @@ def serialize_tcra(record: Tcra) -> dict[str, object]:
     }
 
 
+def latest_event(eventos: list[TcraEvento]) -> TcraEvento | None:
+    if not eventos:
+        return None
+    return max(eventos, key=lambda item: (item.data_evento or date.min, item.sequence))
+
+
+def build_event_summary_line(evento: TcraEvento, *, separator: str = " | ") -> str:
+    parts = [_format_date(evento.data_evento), evento.tipo_evento or "Evento"]
+    if evento.status_resultante:
+        parts.append(evento.status_resultante)
+    if evento.prazo_resultante is not None:
+        parts.append(f"prazo {_format_date(evento.prazo_resultante)}")
+    if getattr(evento, "protocolo", ""):
+        parts.append(f"protocolo {evento.protocolo}")
+    if getattr(evento, "documento_ref", ""):
+        parts.append(f"doc {evento.documento_ref}")
+    if evento.descricao:
+        parts.append(evento.descricao)
+    return separator.join(part for part in parts if part)
+
+
+def format_latest_event_label(record: Tcra) -> str:
+    evento = latest_event(list(record.eventos))
+    if evento is None:
+        return "Sem evento"
+    parts: list[str] = []
+    if evento.data_evento is not None:
+        parts.append(_format_date(evento.data_evento))
+    parts.append(evento.tipo_evento or "Evento")
+    return " | ".join(parts)
+
+
 def build_event_lines(
     eventos: list[TcraEvento],
     *,
@@ -155,18 +187,7 @@ def build_event_lines(
         return ["Nenhum evento cadastrado."]
     lines: list[str] = []
     for evento in sorted(eventos, key=lambda item: (item.data_evento or date.min, item.sequence), reverse=True)[:limit]:
-        parts = [_format_date(evento.data_evento), evento.tipo_evento or "Evento"]
-        if evento.status_resultante:
-            parts.append(evento.status_resultante)
-        if evento.prazo_resultante is not None:
-            parts.append(f"prazo {_format_date(evento.prazo_resultante)}")
-        if getattr(evento, "protocolo", ""):
-            parts.append(f"protocolo {evento.protocolo}")
-        if getattr(evento, "documento_ref", ""):
-            parts.append(f"doc {evento.documento_ref}")
-        if evento.descricao:
-            parts.append(evento.descricao)
-        lines.append(separator.join(parts))
+        lines.append(build_event_summary_line(evento, separator=separator))
     return lines
 
 
@@ -337,16 +358,5 @@ def build_event_timeline_text(eventos: list[TcraEvento]) -> str:
         return "Nenhum evento registrado para este termo."
     lines: list[str] = []
     for evento in sorted(eventos, key=lambda item: (item.data_evento or date.min, item.sequence), reverse=True):
-        parts = [_format_date(evento.data_evento), evento.tipo_evento or "Evento"]
-        if evento.status_resultante:
-            parts.append(evento.status_resultante)
-        if evento.prazo_resultante is not None:
-            parts.append(f"prazo {_format_date(evento.prazo_resultante)}")
-        if getattr(evento, "protocolo", ""):
-            parts.append(f"protocolo {evento.protocolo}")
-        if getattr(evento, "documento_ref", ""):
-            parts.append(f"doc {evento.documento_ref}")
-        if evento.descricao:
-            parts.append(evento.descricao)
-        lines.append(" - ".join(parts))
+        lines.append(build_event_summary_line(evento, separator=" - "))
     return "\n".join(lines)

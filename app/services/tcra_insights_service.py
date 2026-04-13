@@ -207,7 +207,7 @@ def resolve_tcra_sla_profile(
             due_at=None,
             escalation_at=None,
             status="ok",
-            summary="Sem SLA operacional pendente.",
+            summary="Sem prazo interno de tratamento pendente.",
         )
 
     if tcra_has_prazo_vencido(record, today=current_day):
@@ -246,7 +246,7 @@ def resolve_tcra_sla_profile(
             due_at=None,
             escalation_at=None,
             status="ok",
-            summary="Sem SLA operacional pendente.",
+            summary="Sem prazo interno de tratamento pendente.",
         )
 
     started_at = max([item for item in (issue_date, last_touch) if item is not None], default=issue_date)
@@ -258,16 +258,20 @@ def resolve_tcra_sla_profile(
     if escalation_at is not None and current_day > escalation_at:
         status = "escalated"
         overdue_days = (current_day - escalation_at).days
-        summary = f"SLA escalado há {overdue_days} dia(s); cobrar coordenação."
+        summary = f"Prazo interno de tratamento escalado há {overdue_days} dia(s); cobrar coordenação."
     elif due_at is not None and current_day > due_at:
         status = "overdue"
         overdue_days = (current_day - due_at).days
-        summary = f"SLA atrasado há {overdue_days} dia(s)."
+        summary = f"Prazo interno de tratamento atrasado há {overdue_days} dia(s)."
     elif due_at is not None and current_day == due_at:
         status = "due_today"
-        summary = "SLA vence hoje."
+        summary = "Prazo interno de tratamento vence hoje."
     else:
-        summary = f"SLA em curso até {_format_date(due_at)}." if due_at is not None else "SLA em curso."
+        summary = (
+            f"Prazo interno de tratamento em curso até {_format_date(due_at)}."
+            if due_at is not None
+            else "Prazo interno de tratamento em curso."
+        )
 
     return TcraSlaProfile(
         issue_key=issue_key,
@@ -334,7 +338,7 @@ def build_sla_summary(
     overdue_count = sum(1 for item in queue if item.status == "overdue")
     escalated_count = sum(1 for item in queue if item.status == "escalated")
     summary_text = (
-        f"SLA: {len(queue)} pendência(s) | "
+        f"Prazo interno de tratamento: {len(queue)} pendência(s) | "
         f"{due_today_count} vence(m) hoje | "
         f"{overdue_count} atrasada(s) | "
         f"{escalated_count} escalada(s)"
@@ -513,7 +517,7 @@ def build_responsavel_digests(
         workload_score = int(getattr(workload_map.get(responsavel), "workload_score", 0) or 0)
         summary = (
             f"{responsavel}: {len(grouped)} termo(s) | "
-            f"{alert_count} com SLA aberto | "
+            f"{alert_count} com prazo interno aberto | "
             f"{escalated_count} escalado(s) | "
             f"score {workload_score}"
         )

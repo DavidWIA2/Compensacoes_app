@@ -342,7 +342,16 @@ def _build_dashboard_kpi_table(kpi_lines: List[str], styles):
     return table
 
 
-def _draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str):
+def _build_footer_right_text(*, generated_label: str, page_number: int, emitted_by: str = "") -> str:
+    parts = [f"Emitido em {generated_label}"]
+    normalized_user = str(emitted_by or "").strip()
+    if normalized_user:
+        parts.append(f"por {normalized_user}")
+    parts.append(f"P\u00e1gina {page_number}")
+    return " | ".join(parts)
+
+
+def _draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str, emitted_by: str = ""):
     canvas.saveState()
     canvas.setStrokeColor(colors.HexColor("#C8D5E3"))
     canvas.line(doc.leftMargin, 18, doc.pagesize[0] - doc.rightMargin, 18)
@@ -350,6 +359,11 @@ def _draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str):
     canvas.setFillColor(colors.HexColor("#486581"))
     canvas.drawString(doc.leftMargin, 8, f"{INSTITUTIONAL_APP_NAME} | {title}")
     right_text = f"Emitido em {generated_label} | Página {canvas.getPageNumber()}"
+    right_text = _build_footer_right_text(
+        generated_label=generated_label,
+        page_number=canvas.getPageNumber(),
+        emitted_by=emitted_by,
+    )
     text_width = stringWidth(right_text, "Helvetica", 8)
     canvas.drawString(doc.pagesize[0] - doc.rightMargin - text_width, 8, right_text)
     canvas.restoreState()
@@ -437,6 +451,8 @@ def export_pdf(
     selected_cols: List[str],
     kpis: List[Tuple[str, Any]],
     pend_micro_sorted: List[Tuple[str, float]],
+    *,
+    emitted_by: str = "",
 ):
     del pend_micro_sorted
 
@@ -526,12 +542,30 @@ def export_pdf(
     elements.append(main_table)
     doc.build(
         elements,
-        onFirstPage=partial(_draw_pdf_page_frame, title=REPORT_TITLE, generated_label=generated_label),
-        onLaterPages=partial(_draw_pdf_page_frame, title=REPORT_TITLE, generated_label=generated_label),
+        onFirstPage=partial(
+            _draw_pdf_page_frame,
+            title=REPORT_TITLE,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
+        ),
+        onLaterPages=partial(
+            _draw_pdf_page_frame,
+            title=REPORT_TITLE,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
+        ),
     )
 
 
-def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_txt: str, chart_images: List[str]):
+def export_dashboard_pdf(
+    path: str,
+    titulo: str,
+    kpi_lines: List[str],
+    filtros_txt: str,
+    chart_images: List[str],
+    *,
+    emitted_by: str = "",
+):
     doc = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
@@ -578,8 +612,18 @@ def export_dashboard_pdf(path: str, titulo: str, kpi_lines: List[str], filtros_t
 
     doc.build(
         elements,
-        onFirstPage=partial(_draw_pdf_page_frame, title=titulo, generated_label=generated_label),
-        onLaterPages=partial(_draw_pdf_page_frame, title=titulo, generated_label=generated_label),
+        onFirstPage=partial(
+            _draw_pdf_page_frame,
+            title=titulo,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
+        ),
+        onLaterPages=partial(
+            _draw_pdf_page_frame,
+            title=titulo,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
+        ),
     )
 
 

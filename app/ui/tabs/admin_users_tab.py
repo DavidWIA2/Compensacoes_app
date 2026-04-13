@@ -31,6 +31,7 @@ from app.services.supabase_admin_users_service import (
     AdminUsersError,
     SupabaseAdminUsersService,
 )
+from app.ui.components.widgets import ClickableComboBox
 from app.ui.components.ui_utils import msg_confirm
 
 
@@ -300,11 +301,11 @@ class AdminUsersTab(QWidget):
             placeholder="Buscar por email, nome ou perfil",
             tooltip="Filtra os usuários já carregados nesta tela.",
         )
-        self.status_filter_combo = QComboBox(self)
+        self.status_filter_combo = ClickableComboBox(self)
         self.status_filter_combo.addItem("Todos os status", "all")
         self.status_filter_combo.addItem("Somente ativos", "active")
         self.status_filter_combo.addItem("Somente inativos", "inactive")
-        self.role_filter_combo = QComboBox(self)
+        self.role_filter_combo = ClickableComboBox(self)
         self.role_filter_combo.addItem("Todos os perfis", "all")
         self.role_filter_combo.addItem("Administradores", "admin")
         self.role_filter_combo.addItem("Editores", "editor")

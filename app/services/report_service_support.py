@@ -119,9 +119,9 @@ def build_report_metadata_rows(
 
 def resolve_report_logo_path() -> str:
     candidate_paths = (
+        resource_path("assets", "logo_prefeitura.png"),
         resource_path("assets", "icons", "pga_icon_clean_512.png"),
         resource_path("assets", "Logo_512.png"),
-        resource_path("assets", "logo_prefeitura.png"),
     )
     for path in candidate_paths:
         if not path:

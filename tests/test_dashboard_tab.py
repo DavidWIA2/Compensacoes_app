@@ -41,8 +41,12 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     assert tab.scope_tabs.count() == 2
     assert tab.comp_web_host.minimumHeight() >= 250
     assert tab.tcra_web_host.minimumHeight() >= 250
-    assert tab.compensation_details_panel.isHidden() is True
     assert getattr(tab, "compensacoes_web_placeholder_container") is not None
+    assert not hasattr(tab, "btn_open_operations")
+    assert not hasattr(tab, "btn_open_tcra_agenda")
+    assert not hasattr(tab, "btn_toggle_comp_details")
+    assert not hasattr(tab, "compensation_details_panel")
+
     report = PersistenceRecordOverviewReport(
         status="sincronizado",
         workbook_path="dummy.xlsx",
@@ -91,21 +95,12 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
         read_status,
     )
 
-    text = tab.lbl_local_overview.text()
-    assert "Cache local sincronizado: 12 registro(s)" in text
-    assert "Qualidade dos dados: 2 sem microbacia | 5 sem coordenadas" in text
-    assert "Top microbacias: Gregorio: 7 | Medeiros: 5" in text
-    assert "Integridade cadastral" in tab.lbl_record_integrity.text()
-    assert "Coordenadas ausentes" in tab.lbl_record_integrity.text()
-    assert "cache local sincronizado" in tab.lbl_read_source.text()
-    assert "6 registro(s) no recorte" in tab.lbl_read_source.text()
-    assert tab.card_total.maximumHeight() > 0
+    assert tab.card_total.maximumHeight() >= 44
+    assert tab.card_total.minimumHeight() == tab.card_total.maximumHeight()
+    assert tab.card_total.lbl_value.minimumHeight() >= 18
     assert "12 processo(s)" in tab.lbl_comp_summary.text()
     assert "integridade com 1 alerta(s)" in tab.lbl_panel_context.text()
     assert tab.btn_export_diagnostics.text() == "Exportar diagnóstico"
-
-    tab.btn_toggle_comp_details.click()
-    assert tab.compensation_details_panel.isHidden() is False
 
     tab._ensure_dashboard_webview("compensacoes")
     assert getattr(tab, "compensacoes_web_placeholder_container") is None
@@ -150,11 +145,11 @@ def test_dashboard_tab_shows_tcra_overview_and_agenda(monkeypatch, qt_app):
         TcraAgendaItem(
             uid="tcra-2",
             priority_rank=1,
-            prioridade_label="Relatório pendente",
+            prioridade_label="RelatÃ³rio pendente",
             termo_label="26207/2019",
             local="Sistema de Lazer",
-            detalhe="Relatório previsto em 03/04/2026.",
-            status_operacional="Relatório pendente",
+            detalhe="RelatÃ³rio previsto em 03/04/2026.",
+            status_operacional="RelatÃ³rio pendente",
         ),
     )
 
@@ -167,15 +162,14 @@ def test_dashboard_tab_shows_tcra_overview_and_agenda(monkeypatch, qt_app):
     assert tab.card_tcra_cumpridos.lbl_value.text() == "6"
     assert "18 | 12 ativos" in tab.lbl_tcra_summary.text()
     assert "Prazo vencido: TCRA-2024-001" in tab.lbl_tcra_agenda.text()
-    assert "Relatório pendente: 26207/2019" in tab.lbl_tcra_agenda.text()
-    assert "TCRAs: 5 alerta(s)" in tab.lbl_agenda_summary.text()
+    assert "RelatÃ³rio pendente: 26207/2019" in tab.lbl_tcra_agenda.text()
     assert tab.current_export_context() is not None
 
     tab.close()
     parent.close()
 
 
-def test_dashboard_tab_agenda_buttons_navigate_to_target_tabs(monkeypatch, qt_app):
+def test_dashboard_tab_open_tcra_button_navigates_to_target_tab(monkeypatch, qt_app):
     import app.ui.tabs.dashboard_tab as dashboard_tab_module
 
     monkeypatch.setattr(dashboard_tab_module, "QWebEngineView", MockQWebEngineView)
@@ -185,20 +179,15 @@ def test_dashboard_tab_agenda_buttons_navigate_to_target_tabs(monkeypatch, qt_ap
     parent.scale_factor = 1.0
     parent.is_dark_mode = False
     parent.tabs = tabs
-    parent.operations_tab = QtWidgets.QWidget()
     parent.tcra_tab = QtWidgets.QWidget()
     tabs.addTab(QtWidgets.QWidget(), "Dados")
-    tabs.addTab(parent.operations_tab, "Operacoes")
     tabs.addTab(parent.tcra_tab, "TCRAs")
 
     tab = dashboard_tab_module.DashboardTab(parent)
     parent.tcra_tab._set_agenda_scope = lambda scope: setattr(parent, "_last_scope", scope)
     parent.tcra_tab._open_inbox_overview = lambda: setattr(parent, "_opened_inbox", True)
 
-    tab.btn_open_operations.click()
-    assert tabs.currentWidget() is parent.operations_tab
-
-    tab.btn_open_tcra_agenda.click()
+    tab.btn_open_tcra_page.click()
     assert tabs.currentWidget() is parent.tcra_tab
     assert parent._last_scope == "hoje"
     assert parent._opened_inbox is True

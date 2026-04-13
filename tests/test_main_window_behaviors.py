@@ -1774,11 +1774,12 @@ def test_export_dashboard_pdf_uses_images_from_dash_tab(monkeypatch, tmp_path):
     monkeypatch.setattr(window.dash_tab, "export_images", fake_export_images)
     monkeypatch.setattr(
         "app.ui.controllers.export_controller.export_dashboard_pdf",
-        lambda path, titulo, kpi_lines, filtros_txt, chart_images: captured.update(
+        lambda path, titulo, kpi_lines, filtros_txt, chart_images, emitted_by="": captured.update(
             {
                 "path": path,
                 "chart_images": chart_images,
                 "kpi_lines": list(kpi_lines),
+                "emitted_by": emitted_by,
             }
         ),
     )
@@ -1787,6 +1788,7 @@ def test_export_dashboard_pdf_uses_images_from_dash_tab(monkeypatch, tmp_path):
 
     assert captured["path"].endswith("painel.pdf")
     assert captured["chart_images"] == ["pie.png", "bar.png"]
+    assert "emitted_by" in captured
     assert any("Espelho local: 1 registro(s)" in line for line in captured["kpi_lines"])
     assert any("Top microbacias no espelho: Gregorio: 1" in line for line in captured["kpi_lines"])
     window.close()
@@ -1833,11 +1835,12 @@ def test_export_dashboard_pdf_uses_shell_resolved_dashboard_report(monkeypatch, 
     )
     monkeypatch.setattr(
         "app.ui.controllers.export_controller.export_dashboard_pdf",
-        lambda path, titulo, kpi_lines, filtros_txt, chart_images: captured.update(
+        lambda path, titulo, kpi_lines, filtros_txt, chart_images, emitted_by="": captured.update(
             {
                 "path": path,
                 "chart_images": list(chart_images),
                 "kpi_lines": list(kpi_lines),
+                "emitted_by": emitted_by,
             }
         ),
     )
@@ -1847,6 +1850,7 @@ def test_export_dashboard_pdf_uses_shell_resolved_dashboard_report(monkeypatch, 
     assert calls["overview"] >= 1
     assert captured["path"].endswith("painel.pdf")
     assert captured["chart_images"] == ["pie.png", "bar.png"]
+    assert "emitted_by" in captured
     assert any("Espelho local: 1 registro(s)" in line for line in captured["kpi_lines"])
     assert window._dashboard_record_overview is report
     window.close()

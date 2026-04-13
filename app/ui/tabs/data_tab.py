@@ -13,6 +13,7 @@ from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_inde
 from app.services.records_service import display_tipo_value
 from app.ui.components.widgets import (
     CheckableComboBox,
+    ClickableComboBox,
     NumericSortProxy,
     MapBridge,
     DebugPage,
@@ -169,10 +170,10 @@ class DataTab(QWidget):
         self.filter_micro.setMinimumWidth(int(220 * self.sf))
         self.filter_eletronico = CheckableComboBox("Todos os Tipos")
         self.filter_eletronico.setMinimumWidth(int(140 * self.sf))
-        self.filter_status = QComboBox()
+        self.filter_status = ClickableComboBox()
         self.filter_status.addItems(["Todos", "Compensados", "Pendentes"])
         self.filter_status.setMinimumWidth(int(130 * self.sf))
-        self.filter_year = QComboBox()
+        self.filter_year = ClickableComboBox()
         self.filter_year.addItem("Todos")
         self.filter_year.setMinimumWidth(int(90 * self.sf))
 

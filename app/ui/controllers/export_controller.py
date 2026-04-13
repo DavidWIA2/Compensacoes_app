@@ -3,6 +3,7 @@ from typing import List
 
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+from app.config import display_corporate_email_local_part
 from app.application.use_cases.export_operations import (
     ExportFilterState,
     ExportReportingUseCases,
@@ -142,6 +143,13 @@ class ExportController:
             self._current_dashboard_record_overview()
         )
 
+    def _current_export_user_name(self) -> str:
+        access_session = getattr(self.window, "access_session", None)
+        user_email = str(getattr(access_session, "user_email", "") or "").strip()
+        if not user_email:
+            return ""
+        return display_corporate_email_local_part(user_email) or user_email
+
     def build_filter_summary(self) -> str:
         return self.reporting_use_cases.build_filter_summary(self._current_filter_state())
 
@@ -210,6 +218,7 @@ class ExportController:
                 list(payload.visible_columns),
                 list(payload.metrics_kpi_rows),
                 list(payload.pend_micro_sorted),
+                emitted_by=self._current_export_user_name(),
             ),
         )
 
@@ -259,6 +268,7 @@ class ExportController:
                     list(export_context.kpi_lines),
                     export_context.filter_summary,
                     [image for image in [pie, bar] if image],
+                    emitted_by=self._current_export_user_name(),
                 ),
             )
             return
@@ -286,5 +296,6 @@ class ExportController:
                 list(payload.kpi_lines),
                 payload.filter_summary,
                 list(payload.chart_images),
+                emitted_by=self._current_export_user_name(),
             ),
         )

@@ -101,6 +101,7 @@ from app.ui.components.dialogs import (
 )
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
+from app.ui.components.widgets import ClickableComboBox
 from app.ui.controllers.window_layout_support import schedule_window_fit
 from app.ui.tabs.tcra_tab_form_support import (
     TcraFormPreviewData,
@@ -192,7 +193,7 @@ class TcraRecordDetailsDialog(QDialog):
 
         button_layout = QHBoxLayout()
         button_layout.addStretch(1)
-        self.btn_edit = QPushButton("Abrir cadastro")
+        self.btn_edit = QPushButton("Abrir termo")
         self.btn_edit.setProperty("kind", "primary")
         self.btn_close = QPushButton("Fechar")
         self.btn_close.setProperty("kind", "secondary")
@@ -333,7 +334,7 @@ class TcraRecordDetailsDialog(QDialog):
 
         button_layout = QHBoxLayout()
         button_layout.addStretch(1)
-        self.btn_edit = QPushButton("Abrir cadastro")
+        self.btn_edit = QPushButton("Abrir termo")
         self.btn_edit.setProperty("kind", "primary")
         self.btn_close = QPushButton("Fechar")
         self.btn_close.setProperty("kind", "secondary")
@@ -714,6 +715,10 @@ class TcraTab(QWidget):
     OVERVIEW_PREVIEW_LIMIT = 3
     FORM_DRAFT_AUTOSAVE_MS = 700
     INITIAL_PREFETCH_DELAY_MS = 0
+    STARTUP_DEADLINE_ALERT_LIMIT = 8
+    STARTUP_DEADLINE_ALERT_DELAY_MS = 1200
+    STARTUP_DEADLINE_ALERT_RETRY_MS = 250
+    STARTUP_DEADLINE_ALERT_MAX_ATTEMPTS = 20
     AGENDA_SCOPE_LABELS = {
         scope: WORKSPACE_AGENDA_SCOPE_LABELS[scope]
         for scope in SUPPORTED_AGENDA_SCOPES
@@ -787,6 +792,7 @@ class TcraTab(QWidget):
         self._clean_form_state: dict[str, object] | None = None
         self._pending_event_audit: dict[str, object] | None = None
         self._workspace_context_expanded = False
+        self._form_panel_expanded = True
         self._restoring_selection = False
         self._advanced_filters_visible = False
         self._agenda_expanded = False
@@ -801,6 +807,8 @@ class TcraTab(QWidget):
         self._last_draft_saved_payload: dict[str, object] | None = None
         self._records_loaded = False
         self._initial_prefetch_pending = True
+        self._startup_deadline_alert_shown = False
+        self._startup_deadline_alert_attempts = 0
         self._teardown_in_progress = False
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
@@ -837,10 +845,10 @@ class TcraTab(QWidget):
         self.header_layout.setSpacing(int(3 * self.sf))
         self.header_kicker = QLabel("TCRAs")
         self.header_kicker.setProperty("role", "eyebrow")
-        self.header_title = QLabel("Acompanhamento operacional dos termos")
+        self.header_title = QLabel("Cadastro e atualização de TCRAs")
         self.header_title.setProperty("role", "page-title")
         self.header_subtitle = QLabel(
-            "Use a lista para triagem, abra detalhes em janela quando precisar de contexto e use o cadastro dedicado apenas para atualizar prazos, relatórios e eventos."
+            "Use a lista para triagem, abra detalhes em janela quando precisar de contexto e use o painel de dados apenas para corrigir ou complementar o termo."
         )
         self.header_subtitle.setProperty("role", "page-subtitle")
         self.header_subtitle.setWordWrap(True)
@@ -884,34 +892,34 @@ class TcraTab(QWidget):
             cards_layout.addWidget(card, 0, index)
         self.list_page_layout.addWidget(self.metrics_frame)
 
-        self.lbl_context = QLabel("Base TCRA: aguardando leitura inicial.")
+        self.lbl_context = QLabel("Base TCRA: aguardando leitura inicial.", self)
         self.lbl_context.setWordWrap(False)
         self.lbl_context.setObjectName("FormStateLabel")
-        self.lbl_radar_summary = QLabel("Sem dados operacionais no momento.")
+        self.lbl_radar_summary = QLabel("Sem dados operacionais no momento.", self)
         self.lbl_radar_summary.setWordWrap(True)
         self.lbl_radar_summary.setObjectName("FormStateLabel")
         self.lbl_radar_summary.setVisible(False)
-        self.lbl_data_quality = QLabel("Qualidade cadastral: aguardando leitura.")
+        self.lbl_data_quality = QLabel("Qualidade cadastral: aguardando leitura.", self)
         self.lbl_data_quality.setWordWrap(True)
         self.lbl_data_quality.setObjectName("FormStateLabel")
         self.lbl_data_quality.setVisible(False)
-        self.lbl_sla_summary = QLabel("SLA: aguardando leitura.")
+        self.lbl_sla_summary = QLabel("SLA: aguardando leitura.", self)
         self.lbl_sla_summary.setWordWrap(True)
         self.lbl_sla_summary.setObjectName("FormStateLabel")
         self.lbl_sla_summary.setVisible(False)
-        self.lbl_workload_summary = QLabel("Carga: aguardando leitura.")
+        self.lbl_workload_summary = QLabel("Carga: aguardando leitura.", self)
         self.lbl_workload_summary.setWordWrap(True)
         self.lbl_workload_summary.setObjectName("FormStateLabel")
         self.lbl_workload_summary.setVisible(False)
-        self.lbl_upcoming_reports = QLabel("Próximos relatórios: --")
+        self.lbl_upcoming_reports = QLabel("Próximos relatórios: --", self)
         self.lbl_upcoming_reports.setWordWrap(True)
         self.lbl_upcoming_reports.setObjectName("FormStateLabel")
         self.lbl_upcoming_reports.setVisible(False)
-        self.lbl_import_status = QLabel(self.IMPORT_STATUS_IDLE_TEXT)
+        self.lbl_import_status = QLabel(self.IMPORT_STATUS_IDLE_TEXT, self)
         self.lbl_import_status.setWordWrap(True)
         self.lbl_import_status.setObjectName("FormStateLabel")
         self.lbl_import_status.setVisible(False)
-        self.lbl_sync_status = QLabel("Sync TCRA: cache local aguardando atualização.")
+        self.lbl_sync_status = QLabel("Sync TCRA: cache local aguardando atualização.", self)
         self.lbl_sync_status.setWordWrap(True)
         self.lbl_sync_status.setObjectName("FormStateLabel")
         self.lbl_sync_status.setVisible(False)
@@ -955,6 +963,9 @@ class TcraTab(QWidget):
         summary_details_layout.setContentsMargins(0, 0, 0, 0)
         summary_details_layout.setSpacing(int(4 * self.sf))
         summary_details_layout.addWidget(self.summary_helper)
+        summary_details_layout.addWidget(self.lbl_radar_summary)
+        summary_details_layout.addWidget(self.lbl_data_quality)
+        summary_details_layout.addWidget(self.lbl_upcoming_reports)
         summary_details_layout.addWidget(self.lbl_sla_summary)
         summary_details_layout.addWidget(self.lbl_workload_summary)
         summary_details_layout.addWidget(self.lbl_sync_status)
@@ -975,14 +986,14 @@ class TcraTab(QWidget):
         record_header.setSpacing(int(6 * self.sf))
         self.lbl_record_title = QLabel("Nenhum TCRA selecionado")
         self.lbl_record_title.setObjectName("FormStateLabel")
-        self.btn_record_edit = QPushButton("Abrir cadastro")
+        self.btn_record_edit = QPushButton("Abrir termo")
         self.btn_record_edit.setProperty("kind", "secondary")
         self.btn_record_edit.setEnabled(False)
         record_header.addWidget(self.lbl_record_title, 1)
         record_header.addWidget(self.btn_record_edit)
         record_layout.addLayout(record_header)
 
-        self.lbl_record_meta = QLabel("Selecione um TCRA na grade para ver o resumo e abrir o cadastro quando quiser.")
+        self.lbl_record_meta = QLabel("Selecione um TCRA na grade para ver um resumo rápido e abrir o cadastro quando precisar.")
         self.lbl_record_meta.setWordWrap(True)
         self.lbl_record_meta.setObjectName("FormStateLabel")
         record_layout.addWidget(self.lbl_record_meta)
@@ -1016,14 +1027,14 @@ class TcraTab(QWidget):
         self.lbl_agenda_summary = QLabel("Nenhuma pendência prioritária no recorte atual.")
         self.lbl_agenda_summary.setWordWrap(True)
         self.lbl_agenda_summary.setObjectName("FormStateLabel")
-        self.btn_agenda_open = QPushButton("Abrir cadastro")
+        self.btn_agenda_open = QPushButton("Abrir termo")
         self.btn_agenda_open.setProperty("kind", "ghost")
         self.btn_agenda_open.setEnabled(False)
-        self.btn_agenda_open.setToolTip("Abre o cadastro do item selecionado na Inbox.")
+        self.btn_agenda_open.setToolTip("Abre o cadastro do termo selecionado a partir da Inbox.")
         self.btn_agenda_quick_event = QPushButton("Registrar evento")
         self.btn_agenda_quick_event.setProperty("kind", "chip-quiet")
         self.btn_agenda_quick_event.setEnabled(False)
-        self.btn_agenda_quick_event.setToolTip("Registra uma movimentação rápida para o item selecionado sem passar pelo cadastro completo.")
+        self.btn_agenda_quick_event.setToolTip("Registra uma movimentacao rapida para o item selecionado sem abrir todo o painel de dados.")
         self.btn_agenda_assign_responsavel = QPushButton("Atribuir responsável")
         self.btn_agenda_assign_responsavel.setProperty("kind", "chip-quiet")
         self.btn_agenda_assign_responsavel.setEnabled(False)
@@ -1191,7 +1202,7 @@ class TcraTab(QWidget):
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setToolTip("Busca em processo, TCRA, local, endereço, órgão, responsável, observações e inquérito.")
 
-        self.filter_status = QComboBox(self)
+        self.filter_status = ClickableComboBox(self)
         self.filter_status.addItem(STATUS_TODOS)
         self.filter_status.setToolTip("Filtra os termos pelo status operacional atual.")
         self.filter_orgao = CheckableComboBox("Todos os Órgãos")
@@ -1200,7 +1211,7 @@ class TcraTab(QWidget):
         self.filter_bairro.setToolTip("Refina a lista pelos bairros cadastrados.")
         self.filter_responsavel = CheckableComboBox("Todos os Responsáveis")
         self.filter_responsavel.setToolTip("Refina a lista pelos responsáveis de execução cadastrados.")
-        self.filter_year = QComboBox(self)
+        self.filter_year = ClickableComboBox(self)
         self.filter_year.addItem(STATUS_TODOS)
         self.filter_year.setToolTip("Mostra apenas TCRAs do ano selecionado.")
 
@@ -1222,7 +1233,7 @@ class TcraTab(QWidget):
         self.btn_export_excel.setToolTip("Exporta a base de TCRAs para uma planilha Excel.")
         self.btn_export_pdf = QPushButton("PDF")
         self.btn_export_pdf.setProperty("kind", "chip-quiet")
-        self.btn_export_pdf.setToolTip("Gera um relatório PDF com o panorama operacional atual.")
+        self.btn_export_pdf.setToolTip("Gera um relatório PDF com o resumo atual dos TCRAs.")
         self.btn_import_legacy = QPushButton("Importar")
         self.btn_import_legacy.setProperty("kind", "chip-quiet")
         self.btn_import_legacy.setToolTip("Importa uma planilha legada para a base local do módulo TCRA.")
@@ -1323,10 +1334,10 @@ class TcraTab(QWidget):
 
         primary_actions_layout = QHBoxLayout()
         primary_actions_layout.setSpacing(int(6 * self.sf))
-        self.btn_open_selected = QPushButton("Abrir no cadastro")
+        self.btn_open_selected = QPushButton("Abrir termo")
         self.btn_open_selected.setProperty("kind", "secondary")
         self.btn_open_selected.setEnabled(False)
-        self.btn_open_selected.setToolTip("Abre o termo selecionado diretamente no cadastro.")
+        self.btn_open_selected.setToolTip("Abre o cadastro do termo selecionado.")
         self.btn_record_details = QPushButton("Detalhes")
         self.btn_record_details.setProperty("kind", "secondary")
         self.btn_record_details.setEnabled(False)
@@ -1363,7 +1374,7 @@ class TcraTab(QWidget):
         secondary_actions_layout.setSpacing(int(6 * self.sf))
         self.btn_new_list = QPushButton("Novo termo")
         self.btn_new_list.setProperty("kind", "primary")
-        self.btn_new_list.setToolTip("Abre um cadastro em branco para um novo TCRA.")
+        self.btn_new_list.setToolTip("Abre um novo termo em branco para revisão e preenchimento.")
         secondary_actions_layout.addWidget(self.btn_new_list)
         secondary_actions_layout.addWidget(self.btn_more_actions)
         secondary_actions_layout.addStretch(1)
@@ -1443,6 +1454,8 @@ class TcraTab(QWidget):
         self.editor_tabs = QTabWidget(self)
         self.editor_tabs.setDocumentMode(True)
         self.editor_tabs.setTabPosition(QTabWidget.North)
+        self.editor_tabs.setMinimumHeight(0)
+        self.editor_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
 
         editor_header_frame = QFrame(self)
         editor_header_frame.setProperty("panel", "section")
@@ -1458,27 +1471,32 @@ class TcraTab(QWidget):
         self.lbl_form_state.setObjectName("FormStateLabel")
         self.btn_new = QPushButton("Novo TCRA")
         self.btn_new.setProperty("kind", "chip-quiet")
-        self.btn_new.setToolTip("Limpa o formulário e inicia um novo cadastro.")
+        self.btn_new.setToolTip("Limpa os dados editáveis e inicia um novo termo.")
         self.btn_save = QPushButton("Salvar TCRA")
         self.btn_save.setProperty("kind", "primary")
-        self.btn_save.setToolTip("Salva o cadastro atual do termo.")
+        self.btn_save.setToolTip("Salva os dados atuais do termo.")
         self.btn_delete = QPushButton("Excluir TCRA")
         self.btn_delete.setProperty("kind", "danger")
         self.btn_delete.setToolTip("Exclui o TCRA atual após confirmação.")
+        self.btn_toggle_form_panel = QPushButton("Mostrar cadastro")
+        self.btn_toggle_form_panel.setProperty("kind", "secondary")
+        self.btn_toggle_form_panel.setCheckable(True)
+        self.btn_toggle_form_panel.setToolTip("Mostra ou oculta o cadastro do termo.")
+        self.btn_toggle_form_panel.setVisible(False)
         editor_header.addWidget(self.lbl_editor_context)
         editor_header.addWidget(self.lbl_form_state)
         editor_header.addStretch(1)
         editor_header.addWidget(self.btn_new)
         editor_header.addWidget(self.btn_save)
         editor_header.addWidget(self.btn_delete)
+        editor_header.addWidget(self.btn_toggle_form_panel)
         editor_header.addWidget(self.btn_back_to_list)
         self.editor_page_layout.addWidget(editor_header_frame)
         self.editor_helper = QLabel(
-            "Edite o termo em um fluxo único. A síntese e os eventos ficam nas abas inferiores para apoiar a decisão sem poluir o formulário."
+            "Preencha o cadastro do termo nesta área principal. O resumo e os eventos ficam abaixo apenas para conferência."
         )
         self.editor_helper.setProperty("role", "helper")
         self.editor_helper.setWordWrap(True)
-        self.editor_page_layout.addWidget(self.editor_helper)
 
         self.event_spotlight_frame = QFrame(self)
         self.event_spotlight_frame.setProperty("panel", "section")
@@ -1489,7 +1507,7 @@ class TcraTab(QWidget):
         self.lbl_event_spotlight_title.setObjectName("FormStateLabel")
         self.lbl_event_spotlight_meta = QLabel("Status resultante, prazo gerado e protocolo aparecerao aqui.")
         self.lbl_event_spotlight_meta.setWordWrap(True)
-        self.lbl_event_spotlight_helper = QLabel("Registre eventos sem precisar descer ate o fim do cadastro.")
+        self.lbl_event_spotlight_helper = QLabel("Use este quadro apenas para consultar o último evento sem perder o cadastro de vista.")
         self.lbl_event_spotlight_helper.setWordWrap(True)
         self.lbl_event_spotlight_helper.setProperty("role", "helper")
         event_spotlight_layout.addWidget(self.lbl_event_spotlight_title)
@@ -1497,7 +1515,7 @@ class TcraTab(QWidget):
         event_spotlight_layout.addWidget(self.lbl_event_spotlight_helper)
         event_spotlight_actions = QHBoxLayout()
         event_spotlight_actions.setSpacing(int(6 * self.sf))
-        self.btn_event_register_primary = QPushButton("Abrir acompanhamento")
+        self.btn_event_register_primary = QPushButton("Registrar evento")
         self.btn_event_register_primary.setProperty("kind", "primary")
         self.btn_event_register_primary.setToolTip("Abre a janela de detalhes para consultar e registrar eventos do TCRA.")
         self.btn_event_open_latest_document = QPushButton("Abrir doc. do ultimo")
@@ -1520,19 +1538,12 @@ class TcraTab(QWidget):
         self.event_cards_layout.setSpacing(int(6 * self.sf))
         self.event_cards_scroll.setWidget(self.event_cards_container)
         event_spotlight_layout.addWidget(self.event_cards_scroll)
-        self.editor_page_layout.addWidget(self.event_spotlight_frame)
-
-        form_page = QWidget(self)
-        form_page_layout = QVBoxLayout(form_page)
-        form_page_layout.setContentsMargins(0, 0, 0, 0)
-        form_page_layout.setSpacing(int(5 * self.sf))
-
-        self.form_group = QGroupBox("Cadastro operacional do termo")
+        self.form_group = QGroupBox("Cadastro do termo")
         form_layout = QVBoxLayout(self.form_group)
         form_layout.setContentsMargins(10, 10, 10, 10)
         form_layout.setSpacing(int(6 * self.sf))
         self.form_intro = QLabel(
-            "Preencha dados do termo, prazos, acompanhamento institucional e observações em um único fluxo de edição."
+            "Preencha identificação, prazos, dados institucionais e observações do termo em um único fluxo de cadastro."
         )
         self.form_intro.setProperty("role", "helper")
         self.form_intro.setWordWrap(True)
@@ -1562,7 +1573,7 @@ class TcraTab(QWidget):
         form_nav_layout.addStretch(1)
         form_layout.addLayout(form_nav_layout)
 
-        self.lbl_fix_guidance = QLabel("Correção assistida: cadastro pronto para edição.")
+        self.lbl_fix_guidance = QLabel("Correcao assistida: cadastro pronto para revisão.")
         self.lbl_fix_guidance.setWordWrap(True)
         self.lbl_fix_guidance.setObjectName("FormStateLabel")
         form_layout.addWidget(self.lbl_fix_guidance)
@@ -1804,17 +1815,42 @@ class TcraTab(QWidget):
         self.form_scroll.setMinimumHeight(0)
         self.form_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.form_scroll.setWidget(self.form_group)
-        form_page_layout.addWidget(self.form_scroll)
+
+        self.form_panel_shell = QFrame(self)
+        self.form_panel_shell.setProperty("panel", "section")
+        self.form_panel_shell.setMinimumHeight(0)
+        self.form_panel_shell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        form_panel_layout = QVBoxLayout(self.form_panel_shell)
+        form_panel_layout.setContentsMargins(int(10 * self.sf), int(9 * self.sf), int(10 * self.sf), int(10 * self.sf))
+        form_panel_layout.setSpacing(int(6 * self.sf))
+        form_panel_header = QHBoxLayout()
+        form_panel_header.setSpacing(int(6 * self.sf))
+        self.lbl_form_panel_title = QLabel("Cadastro principal")
+        self.lbl_form_panel_title.setObjectName("FormStateLabel")
+        self.lbl_form_panel_state = QLabel("Os campos abaixo são a área principal desta tela de cadastro.")
+        self.lbl_form_panel_state.setProperty("role", "helper")
+        self.lbl_form_panel_state.setWordWrap(True)
+        form_panel_header.addWidget(self.lbl_form_panel_title)
+        form_panel_header.addWidget(self.lbl_form_panel_state, 1)
+        form_panel_layout.addLayout(form_panel_header)
+        self.form_panel_body = QWidget(self)
+        self.form_panel_body.setMinimumHeight(0)
+        self.form_panel_body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        form_panel_body_layout = QVBoxLayout(self.form_panel_body)
+        form_panel_body_layout.setContentsMargins(0, 0, 0, 0)
+        form_panel_body_layout.setSpacing(int(6 * self.sf))
+        form_panel_body_layout.addWidget(self.form_scroll, 1)
+        form_panel_layout.addWidget(self.form_panel_body, 1)
 
         preview_page = QWidget(self)
         preview_layout = QVBoxLayout(preview_page)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(int(6 * self.sf))
-        self.lbl_selected_title = QLabel("Síntese operacional")
+        self.lbl_selected_title = QLabel("Resumo do termo")
         self.lbl_selected_title.setObjectName("FormStateLabel")
         preview_layout.addWidget(self.lbl_selected_title)
         self.preview_helper = QLabel(
-            "Esta aba resume o termo atual, destacando pendências, prazos e pontos de atenção."
+            "Confira aqui um resumo rápido do termo enquanto preenche ou revisa o cadastro."
         )
         self.preview_helper.setProperty("role", "helper")
         self.preview_helper.setWordWrap(True)
@@ -1822,19 +1858,20 @@ class TcraTab(QWidget):
 
         self.details = QPlainTextEdit(self)
         self.details.setReadOnly(True)
-        self.details.setPlaceholderText("Preencha ou selecione um TCRA para ver o resumo operacional.")
+        self.details.setPlaceholderText("Selecione ou abra um TCRA para ver o resumo.")
         preview_layout.addWidget(self.details, 1)
+        self.summary_workspace_page = preview_page
 
         events_page = QWidget(self)
         events_layout = QVBoxLayout(events_page)
         events_layout.setContentsMargins(0, 0, 0, 0)
         events_layout.setSpacing(int(6 * self.sf))
         events_header = QHBoxLayout()
-        self.lbl_events_title = QLabel("Linha do tempo e eventos")
+        self.lbl_events_title = QLabel("Eventos do termo")
         self.lbl_events_title.setObjectName("FormStateLabel")
         events_header.addWidget(self.lbl_events_title)
         events_header.addStretch(1)
-        self.btn_add_event = QPushButton("Abrir acompanhamento")
+        self.btn_add_event = QPushButton("Registrar evento")
         self.btn_add_event.setProperty("kind", "secondary")
         self.btn_add_event.setToolTip("Abre a janela de detalhes, onde os eventos deste TCRA sao registrados.")
         self.btn_edit_event = QPushButton("Editar")
@@ -1863,7 +1900,7 @@ class TcraTab(QWidget):
         self.lbl_event_hint.setObjectName("FormStateLabel")
         events_layout.addWidget(self.lbl_event_hint)
         self.lbl_event_hint.setText(
-            "No cadastro, os eventos ficam apenas como contexto. O registro e a edicao agora acontecem na janela de detalhes."
+            "Os eventos aparecem aqui como apoio de conferência. Use os botões acima quando precisar registrar ou consultar um evento."
         )
 
         self.lbl_recent_event_cards = QLabel("Linha do tempo visual")
@@ -1938,23 +1975,39 @@ class TcraTab(QWidget):
         self.events_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
         events_layout.addWidget(self.events_table, 1)
 
+        editor_preview_placeholder = QWidget(self)
+        self.editor_tabs.addTab(editor_preview_placeholder, "Resumo")
+        self.editor_tabs.addTab(events_page, "Eventos")
+
+        self.editor_operational_panel = QFrame(self)
+        self.editor_operational_panel.setProperty("panel", "section")
+        self.editor_operational_panel.setMinimumHeight(0)
+        self.editor_operational_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        editor_operational_layout = QVBoxLayout(self.editor_operational_panel)
+        editor_operational_layout.setContentsMargins(int(10 * self.sf), int(9 * self.sf), int(10 * self.sf), int(10 * self.sf))
+        editor_operational_layout.setSpacing(int(8 * self.sf))
+        editor_operational_layout.addWidget(self.editor_helper)
+        editor_operational_layout.addWidget(self.event_spotlight_frame)
+        editor_operational_layout.addWidget(self.editor_tabs, 1)
+        self.editor_operational_panel.setVisible(False)
+        self.editor_operational_panel.setMaximumHeight(0)
+        self.event_spotlight_frame.setVisible(False)
+        self.editor_tabs.setVisible(False)
+
         self.editor_splitter = QSplitter(Qt.Vertical, self)
         self.editor_splitter.setChildrenCollapsible(False)
+        self.editor_splitter.setHandleWidth(0)
         self.editor_splitter.setMinimumHeight(0)
         self.editor_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-        self.editor_tabs.setMinimumHeight(0)
-        self.editor_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-        self.editor_splitter.addWidget(self.form_scroll)
-        self.editor_tabs.addTab(preview_page, "Síntese")
-        self.editor_tabs.addTab(events_page, "Eventos")
-        self.editor_splitter.addWidget(self.editor_tabs)
-        self.editor_splitter.setStretchFactor(0, 5)
+        self.editor_splitter.addWidget(self.form_panel_shell)
+        self.editor_splitter.addWidget(self.editor_operational_panel)
+        self.editor_splitter.setStretchFactor(0, 8)
         self.editor_splitter.setStretchFactor(1, 3)
-        self.editor_splitter.setSizes([max(int(560 * self.sf), 500), max(int(300 * self.sf), 260)])
         self.editor_page_layout.addWidget(self.editor_splitter, 1)
 
         self.workspace_tabs.addTab(self.list_page, "Lista")
         self.workspace_tabs.addTab(self.editor_page, "Cadastro")
+        self.workspace_tabs.addTab(self.summary_workspace_page, "Resumo")
         layout.addWidget(self.workspace_tabs, 1)
 
         self.search_input.textChanged.connect(self._apply_filters)
@@ -1993,6 +2046,7 @@ class TcraTab(QWidget):
         self.btn_clear_selection.clicked.connect(self._clear_table_selection)
         self.btn_bulk_action.clicked.connect(self.apply_bulk_action)
         self.btn_back_to_list.clicked.connect(self._switch_to_list_view)
+        self.btn_toggle_form_panel.clicked.connect(self._toggle_form_panel)
         self.btn_record_edit.clicked.connect(self._open_selected_record_in_editor)
         self.btn_summary_inbox.clicked.connect(self._open_inbox_overview)
         self.btn_summary_quality.clicked.connect(self._open_quality_overview)
@@ -2046,6 +2100,7 @@ class TcraTab(QWidget):
         self._refresh_event_actions()
         self._update_event_spotlight()
         self._set_advanced_filters_visible(False)
+        self._apply_form_panel_visibility()
         self._apply_responsive_layout()
 
     def showEvent(self, event):
@@ -2095,6 +2150,36 @@ class TcraTab(QWidget):
     def _toggle_workspace_context(self) -> None:
         self._workspace_context_expanded = not self._workspace_context_expanded
         self._apply_responsive_layout()
+
+    def _toggle_form_panel(self) -> None:
+        self._set_form_panel_expanded(not self._form_panel_expanded)
+
+    def _set_form_panel_expanded(self, expanded: bool) -> None:
+        self._form_panel_expanded = bool(expanded)
+        self._apply_form_panel_visibility()
+        if hasattr(self, "editor_splitter"):
+            self._apply_responsive_layout()
+
+    def _apply_form_panel_visibility(self) -> None:
+        if not hasattr(self, "form_panel_body"):
+            return
+        expanded = bool(self._form_panel_expanded)
+        self.form_panel_body.setVisible(expanded)
+        collapsed_height = max(int(56 * self.sf), 46)
+        self.form_panel_shell.setMaximumHeight(16777215 if expanded else collapsed_height)
+        self.form_panel_shell.setMinimumHeight(0 if expanded else collapsed_height)
+        self.btn_toggle_form_panel.blockSignals(True)
+        self.btn_toggle_form_panel.setChecked(expanded)
+        self.btn_toggle_form_panel.setText("Ocultar cadastro" if expanded else "Mostrar cadastro")
+        self.btn_toggle_form_panel.blockSignals(False)
+        if expanded:
+            self.lbl_form_panel_state.setText(
+                "Cadastro aberto. Preencha processo, prazos, dados institucionais e observações."
+            )
+        else:
+            self.lbl_form_panel_state.setText(
+                "Cadastro recolhido. Abra quando precisar editar o termo."
+            )
 
     def _update_workspace_digest(self, snapshot: TcraWorkspaceSnapshot | None = None) -> None:
         if not hasattr(self, "lbl_workspace_digest"):
@@ -2152,9 +2237,9 @@ class TcraTab(QWidget):
         self.agenda_helper.setVisible(not compact_mode)
         self.quality_helper.setVisible(not compact_mode)
         self.executive_helper.setVisible(not compact_mode)
-        self.editor_helper.setVisible(not compact_mode)
+        self.editor_helper.setVisible(True)
         self.form_intro.setVisible(not tight_mode)
-        self.preview_helper.setVisible(not tight_mode)
+        self.preview_helper.setVisible(True)
         self.lbl_event_hint.setVisible(not tight_mode)
 
         self.list_page_layout.setSpacing(int((5 if show_workspace_context else 4) * self.sf))
@@ -2182,12 +2267,12 @@ class TcraTab(QWidget):
 
         self.btn_new_list.setText("Novo" if compact_mode else "Novo termo")
         self.btn_record_details.setText("Ver" if compact_mode else "Detalhes")
-        self.btn_open_selected.setText("Abrir" if compact_mode else "Abrir no cadastro")
+        self.btn_open_selected.setText("Abrir" if compact_mode else "Abrir termo")
         self.btn_bulk_action.setText("Lote" if compact_mode else "Ações em lote")
         self.btn_back_to_list.setText("Voltar" if compact_mode else "Voltar para Lista")
         self.btn_more_actions.setText("Ações" if compact_mode else "Mais ações")
         self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar")
-        self.btn_event_register_primary.setText("Acomp." if compact_mode else "Abrir acompanhamento")
+        self.btn_event_register_primary.setText("Evento" if compact_mode else "Registrar evento")
         self.btn_event_open_latest_document.setText("Abrir doc" if compact_mode else "Abrir doc. do ultimo")
         self.btn_event_open_audit.setText("Historico" if compact_mode else "Auditoria")
         self.btn_open_event_document.setText("Doc" if compact_mode else "Abrir documento")
@@ -2211,13 +2296,23 @@ class TcraTab(QWidget):
         self.overview_panel.setMaximumWidth(16777215)
         self.record_timeline.setMaximumHeight(max(int((104 if compact_mode else 132) * self.sf), 84))
         self.timeline_preview.setMaximumHeight(max(int((96 if compact_mode else 116) * self.sf), 80))
-        self.event_cards_scroll.setMaximumHeight(max(int((180 if compact_mode else 220) * self.sf), 150))
-        self.events_visual_scroll.setMaximumHeight(max(int((180 if compact_mode else 240) * self.sf), 150))
+        self.event_cards_scroll.setMaximumHeight(max(int((130 if compact_mode else 160) * self.sf), 110))
+        self.events_visual_scroll.setMaximumHeight(max(int((150 if compact_mode else 180) * self.sf), 120))
         self.in_servicos.setMinimumHeight(max(int((42 if compact_mode else 52) * self.sf), 36))
         self.in_observacoes.setMinimumHeight(max(int((42 if compact_mode else 52) * self.sf), 36))
 
-        form_size = [max(int(500 * self.sf), 430), max(int(220 * self.sf), 180)] if compact_mode else [max(int(560 * self.sf), 500), max(int(300 * self.sf), 260)]
-        self.editor_splitter.setSizes(form_size)
+        self._apply_form_panel_visibility()
+        if self._form_panel_expanded:
+            splitter_sizes = (
+                [max(int(520 * self.sf), 400), max(int(220 * self.sf), 170)]
+                if compact_mode
+                else [max(int(700 * self.sf), 520), max(int(260 * self.sf), 200)]
+            )
+        else:
+            splitter_sizes = [max(int(700 * self.sf), 520), max(int(56 * self.sf), 46)]
+        if hasattr(self, "editor_operational_panel") and not self.editor_operational_panel.isVisible():
+            splitter_sizes = [splitter_sizes[0], 0]
+        self.editor_splitter.setSizes(splitter_sizes)
         self._set_overview_tab_counts(
             inbox_count=len(self.agenda_items),
             quality_count=len(self.quality_items),
@@ -2622,13 +2717,124 @@ class TcraTab(QWidget):
         if has_form_content:
             return
         self._initial_prefetch_pending = False
-        tabs_widget = getattr(self.main_window, "tabs", None) if self.main_window is not None else None
-        if tabs_widget is not None and getattr(tabs_widget, "currentWidget", lambda: None)() is self:
-            return
         try:
             self._run_refresh_data()
         except Exception:
             logger.debug("Pré-carga silenciosa de TCRA indisponível nesta sessão.", exc_info=True)
+
+    def _record_startup_alert_label(self, record: Tcra) -> str:
+        return _stringify(record.numero_tcra or record.numero_processo or record.local or record.uid) or "TCRA"
+
+    def _deadline_distance_text(self, deadline: date) -> str:
+        days = (deadline - self.today).days
+        if days < 0:
+            overdue_days = abs(days)
+            if overdue_days == 1:
+                return "vencido há 1 dia"
+            return f"vencido há {overdue_days} dias"
+        if days == 0:
+            return "vence hoje"
+        if days == 1:
+            return "vence amanhã"
+        return f"vence em {days} dias"
+
+    def _is_open_tcra_deadline(self, record: Tcra) -> bool:
+        if record.prazo_final is None:
+            return False
+        normalized_status = normalize_status_label(record.status)
+        return normalized_status not in {STATUS_CUMPRIDO, STATUS_ARQUIVADO}
+
+    def _is_deadline_due_soon(self, record: Tcra) -> bool:
+        if not self._is_open_tcra_deadline(record):
+            return False
+        assert record.prazo_final is not None
+        days_until_deadline = (record.prazo_final - self.today).days
+        window_days = max(int(self.operational_rules.upcoming_report_window_days or 0), 0)
+        return 0 <= days_until_deadline <= window_days
+
+    def _startup_alert_record_line(self, record: Tcra) -> str:
+        deadline = record.prazo_final
+        deadline_text = _format_date(deadline)
+        distance_text = self._deadline_distance_text(deadline) if deadline is not None else "sem prazo"
+        local = _stringify(record.local or record.bairro or record.endereco)
+        suffix = f" - {local}" if local else ""
+        return f"- {self._record_startup_alert_label(record)}: {deadline_text} ({distance_text}){suffix}"
+
+    def _append_startup_alert_section(
+        self,
+        lines: list[str],
+        *,
+        title: str,
+        records: list[Tcra],
+    ) -> None:
+        if not records:
+            return
+        lines.extend(["", f"{title}: {len(records)}"])
+        visible_records = records[: self.STARTUP_DEADLINE_ALERT_LIMIT]
+        lines.extend(self._startup_alert_record_line(record) for record in visible_records)
+        hidden_count = len(records) - len(visible_records)
+        if hidden_count > 0:
+            lines.append(f"- +{hidden_count} outro(s) na Inbox operacional")
+
+    def _build_startup_deadline_alert(self) -> tuple[str, str, bool] | None:
+        open_records = [record for record in self.all_tcras if self._is_open_tcra_deadline(record)]
+        overdue_records = sorted(
+            (record for record in open_records if tcra_has_prazo_vencido(record, today=self.today)),
+            key=lambda record: (record.prazo_final or date.max, self._record_startup_alert_label(record).lower()),
+        )
+        upcoming_records = sorted(
+            (record for record in open_records if self._is_deadline_due_soon(record)),
+            key=lambda record: (record.prazo_final or date.max, self._record_startup_alert_label(record).lower()),
+        )
+        if not overdue_records and not upcoming_records:
+            return None
+
+        window_days = max(int(self.operational_rules.upcoming_report_window_days or 0), 0)
+        lines = ["Há prazos de TCRA que precisam de atenção."]
+        self._append_startup_alert_section(lines, title="Prazos vencidos", records=overdue_records)
+        self._append_startup_alert_section(
+            lines,
+            title=f"Prazos que vencem nos próximos {window_days} dias",
+            records=upcoming_records,
+        )
+        lines.extend(["", "A lista completa fica na Inbox operacional da aba TCRAs."])
+        return "Prazos de TCRA", "\n".join(lines), bool(overdue_records)
+
+    def _queue_startup_deadline_alert(self) -> None:
+        if self.main_window is None or self._startup_deadline_alert_shown:
+            return
+        QTimer.singleShot(self.STARTUP_DEADLINE_ALERT_DELAY_MS, self._show_startup_deadline_alert)
+
+    def _main_window_ready_for_startup_alert(self) -> bool:
+        window = self.main_window
+        if window is None:
+            return False
+        if hasattr(window, "isVisible") and not window.isVisible():
+            return False
+        if hasattr(window, "isMinimized") and window.isMinimized():
+            return False
+        if getattr(window, "_startup_close_guard_active", False):
+            return False
+        return True
+
+    def _show_startup_deadline_alert(self) -> None:
+        if self._startup_deadline_alert_shown or self._teardown_in_progress:
+            return
+        alert = self._build_startup_deadline_alert()
+        if alert is None:
+            self._startup_deadline_alert_shown = True
+            return
+        if not self._main_window_ready_for_startup_alert():
+            self._startup_deadline_alert_attempts += 1
+            if self._startup_deadline_alert_attempts <= self.STARTUP_DEADLINE_ALERT_MAX_ATTEMPTS:
+                QTimer.singleShot(self.STARTUP_DEADLINE_ALERT_RETRY_MS, self._show_startup_deadline_alert)
+            return
+        self._startup_deadline_alert_shown = True
+        title, message, has_overdue = alert
+        if has_overdue:
+            QMessageBox.warning(self, title, message)
+        else:
+            QMessageBox.information(self, title, message)
 
     def build_dashboard_payload(self) -> tuple[object | None, tuple[TcraAgendaItem, ...]]:
         records = self.all_tcras
@@ -2697,7 +2903,9 @@ class TcraTab(QWidget):
                 self._select_uid_in_table(self.current_form_uid or self.selected_uid)
                 return
         self._load_record_into_form(record, mark_clean=True)
+        self.editor_tabs.setCurrentIndex(0)
         self._switch_to_editor_view()
+        self._set_form_panel_expanded(True)
 
     def _apply_event_effects_to_record_snapshot(self, record: Tcra) -> Tcra:
         updated_record = replace(record, eventos=list(record.eventos))
@@ -2745,7 +2953,7 @@ class TcraTab(QWidget):
     ) -> Tcra | None:
         target_uid = _stringify(record.uid)
         if not target_uid:
-            QMessageBox.warning(self, "Aviso", "Salve o TCRA antes de registrar eventos no acompanhamento.")
+            QMessageBox.warning(self, "Aviso", "Salve o TCRA antes de registrar eventos do termo.")
             return None
         if self.current_form_uid == target_uid and self.has_pending_form_changes():
             QMessageBox.warning(
@@ -2835,11 +3043,11 @@ class TcraTab(QWidget):
     def _open_current_form_record_details(self, *, event_preset: str = "") -> None:
         target_uid = _stringify(self.current_form_uid or self.selected_uid)
         if not target_uid:
-            QMessageBox.warning(self, "Aviso", "Salve ou selecione um TCRA antes de abrir o acompanhamento.")
+            QMessageBox.warning(self, "Aviso", "Salve ou selecione um TCRA antes de abrir os eventos do termo.")
             return
         record = self._record_by_uid(target_uid)
         if record is None:
-            QMessageBox.warning(self, "Aviso", "Nao foi possivel localizar o TCRA atual para abrir o acompanhamento.")
+            QMessageBox.warning(self, "Aviso", "Nao foi possivel localizar o TCRA atual para abrir os eventos do termo.")
             return
         self._open_record_details_for_record(record, event_preset=event_preset)
 
@@ -3093,8 +3301,8 @@ class TcraTab(QWidget):
 
     def _set_record_panel_placeholder(self) -> None:
         self.lbl_record_title.setText("Nenhum TCRA selecionado")
-        self.lbl_record_meta.setText("Selecione um TCRA na grade para ver detalhes e abrir o cadastro quando quiser.")
-        self.record_details.setPlainText("Use a grade para consultar termos e abra o cadastro apenas quando for editar.")
+        self.lbl_record_meta.setText("Selecione um TCRA na grade para ver um resumo e abrir o cadastro quando quiser.")
+        self.record_details.setPlainText("Use a grade para consultar termos e abra o cadastro quando precisar preencher ou revisar dados.")
         self.record_timeline.setPlainText("Nenhum evento para exibir.")
         self.btn_record_details.setEnabled(False)
         self.btn_record_map.setEnabled(False)
@@ -3548,6 +3756,8 @@ class TcraTab(QWidget):
         self._run_refresh_data(preferred_uid=preferred_uid, refresh_remote=refresh_remote)
 
     def _run_refresh_data(self, *, preferred_uid: str | None = None, refresh_remote: bool = False):
+        was_records_loaded = self._records_loaded
+        should_queue_startup_alert = not was_records_loaded and not self._initial_prefetch_pending
         try:
             load_result = self.module_operations.load_records(refresh_remote=refresh_remote)
             self.all_tcras = list(load_result.records)
@@ -3570,6 +3780,8 @@ class TcraTab(QWidget):
             self._sync_filter_options()
             self._restore_filter_state_if_pending()
             self._apply_filters(preferred_uid=preferred_uid)
+            if should_queue_startup_alert:
+                self._queue_startup_deadline_alert()
         except Exception as exc:
             logger.exception("Falha ao recarregar TCRAs do banco local")
             self._workspace_snapshot = None
@@ -3668,7 +3880,9 @@ class TcraTab(QWidget):
         self.selected_uid = ""
         self._clear_form(mark_clean=True)
         self._restore_new_form_draft_if_available()
+        self.editor_tabs.setCurrentIndex(0)
         self._switch_to_editor_view()
+        self._set_form_panel_expanded(True)
         self._focus_form_widget(self.in_numero_processo)
 
     def save_tcra(self):
@@ -4539,6 +4753,7 @@ class TcraTab(QWidget):
 
     def _focus_form_widget(self, widget) -> None:
         self._switch_to_editor_view()
+        self._set_form_panel_expanded(True)
         if hasattr(self, "form_scroll"):
             self.form_scroll.ensureWidgetVisible(widget)
         widget.setFocus(Qt.OtherFocusReason)
@@ -4568,7 +4783,7 @@ class TcraTab(QWidget):
         if "orgao" in normalized_label:
             self._focus_form_widget(self.in_orgao)
             return
-        if "cadastro" in normalized_label or "revisar" in normalized_label:
+        if "cadastro" in normalized_label or "dados" in normalized_label or "revisar" in normalized_label:
             self._focus_issue_in_form(agenda_item.detalhe)
 
     def _focus_quality_item(self, quality_item: TcraQualityQueueItem) -> None:
@@ -4663,7 +4878,7 @@ class TcraTab(QWidget):
         self.btn_record_details.setEnabled(True)
         self.btn_record_map.setEnabled(True)
         self.btn_open_selected.setEnabled(selection_state.open_selected_enabled)
-        self.btn_open_selected.setText("Editar selecionado")
+        self.btn_open_selected.setText("Abrir termo")
         self.btn_record_edit.setEnabled(True)
         self._update_record_panel(record)
         self.overview_tabs.setCurrentIndex(0)
@@ -4674,7 +4889,7 @@ class TcraTab(QWidget):
         self.btn_record_details.setEnabled(True)
         self.btn_record_map.setEnabled(True)
         self.btn_open_selected.setEnabled(True)
-        self.btn_open_selected.setText("Editar selecionado")
+        self.btn_open_selected.setText("Abrir termo")
         self.lbl_selection_summary.setText("1 termo selecionado")
         self._set_selection_actions_visible(True)
         self._update_record_panel(record)
@@ -4699,7 +4914,7 @@ class TcraTab(QWidget):
         self.btn_record_details.setEnabled(False)
         self.btn_record_map.setEnabled(False)
         self.btn_open_selected.setEnabled(False)
-        self.btn_open_selected.setText("Editar selecionado")
+        self.btn_open_selected.setText("Abrir termo")
         self.lbl_selection_summary.setText("Nenhum termo selecionado")
         self._set_selection_actions_visible(bool(self._selected_table_rows()))
         self._set_record_panel_placeholder()
@@ -5201,7 +5416,7 @@ class TcraTab(QWidget):
             severity = "error" if primary in preview_data.consistency_issues else "warning"
             role = "feedback-error" if severity == "error" else "feedback-warning"
             self.lbl_form_validation.setProperty("role", role)
-            self.lbl_form_validation.setText("Validação do cadastro: " + " | ".join(issues[:3]))
+            self.lbl_form_validation.setText("Validação dos dados: " + " | ".join(issues[:3]))
             self.lbl_form_validation.setVisible(True)
             self._repolish_widget(self.lbl_form_validation)
 

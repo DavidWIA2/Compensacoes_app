@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 import app.ui.tabs.tcra_tab as tcra_tab_module
 from app.models.tcra import Tcra
@@ -158,6 +158,8 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert tab.card_mpsp.lbl_value.text() == "1"
     assert "termos" in tab.lbl_context.text()
     assert "Foco do recorte" in tab.lbl_radar_summary.text()
+    assert tab.lbl_radar_summary.isWindow() is False
+    assert tab.lbl_data_quality.isWindow() is False
     assert tab.lbl_import_status.isHidden() is True
     assert tab.overview_tabs.tabText(0) == "Seleção"
     assert "Inbox operacional (" in tab.overview_tabs.tabText(1)
@@ -175,10 +177,119 @@ def test_tcra_tab_refreshes_cards_table_and_details(tmp_path):
     assert tab.operational_dialog.isVisible() is False
     assert tab.btn_record_details.isEnabled() is True
     assert "Próxima ação:" in tab.record_details.toPlainText()
+    assert "Prazo interno de tratamento:" in tab.record_details.toPlainText()
     assert "Varjao" in tab.record_details.toPlainText()
     assert tab.events_table.rowCount() == 0
     assert "nenhum registro" in tab.lbl_event_spotlight_title.text().lower()
     assert tab.selection_actions_frame.isHidden() is False
+
+
+def test_tcra_tab_initial_prefetch_loads_when_startup_tab_is_active(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-1",
+                prazo_final=date(2027, 4, 1),
+                data_proximo_relatorio=None,
+            )
+        ]
+    )
+    parent = QWidget()
+    tab = TcraTab(parent=parent, sqlite_service=service, today=date(2026, 4, 3))
+    parent.tabs = SimpleNamespace(currentWidget=lambda: tab)
+    tab._records_loaded = False
+    tab._initial_prefetch_pending = True
+    tab.all_tcras = []
+    tab._set_initial_loading_state()
+
+    tab._prefetch_initial_records()
+
+    assert tab._records_loaded is True
+    assert tab.table.rowCount() == 1
+    assert tab.card_total.lbl_value.text() == "1"
+
+
+def test_tcra_tab_startup_deadline_alert_lists_actionable_deadlines(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-overdue",
+                numero_tcra="TCRA-OVERDUE",
+                prazo_final=date(2026, 4, 1),
+                data_proximo_relatorio=None,
+            ),
+            make_tcra(
+                uid="tcra-soon",
+                numero_tcra="TCRA-SOON",
+                prazo_final=date(2026, 4, 10),
+                data_proximo_relatorio=None,
+            ),
+            make_tcra(
+                uid="tcra-done",
+                numero_tcra="TCRA-DONE",
+                status="Cumprido",
+                prazo_final=date(2026, 4, 5),
+                data_proximo_relatorio=None,
+            ),
+        ]
+    )
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+
+    alert = tab._build_startup_deadline_alert()
+
+    assert alert is not None
+    title, message, has_overdue = alert
+    assert title == "Prazos de TCRA"
+    assert has_overdue is True
+    assert "Prazos vencidos: 1" in message
+    assert "TCRA-OVERDUE: 01/04/2026 (vencido há 2 dias)" in message
+    assert "Prazos que vencem nos próximos 30 dias: 1" in message
+    assert "TCRA-SOON: 10/04/2026 (vence em 7 dias)" in message
+    assert "TCRA-DONE" not in message
+    assert "registros" not in message.lower()
+
+
+def test_tcra_tab_startup_deadline_alert_waits_for_main_window_ready(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid="tcra-overdue",
+                numero_tcra="TCRA-OVERDUE",
+                prazo_final=date(2026, 4, 1),
+                data_proximo_relatorio=None,
+            )
+        ]
+    )
+    parent = QWidget()
+    parent._startup_close_guard_active = True
+    parent.show()
+    get_app().processEvents()
+    tab = TcraTab(parent=parent, sqlite_service=service, today=date(2026, 4, 3))
+    tab.all_tcras = service.list_tcras()
+    captured = []
+
+    monkeypatch.setattr(
+        tcra_tab_module.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: captured.append(args[2] if len(args) > 2 else ""),
+    )
+
+    tab._show_startup_deadline_alert()
+
+    assert captured == []
+    assert tab._startup_deadline_alert_shown is False
+
+    parent._startup_close_guard_active = False
+    tab._show_startup_deadline_alert()
+
+    assert captured
+    assert "TCRA-OVERDUE" in captured[-1]
+    assert tab._startup_deadline_alert_shown is True
 
 
 def test_tcra_tab_defers_initial_load_until_event_loop_runs(tmp_path):
@@ -385,7 +496,7 @@ def test_tcra_tab_preserves_dirty_form_when_reactivated(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_tcra_tab_new_tcra_switches_to_cadastro_workspace(tmp_path):
+def test_tcra_tab_new_tcra_switches_to_cadastro_workspace_and_keeps_form_visible(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
 
@@ -395,6 +506,32 @@ def test_tcra_tab_new_tcra_switches_to_cadastro_workspace(tmp_path):
     get_app().processEvents()
 
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
+    assert tab.workspace_tabs.tabText(2) == "Resumo"
+    assert tab.editor_tabs.currentIndex() == 0
+    assert tab.form_panel_body.isHidden() is False
+    assert tab.btn_toggle_form_panel.isChecked() is True
+    assert tab.editor_operational_panel.isHidden() is True
+
+
+def test_tcra_tab_cadastro_workspace_hides_form_toggle_and_keeps_form_open(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    tab.new_tcra()
+    get_app().processEvents()
+
+    assert tab.form_panel_body.isHidden() is False
+    assert tab.btn_toggle_form_panel.isHidden() is True
+    assert tab.btn_toggle_form_panel.text() == "Ocultar cadastro"
+    assert tab.editor_operational_panel.isHidden() is True
+
+
+def test_tcra_tab_summary_workspace_exposes_read_only_preview(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+
+    assert tab.workspace_tabs.indexOf(tab.summary_workspace_page) == 2
+    assert tab.details.isReadOnly() is True
 
 
 def test_tcra_tab_uses_calendar_date_inputs_in_form(tmp_path):
@@ -1238,9 +1375,10 @@ def test_tcra_tab_quality_queue_selects_record(tmp_path):
     assert tab.current_form_uid == "tcra-1"
     assert tab.in_local.text() == "Area Norte"
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
+    assert tab.form_panel_body.isHidden() is False
 
 
-def test_tcra_tab_open_selected_button_switches_to_cadastro(tmp_path):
+def test_tcra_tab_open_selected_button_switches_to_cadastro_and_keeps_form_visible(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     service.replace_all([make_tcra(uid="tcra-1")])
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
@@ -1261,6 +1399,10 @@ def test_tcra_tab_open_selected_button_switches_to_cadastro(tmp_path):
     get_app().processEvents()
 
     assert tab.workspace_tabs.tabText(tab.workspace_tabs.currentIndex()) == "Cadastro"
+    assert tab.editor_tabs.currentIndex() == 0
+    assert tab.form_panel_body.isHidden() is False
+    assert tab.btn_toggle_form_panel.isChecked() is True
+    assert tab.editor_operational_panel.isHidden() is True
 
 
 def test_tcra_tab_record_details_opens_in_dialog_without_side_panel(tmp_path, monkeypatch):

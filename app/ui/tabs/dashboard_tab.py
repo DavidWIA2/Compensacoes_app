@@ -25,11 +25,7 @@ from app.ui.components.widgets import KPICard
 from app.ui.tabs.dashboard_tab_support import (
     DashboardExportContext,
     build_compensation_chart_payload,
-    build_dashboard_agenda_summary_text,
     build_dashboard_context_text,
-    build_local_overview_text,
-    build_read_source_text,
-    build_record_integrity_overview_text,
     build_tcra_agenda_text,
     build_tcra_chart_payload,
     build_tcra_dashboard_export_context,
@@ -125,8 +121,6 @@ class DashboardTab(QWidget):
         self._build_tcra_page()
         self.scope_tabs.currentChanged.connect(self._ensure_current_scope_webview)
 
-        self.btn_open_operations.clicked.connect(self._open_operations_tab)
-        self.btn_open_tcra_agenda.clicked.connect(self._open_tcra_tab)
         self._apply_responsive_layout()
 
     def _current_root_dimensions(self) -> tuple[int, int]:
@@ -187,7 +181,7 @@ class DashboardTab(QWidget):
     def _resolve_card_max_height(self) -> int:
         compact_mode = self._is_compact_layout()
         short_mode = self._is_short_layout()
-        target_height = 34 if short_mode else 40 if compact_mode else 46
+        target_height = 44 if short_mode else 48 if compact_mode else 54
         return max(int(target_height * self.sf), 30)
 
     def _configure_compact_info_label(self, label: QLabel, *, max_height: int) -> None:
@@ -195,11 +189,6 @@ class DashboardTab(QWidget):
         label.setObjectName("FormStateLabel")
         label.setMaximumHeight(max_height)
         label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-
-    def _set_compensation_details_visible(self, visible: bool) -> None:
-        show_details = bool(visible)
-        self.compensation_details_panel.setVisible(show_details)
-        self.btn_toggle_comp_details.setText("Ocultar detalhes" if show_details else "Detalhes")
 
     def _refresh_compensation_summary(self) -> None:
         metrics = dict(self._last_metrics or {})
@@ -242,6 +231,7 @@ class DashboardTab(QWidget):
         self.card_comp = KPICard("Compensadas", "0", "#2e7d32", compact=True)
         self.card_records = KPICard("Total de processos", "0", "#ff9800", compact=True)
         for card in [self.card_total, self.card_pend, self.card_comp, self.card_records]:
+            card.setMinimumHeight(self._card_max_height)
             card.setMaximumHeight(self._card_max_height)
             cards_layout.addWidget(card)
         layout.addLayout(cards_layout)
@@ -251,61 +241,8 @@ class DashboardTab(QWidget):
         comp_summary_row.setSpacing(int(6 * self.sf))
         self.lbl_comp_summary = QLabel("Foco do recorte: aguardando a primeira leitura da base.")
         self._configure_compact_info_label(self.lbl_comp_summary, max_height=int(26 * self.sf))
-        self.btn_open_operations = QPushButton("Ir para Operações")
-        self.btn_open_operations.setProperty("kind", "chip-quiet")
-        self.btn_open_operations.setMinimumHeight(int(24 * self.sf))
-        self.btn_open_tcra_agenda = QPushButton("Abrir agenda TCRA")
-        self.btn_open_tcra_agenda.setProperty("kind", "chip-quiet")
-        self.btn_open_tcra_agenda.setMinimumHeight(int(24 * self.sf))
-        self.btn_toggle_comp_details = QPushButton("Detalhes")
-        self.btn_toggle_comp_details.setProperty("kind", "chip-quiet")
-        self.btn_toggle_comp_details.setMaximumWidth(int(104 * self.sf))
-        self.btn_toggle_comp_details.setMinimumHeight(int(24 * self.sf))
         comp_summary_row.addWidget(self.lbl_comp_summary, 1)
-        comp_summary_row.addWidget(self.btn_open_operations, 0)
-        comp_summary_row.addWidget(self.btn_open_tcra_agenda, 0)
-        comp_summary_row.addWidget(self.btn_toggle_comp_details, 0)
         layout.addLayout(comp_summary_row)
-
-        self.compensation_details_panel = QWidget(self.comp_page)
-        self.compensation_details_panel.setProperty("panel", "subtle")
-        details_layout = QVBoxLayout(self.compensation_details_panel)
-        details_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
-        details_layout.setSpacing(int(4 * self.sf))
-        details_title = QLabel("Checklist operacional")
-        details_title.setProperty("role", "sidebar-title")
-        details_caption = QLabel("Use este bloco para validar cache, integridade cadastral e foco do dia antes de agir.")
-        details_caption.setProperty("role", "sidebar-helper")
-        details_caption.setWordWrap(True)
-        details_layout.addWidget(details_title)
-        details_layout.addWidget(details_caption)
-        self.btn_toggle_comp_details.clicked.connect(
-            lambda: self._set_compensation_details_visible(not self.compensation_details_panel.isVisible())
-        )
-
-        self.lbl_local_overview = QLabel(
-            "Resumo local (SQLite): carregue uma base para acompanhar a qualidade dos dados."
-        )
-        self._configure_compact_info_label(self.lbl_local_overview, max_height=int(34 * self.sf))
-        details_layout.addWidget(self.lbl_local_overview)
-
-        self.lbl_record_integrity = QLabel(
-            "Integridade cadastral: a validação estrutural aparecerá após a leitura da base."
-        )
-        self._configure_compact_info_label(self.lbl_record_integrity, max_height=int(40 * self.sf))
-        details_layout.addWidget(self.lbl_record_integrity)
-
-        self.lbl_read_source = QLabel(
-            "Leitura operacional atual: aguardando a leitura inicial da base."
-        )
-        self._configure_compact_info_label(self.lbl_read_source, max_height=int(34 * self.sf))
-        details_layout.addWidget(self.lbl_read_source)
-
-        self.lbl_agenda_summary = QLabel("Foco do dia: aguardando a leitura inicial.")
-        self._configure_compact_info_label(self.lbl_agenda_summary, max_height=int(34 * self.sf))
-        details_layout.addWidget(self.lbl_agenda_summary)
-        layout.addWidget(self.compensation_details_panel)
-        self._set_compensation_details_visible(False)
 
         self.comp_web_host = self._build_dashboard_host("compensacoes")
         layout.addWidget(self.comp_web_host, 1)
@@ -339,6 +276,7 @@ class DashboardTab(QWidget):
         self.card_tcra_proximos = KPICard("Próx. 30 dias", "0", "#fb8c00", compact=True)
         self.card_tcra_cumpridos = KPICard("Cumpridos", "0", "#3949ab", compact=True)
         for card in [self.card_tcra_total, self.card_tcra_alertas, self.card_tcra_proximos, self.card_tcra_cumpridos]:
+            card.setMinimumHeight(self._card_max_height)
             card.setMaximumHeight(self._card_max_height)
             cards_layout.addWidget(card)
         layout.addLayout(cards_layout)
@@ -407,14 +345,11 @@ class DashboardTab(QWidget):
             self.card_tcra_proximos,
             self.card_tcra_cumpridos,
         ]:
+            card.setMinimumHeight(self._card_max_height)
             card.setMaximumHeight(self._card_max_height)
 
         self.lbl_comp_summary.setMaximumHeight(max(int((22 if short_mode else 26) * self.sf), 20))
         self.lbl_tcra_summary.setMaximumHeight(max(int((24 if short_mode else 28) * self.sf), 22))
-        self.lbl_local_overview.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
-        self.lbl_record_integrity.setMaximumHeight(max(int((34 if short_mode else 40) * self.sf), 26))
-        self.lbl_read_source.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
-        self.lbl_agenda_summary.setMaximumHeight(max(int((28 if short_mode else 34) * self.sf), 24))
         self.lbl_tcra_agenda.setMaximumHeight(max(int((24 if short_mode else 30) * self.sf), 22))
 
         self.comp_web_host.setMinimumHeight(self._chart_min_height)
@@ -429,9 +364,6 @@ class DashboardTab(QWidget):
         placeholder_container = getattr(self, "tcra_web_placeholder_container", None)
         if placeholder_container is not None:
             placeholder_container.setMinimumHeight(self._chart_min_height)
-
-        if compact_mode and self.compensation_details_panel.isVisible():
-            self._set_compensation_details_visible(False)
 
     def _build_dashboard_host(self, kind: str) -> QWidget:
         host = QWidget(self)
@@ -544,9 +476,6 @@ class DashboardTab(QWidget):
         self.lbl_panel_context.setText(
             build_dashboard_context_text(m, record_read_status, record_integrity_report)
         )
-        self.lbl_local_overview.setText(build_local_overview_text(record_overview))
-        self.lbl_record_integrity.setText(build_record_integrity_overview_text(record_integrity_report))
-        self.lbl_read_source.setText(build_read_source_text(record_read_status))
 
         payload = build_compensation_chart_payload(
             m,
@@ -556,7 +485,6 @@ class DashboardTab(QWidget):
         self._last_chart_payload["compensacoes"] = payload
         if self._page_loaded["compensacoes"]:
             self._send_to_js("compensacoes", payload)
-        self._refresh_agenda_summary()
 
     def update_tcra_overview(
         self,
@@ -587,20 +515,6 @@ class DashboardTab(QWidget):
         self._last_chart_payload["tcra"] = payload
         if self._page_loaded["tcra"]:
             self._send_to_js("tcra", payload)
-        self._refresh_agenda_summary()
-
-    def _refresh_agenda_summary(self):
-        self.lbl_agenda_summary.setText(
-            build_dashboard_agenda_summary_text(
-                self._last_metrics,
-                self._last_tcra_overview,
-                self._last_tcra_agenda,
-            )
-        )
-
-    def _open_operations_tab(self):
-        if getattr(self.main_window, "tabs", None) is not None:
-            self.main_window.tabs.setCurrentWidget(getattr(self.main_window, "operations_tab", self))
 
     def _open_tcra_tab(self):
         if getattr(self.main_window, "tabs", None) is None:

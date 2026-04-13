@@ -19,5 +19,6 @@ tcra_test_run*.log
 tmp_tcra_debug.db*
 data/audit/
 data/state/
+data/geocode_cache.json
 .env.supabase
 supabase/.temp/

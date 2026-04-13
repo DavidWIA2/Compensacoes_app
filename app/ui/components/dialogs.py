@@ -90,7 +90,7 @@ from app.ui.components.table_fullscreen_dialog_support import (
     resolve_fullscreen_visible_columns,
     restore_fullscreen_table_layout,
 )
-from app.ui.components.widgets import CheckableComboBox, MapBridge, DebugPage
+from app.ui.components.widgets import CheckableComboBox, ClickableComboBox, MapBridge, DebugPage
 from app.services.geocode_service import geocode_address_arcgis
 from app.services.plantio_service import clone_plantios
 from app.utils.logger import get_logger
@@ -189,7 +189,7 @@ class ImportPreviewDialog(QDialog):
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
-        self.filter_status = QComboBox(self)
+        self.filter_status = ClickableComboBox(self)
         self.filter_status.addItems(list(self.presentation.status_options))
         self.search_input = QLineEdit(self)
         self.search_input.setClearButtonEnabled(True)
@@ -301,11 +301,11 @@ class OperationHistoryDialog(QDialog):
 
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
-        self.filter_action = QComboBox(self)
+        self.filter_action = ClickableComboBox(self)
         self.filter_action.addItems(list(self.presenter.build_action_items(self.events)))
-        self.filter_backup = QComboBox(self)
+        self.filter_backup = ClickableComboBox(self)
         self.filter_backup.addItems(list(BACKUP_FILTER_OPTIONS))
-        self.filter_period = QComboBox(self)
+        self.filter_period = ClickableComboBox(self)
         self.filter_period.addItems(list(PERIOD_FILTER_OPTIONS))
         self.search_input = QLineEdit(self)
         self.search_input.setClearButtonEnabled(True)
@@ -890,7 +890,7 @@ class TcraImportPreviewDialog(QDialog):
 
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(8)
-        self.filter_severity = QComboBox(self)
+        self.filter_severity = ClickableComboBox(self)
         self.filter_severity.addItems(["Todas", "warning", "info"])
         self.search_input = QLineEdit(self)
         self.search_input.setClearButtonEnabled(True)
@@ -1369,8 +1369,8 @@ class TableFullScreenDialog(QDialog):
         self.btn_clear_filters_fs = None
 
         if self._has_filter_source:
-            self.filter_status_fs = QComboBox()
-            self.filter_year_fs = QComboBox()
+            self.filter_status_fs = ClickableComboBox()
+            self.filter_year_fs = ClickableComboBox()
             self.filter_micro_fs = CheckableComboBox(parent.data_tab.filter_micro._all_label)
             self.filter_eletronico_fs = CheckableComboBox(parent.data_tab.filter_eletronico._all_label)
             self.btn_clear_filters_fs = QPushButton("Limpar Filtros")

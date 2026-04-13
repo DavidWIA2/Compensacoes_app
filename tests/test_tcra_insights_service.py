@@ -67,7 +67,8 @@ def test_sla_queue_and_summary_capture_overdue_items():
     assert due_today_profile.status == "due_today"
     assert queue[0].uid == "tcra-overdue"
     assert summary.total_items == 2
-    assert "SLA" in summary.summary_text
+    assert "Prazo interno de tratamento" in summary.summary_text
+    assert "Prazo interno de tratamento" in overdue_profile.summary
 
 
 def test_duplicate_detection_flags_similar_context():

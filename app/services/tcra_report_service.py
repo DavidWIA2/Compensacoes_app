@@ -74,8 +74,8 @@ def _build_summary_rows(records: Sequence[Tcra], *, today: date | None = None) -
         ("Relacionados ao MPSP", metrics["count_mpsp_relacionados"]),
         ("Sem número TCRA", metrics["count_sem_numero_tcra"]),
         ("Sem responsável", metrics["count_sem_responsavel"]),
-        ("SLA atrasado", sla_summary.overdue_count),
-        ("SLA escalado", sla_summary.escalated_count),
+        ("Prazo interno atrasado", sla_summary.overdue_count),
+        ("Prazo interno escalado", sla_summary.escalated_count),
         ("Maior carga", workload_text),
         ("Com eventos", overview.com_eventos_count),
     ]

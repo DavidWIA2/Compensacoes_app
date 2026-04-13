@@ -225,7 +225,7 @@ def build_record_panel_data(record: Tcra, *, today: date) -> TcraRecordPanelData
     details_lines = [
         f"Prioridade: {priority_label}",
         f"Próxima ação: {next_action}",
-        f"SLA operacional: {sla_profile.summary}",
+        f"Prazo interno de tratamento: {sla_profile.summary}",
         "",
         f"Processo: {record.numero_processo or '--'}",
         f"TCRA: {record.numero_tcra or '--'}",

@@ -32,6 +32,7 @@ from app.services.audit_service import (
     format_audit_timestamp,
 )
 from app.ui.components.widgets import KPICard
+from app.ui.components.widgets import ClickableComboBox
 from app.ui.tabs.operations_tab_support import (
     build_authoritative_write_text,
     build_backup_status_text,
@@ -221,9 +222,9 @@ class OperationsTab(QWidget):
 
         filters_layout = QHBoxLayout()
         filters_layout.setSpacing(int(6 * self.sf))
-        self.filter_action = QComboBox(self)
+        self.filter_action = ClickableComboBox(self)
         self.filter_action.addItem("Todas")
-        self.filter_backup = QComboBox(self)
+        self.filter_backup = ClickableComboBox(self)
         self.filter_backup.addItems(["Todos", "Com backup disponível", "Com backup configurado", "Sem backup"])
         self.search_input = QLineEdit(self)
         self.search_input.setClearButtonEnabled(True)

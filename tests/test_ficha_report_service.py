@@ -37,10 +37,10 @@ def test_build_ficha_rows_include_observation():
     assert ["Observações:", "Linha 1\nLinha 2", "", ""] in rows
 
 
-def test_ficha_logo_prefers_app_brand_asset():
+def test_ficha_logo_prefers_prefeitura_asset():
     logo_path = _resolve_ficha_logo_path().replace("\\", "/")
 
-    assert logo_path.endswith("assets/icons/pga_icon_clean_512.png")
+    assert logo_path.endswith("assets/logo_prefeitura.png")
 
 
 def test_export_individual_pdf_generates_file_with_header_and_observation(tmp_path):

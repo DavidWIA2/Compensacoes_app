@@ -9,6 +9,7 @@ def test_export_dashboard_pdf_uses_tcra_dashboard_context(monkeypatch, tmp_path)
 
     class DummyWindow:
         def __init__(self):
+            self.access_session = SimpleNamespace(user_email="david.oliveira@saocarlos.sp.gov.br")
             self.settings_controller = SimpleNamespace(preferred_export_dir=lambda: str(tmp_path))
             self.dash_tab = SimpleNamespace(
                 current_export_context=lambda: DashboardExportContext(
@@ -30,13 +31,14 @@ def test_export_dashboard_pdf_uses_tcra_dashboard_context(monkeypatch, tmp_path)
 
     monkeypatch.setattr(
         "app.ui.controllers.export_controller.export_dashboard_pdf",
-        lambda path, titulo, kpi_lines, filtros_txt, chart_images: captured.update(
+        lambda path, titulo, kpi_lines, filtros_txt, chart_images, emitted_by="": captured.update(
             {
                 "path": path,
                 "titulo": titulo,
                 "kpi_lines": list(kpi_lines),
                 "filtros_txt": filtros_txt,
                 "chart_images": list(chart_images),
+                "emitted_by": emitted_by,
             }
         ),
     )
@@ -52,3 +54,4 @@ def test_export_dashboard_pdf_uses_tcra_dashboard_context(monkeypatch, tmp_path)
     assert captured["kpi_lines"] == ["Total de TCRAs: 18", "Alertas: 5"]
     assert captured["filtros_txt"] == "Agenda TCRA: Prazo vencido: TCRA-2024-001"
     assert captured["chart_images"] == ["pie.png", "bar.png"]
+    assert captured["emitted_by"] == "david.oliveira"

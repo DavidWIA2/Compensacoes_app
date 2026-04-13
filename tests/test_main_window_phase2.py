@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6 import QtWidgets
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
@@ -51,6 +51,19 @@ class MockDashboardTab(QtWidgets.QWidget):
         return "pie.png", "bar.png"
 
 
+class NoopUpdaterWorker(QThread):
+    update_available = Signal(str, str)
+
+    def start(self, *args, **kwargs):
+        return None
+
+    def quit(self):
+        return None
+
+    def wait(self, *args, **kwargs):
+        return True
+
+
 def get_app():
     return QApplication.instance() or QApplication([])
 
@@ -86,6 +99,7 @@ def phase2_mocks(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.ui.tabs.data_tab.QWebEngineView", MockQWebEngineView)
     monkeypatch.setattr("app.ui.main_window.DashboardTab", MockDashboardTab)
+    monkeypatch.setattr(main_window_module, "UpdaterWorker", NoopUpdaterWorker)
     monkeypatch.setattr(MainWindow, "_apply_theme", lambda self: None)
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: None)

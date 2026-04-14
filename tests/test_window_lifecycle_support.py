@@ -80,6 +80,8 @@ def test_window_lifecycle_support_runs_startup_sequence_in_order():
         _update_form_action_buttons=lambda: calls.append("_update_form_action_buttons"),
         _update_address_search_enabled=lambda: calls.append("_update_address_search_enabled"),
         _refresh_window_chrome=lambda: calls.append("_refresh_window_chrome"),
+        _on_tab_changed=lambda index: calls.append(("_on_tab_changed", index)),
+        tabs=SimpleNamespace(currentIndex=lambda: 3),
         refresh_operations_overview=lambda: calls.append("refresh_operations_overview"),
         setWindowModified=lambda modified: calls.append(("setWindowModified", modified)),
         statusBar=lambda: SimpleNamespace(showMessage=lambda message: status_messages.append(message)),
@@ -89,6 +91,7 @@ def test_window_lifecycle_support_runs_startup_sequence_in_order():
 
     assert calls[:4] == ["_setup_menus", "_load_settings", "_connect_signals", "_setup_shortcuts"]
     assert "_load_last_session" in calls
+    assert ("_on_tab_changed", 3) in calls
     assert ("setWindowModified", False) in calls
     assert timer_starts == [0]
     assert status_messages == ["Pronto"]

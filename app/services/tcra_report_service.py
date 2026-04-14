@@ -1,6 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
+from functools import partial
 from typing import Any, Sequence
 from xml.sax.saxutils import escape
 
@@ -10,9 +12,12 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.tcra import Tcra
+from app.services.report_service import _build_pdf_header, _draw_pdf_page_frame
+from app.services.report_service_support import build_report_metadata_rows
 from app.services.tcra_insights_service import build_sla_summary, build_workload_snapshot
 from app.services.tcra_records_service import (
     AGENDA_SCOPE_30D,
@@ -28,6 +33,49 @@ from app.services.tcra_records_service import (
     suggest_issue_fix,
     tcra_is_mpsp_related,
 )
+
+
+TCRA_PDF_REPORT_TITLE = "Relat\u00f3rio Operacional de TCRAs"
+TCRA_PDF_SOURCE_LABEL = "Base operacional de TCRAs"
+
+
+@dataclass(frozen=True)
+class TcraPdfExportOptions:
+    include_summary: bool = True
+    include_current_records: bool = True
+    include_upcoming_reports: bool = True
+    include_quality_queue: bool = False
+    include_critical_agenda: bool = True
+    include_agenda_7d: bool = False
+    include_agenda_30d: bool = False
+    include_inbox: bool = False
+
+    @classmethod
+    def empty_selection(cls) -> "TcraPdfExportOptions":
+        return cls(
+            include_summary=False,
+            include_current_records=False,
+            include_upcoming_reports=False,
+            include_quality_queue=False,
+            include_critical_agenda=False,
+            include_agenda_7d=False,
+            include_agenda_30d=False,
+            include_inbox=False,
+        )
+
+    def has_any_section(self) -> bool:
+        return any(
+            (
+                self.include_summary,
+                self.include_current_records,
+                self.include_upcoming_reports,
+                self.include_quality_queue,
+                self.include_critical_agenda,
+                self.include_agenda_7d,
+                self.include_agenda_30d,
+                self.include_inbox,
+            )
+        )
 
 
 HEADER_FILL = PatternFill(start_color="D9EAF7", end_color="D9EAF7", fill_type="solid")
@@ -215,6 +263,190 @@ def _build_pdf_table(
         )
     )
     return table
+
+
+def _build_tcra_pdf_elements(
+    records: Sequence[Tcra],
+    *,
+    filter_summary: str,
+    content_width: float,
+    styles,
+    today: date | None = None,
+    options: TcraPdfExportOptions | None = None,
+):
+    export_options = options or TcraPdfExportOptions()
+    normal_style = styles["Normal"]
+    normal_style.fontSize = 8
+    table_header_style = ParagraphStyle(
+        "TcraPdfHeaderResponsive",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        textColor=colors.whitesmoke,
+        alignment=1,
+        leading=8,
+    )
+    table_cell_style = ParagraphStyle(
+        "TcraPdfCellResponsive",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=9,
+        alignment=0,
+    )
+    section_title = ParagraphStyle(
+        "TcraPdfSectionTitle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor("#143A5A"),
+        spaceAfter=6,
+    )
+    metadata_rows = build_report_metadata_rows(
+        filter_summary,
+        source_label=TCRA_PDF_SOURCE_LABEL,
+    )
+    elements = list(_build_pdf_header(styles, title=TCRA_PDF_REPORT_TITLE, metadata_rows=metadata_rows))
+
+    if export_options.include_summary:
+        elements.extend(
+            [
+                Paragraph("Resumo do Relat\u00f3rio", section_title),
+                _build_pdf_table(
+                    headers=["Indicador", "Valor"],
+                    rows=[[label, str(value)] for label, value in _build_summary_rows(records, today=today)],
+                    total_width=min(content_width * 0.50, 360),
+                    column_weights=[0.68, 0.32],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#1F4E78"),
+                    centered_columns=[1],
+                ),
+                Spacer(1, 0.15 * inch),
+            ]
+        )
+
+    overview = build_record_overview(records, today=today)
+    if export_options.include_upcoming_reports and overview.upcoming_reports:
+        elements.extend(
+            [
+                Paragraph("Pr\u00f3ximos relat\u00f3rios", section_title),
+                _build_pdf_table(
+                    headers=["Termo", "Data"],
+                    rows=[
+                        [
+                            _stringify(sample.numero_tcra or sample.numero_processo or sample.local),
+                            _format_date(sample.data_proximo_relatorio),
+                        ]
+                        for sample in overview.upcoming_reports
+                    ],
+                    total_width=min(content_width * 0.48, 360),
+                    column_weights=[0.72, 0.28],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#4F81BD"),
+                    centered_columns=[1],
+                ),
+                Spacer(1, 0.15 * inch),
+            ]
+        )
+
+    quality_queue = build_quality_queue(records, today=today, limit=6)
+    if export_options.include_quality_queue and quality_queue:
+        elements.extend(
+            [
+                Paragraph("Qualidade cadastral", section_title),
+                _build_pdf_table(
+                    headers=["Severidade", "Termo", "Local", "Revis\u00e3o", "Sugest\u00e3o"],
+                    rows=[
+                        [
+                            item.severity_label,
+                            item.termo_label,
+                            item.local,
+                            item.detalhe,
+                            suggest_issue_fix(item.issues[0]) if item.issues else "",
+                        ]
+                        for item in quality_queue
+                    ],
+                    total_width=content_width,
+                    column_weights=[0.12, 0.14, 0.20, 0.27, 0.27],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#8B3D3D"),
+                ),
+                Spacer(1, 0.15 * inch),
+            ]
+        )
+
+    agenda_sections = []
+    if export_options.include_critical_agenda:
+        agenda_sections.append(("Pend\u00eancias cr\u00edticas", AGENDA_SCOPE_VENCIDOS, colors.HexColor("#4F81BD")))
+    if export_options.include_agenda_7d:
+        agenda_sections.append(("Agenda de trabalho - 7 dias", AGENDA_SCOPE_7D, colors.HexColor("#6C8EAD")))
+    if export_options.include_agenda_30d:
+        agenda_sections.append(("Agenda de trabalho - 30 dias", AGENDA_SCOPE_30D, colors.HexColor("#4F81BD")))
+    if export_options.include_inbox:
+        agenda_sections.append(("Inbox operacional", AGENDA_SCOPE_PENDENTES, colors.HexColor("#3E6488")))
+
+    for title, scope, header_color in agenda_sections:
+        rows = _agenda_section_rows(records, scope=scope, today=today, limit=6)
+        if not rows:
+            continue
+        elements.extend(
+            [
+                Paragraph(title, section_title),
+                _build_pdf_table(
+                    headers=["Prioridade", "Termo", "Local", "A\u00e7\u00e3o"],
+                    rows=[list(row) for row in rows],
+                    total_width=content_width,
+                    column_weights=[0.12, 0.15, 0.23, 0.50],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=header_color,
+                ),
+                Spacer(1, 0.15 * inch),
+            ]
+        )
+
+    if export_options.include_current_records:
+        record_rows = [
+            [
+                _stringify(record.numero_processo),
+                _stringify(record.numero_tcra),
+                _stringify(record.local),
+                resolve_operational_status(record, today=today),
+                _format_date(record.prazo_final),
+                _format_date(record.data_proximo_relatorio),
+                _stringify(record.orgao_acompanhamento),
+                _stringify(record.responsavel_execucao),
+            ]
+            for record in records
+        ]
+        elements.extend(
+            [
+                Paragraph("Recorte atual de TCRAs", section_title),
+                _build_pdf_table(
+                    headers=[
+                        "Processo",
+                        "TCRA",
+                        "Local",
+                        "Status",
+                        "Prazo",
+                        "Pr\u00f3x. rel.",
+                        "\u00d3rg\u00e3o",
+                        "Resp.",
+                    ],
+                    rows=record_rows,
+                    total_width=content_width,
+                    column_weights=[0.11, 0.10, 0.25, 0.13, 0.09, 0.10, 0.10, 0.12],
+                    header_style=table_header_style,
+                    cell_style=table_cell_style,
+                    header_background=colors.HexColor("#1F4E78"),
+                ),
+            ]
+        )
+
+    return elements
 
 
 def _append_labeled_section(
@@ -658,160 +890,42 @@ def export_tcra_pdf_report(
     *,
     filter_summary: str,
     today: date | None = None,
+    options: TcraPdfExportOptions | None = None,
+    emitted_by: str = "",
 ) -> None:
+    export_options = options or TcraPdfExportOptions()
+    if not export_options.has_any_section():
+        raise ValueError("Selecione ao menos um bloco para exportar no PDF de TCRAs.")
+
     document = SimpleDocTemplate(
         path,
         pagesize=landscape(A4),
-        leftMargin=20,
-        rightMargin=20,
-        topMargin=20,
-        bottomMargin=18,
+        rightMargin=22,
+        leftMargin=22,
+        topMargin=22,
+        bottomMargin=26,
     )
-    content_width = document.width
-    styles = getSampleStyleSheet()
-    title_style = styles["Title"]
-    title_style.fontSize = 14
-    normal_style = styles["Normal"]
-    normal_style.fontSize = 8
-    table_header_style = ParagraphStyle(
-        "TcraPdfHeaderResponsive",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        textColor=colors.whitesmoke,
-        alignment=1,
-        leading=8,
+    generated_label = datetime.now().strftime("%d/%m/%Y %H:%M")
+    elements = _build_tcra_pdf_elements(
+        records,
+        filter_summary=filter_summary,
+        content_width=document.width,
+        styles=getSampleStyleSheet(),
+        today=today,
+        options=export_options,
     )
-    table_cell_style = ParagraphStyle(
-        "TcraPdfCellResponsive",
-        parent=styles["Normal"],
-        fontSize=7,
-        leading=9,
-        alignment=0,
-    )
-
-    elements = [
-        Paragraph("Relatório Operacional de TCRAs", title_style),
-        Spacer(1, 8),
-        Paragraph(f"<b>Filtros:</b> {_pdf_text(filter_summary, empty_placeholder='Nenhum')}", normal_style),
-        Spacer(1, 8),
-        _build_pdf_table(
-            headers=["Indicador", "Valor"],
-            rows=[[label, str(value)] for label, value in _build_summary_rows(records, today=today)],
-            total_width=min(content_width * 0.50, 360),
-            column_weights=[0.68, 0.32],
-            header_style=table_header_style,
-            cell_style=table_cell_style,
-            header_background=colors.HexColor("#1F4E78"),
-            centered_columns=[1],
+    document.build(
+        elements,
+        onFirstPage=partial(
+            _draw_pdf_page_frame,
+            title=TCRA_PDF_REPORT_TITLE,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
         ),
-        Spacer(1, 10),
-    ]
-
-    overview = build_record_overview(records, today=today)
-    if overview.upcoming_reports:
-        elements.extend(
-            [
-                Paragraph("<b>Próximos relatórios</b>", normal_style),
-                _build_pdf_table(
-                    headers=["Termo", "Data"],
-                    rows=[
-                        [
-                            _stringify(sample.numero_tcra or sample.numero_processo or sample.local),
-                            _format_date(sample.data_proximo_relatorio),
-                        ]
-                        for sample in overview.upcoming_reports
-                    ],
-                    total_width=min(content_width * 0.48, 360),
-                    column_weights=[0.72, 0.28],
-                    header_style=table_header_style,
-                    cell_style=table_cell_style,
-                    header_background=colors.HexColor("#4F81BD"),
-                    centered_columns=[1],
-                ),
-                Spacer(1, 10),
-            ]
-        )
-
-    quality_queue = build_quality_queue(records, today=today, limit=6)
-    if quality_queue:
-        elements.extend(
-            [
-                Paragraph("<b>Qualidade cadastral</b>", normal_style),
-                _build_pdf_table(
-                    headers=["Severidade", "Termo", "Local", "Revisão", "Sugestão"],
-                    rows=[
-                        [
-                            item.severity_label,
-                            item.termo_label,
-                            item.local,
-                            item.detalhe,
-                            suggest_issue_fix(item.issues[0]) if item.issues else "",
-                        ]
-                        for item in quality_queue
-                    ],
-                    total_width=content_width,
-                    column_weights=[0.12, 0.14, 0.20, 0.27, 0.27],
-                    header_style=table_header_style,
-                    cell_style=table_cell_style,
-                    header_background=colors.HexColor("#8B3D3D"),
-                ),
-                Spacer(1, 10),
-            ]
-        )
-
-    agenda_sections = [
-        ("<b>Pendências críticas</b>", AGENDA_SCOPE_VENCIDOS, colors.HexColor("#4F81BD")),
-        ("<b>Agenda de trabalho - 7 dias</b>", AGENDA_SCOPE_7D, colors.HexColor("#6C8EAD")),
-        ("<b>Agenda de trabalho - 30 dias</b>", AGENDA_SCOPE_30D, colors.HexColor("#4F81BD")),
-        ("<b>Inbox operacional</b>", AGENDA_SCOPE_PENDENTES, colors.HexColor("#3E6488")),
-    ]
-    for title, scope, header_color in agenda_sections:
-        rows = _agenda_section_rows(records, scope=scope, today=today, limit=6)
-        if not rows:
-            continue
-        elements.extend(
-            [
-                Paragraph(title, normal_style),
-                _build_pdf_table(
-                    headers=["Prioridade", "Termo", "Local", "Ação"],
-                    rows=[list(row) for row in rows],
-                    total_width=content_width,
-                    column_weights=[0.12, 0.15, 0.23, 0.50],
-                    header_style=table_header_style,
-                    cell_style=table_cell_style,
-                    header_background=header_color,
-                ),
-                Spacer(1, 10),
-            ]
-        )
-
-    record_rows = [
-        [
-            _stringify(record.numero_processo),
-            _stringify(record.numero_tcra),
-            _stringify(record.local),
-            resolve_operational_status(record, today=today),
-            _format_date(record.prazo_final),
-            _format_date(record.data_proximo_relatorio),
-            _stringify(record.orgao_acompanhamento),
-            _stringify(record.responsavel_execucao),
-        ]
-        for record in records
-    ]
-    elements.extend(
-        [
-            Paragraph("<b>Recorte atual de TCRAs</b>", normal_style),
-            _build_pdf_table(
-                headers=["Processo", "TCRA", "Local", "Status", "Prazo", "Próx. rel.", "Órgão", "Resp."],
-                rows=record_rows,
-                total_width=content_width,
-                column_weights=[0.14, 0.13, 0.26, 0.14, 0.10, 0.11, 0.12, 0.15],
-                header_style=table_header_style,
-                cell_style=table_cell_style,
-                header_background=colors.HexColor("#1F4E78"),
-                centered_columns=[4, 5],
-            ),
-        ]
+        onLaterPages=partial(
+            _draw_pdf_page_frame,
+            title=TCRA_PDF_REPORT_TITLE,
+            generated_label=generated_label,
+            emitted_by=emitted_by,
+        ),
     )
-    document.build(elements)

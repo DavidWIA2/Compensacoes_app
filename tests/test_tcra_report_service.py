@@ -1,11 +1,18 @@
 from datetime import date
 
 from openpyxl import load_workbook
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph
 
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
-from app.services.tcra_report_service import _build_pdf_table, export_tcra_excel_report, export_tcra_pdf_report
+from app.services.tcra_report_service import (
+    TcraPdfExportOptions,
+    _build_pdf_table,
+    _build_tcra_pdf_elements,
+    export_tcra_excel_report,
+    export_tcra_pdf_report,
+)
 
 
 def make_tcra(**overrides) -> Tcra:
@@ -95,6 +102,64 @@ def test_export_tcra_pdf_report_creates_non_empty_file(tmp_path):
 
     assert export_path.exists() is True
     assert export_path.stat().st_size > 0
+
+
+def test_build_tcra_pdf_elements_respects_selected_sections():
+    records = [make_tcra(uid="tcra-1")]
+
+    elements = _build_tcra_pdf_elements(
+        records,
+        filter_summary="Busca: nenhuma | Status: Todos",
+        content_width=720,
+        styles=getSampleStyleSheet(),
+        today=date(2026, 4, 3),
+        options=TcraPdfExportOptions(
+            include_summary=True,
+            include_current_records=True,
+            include_upcoming_reports=False,
+            include_quality_queue=False,
+            include_critical_agenda=False,
+            include_agenda_7d=False,
+            include_agenda_30d=False,
+            include_inbox=False,
+        ),
+    )
+
+    titles = [element.getPlainText() for element in elements if isinstance(element, Paragraph)]
+
+    assert "Resumo do Relatório" in titles
+    assert "Recorte atual de TCRAs" in titles
+    assert "Próximos relatórios" not in titles
+    assert "Qualidade cadastral" not in titles
+    assert "Inbox operacional" not in titles
+
+
+def test_export_tcra_pdf_report_requires_at_least_one_section(tmp_path):
+    export_path = tmp_path / "tcra-report-empty.pdf"
+
+    try:
+        export_tcra_pdf_report(
+            str(export_path),
+            [make_tcra(uid="tcra-1")],
+            filter_summary="Busca: nenhuma | Status: Todos",
+            today=date(2026, 4, 3),
+            options=TcraPdfExportOptions(
+                include_summary=False,
+                include_current_records=False,
+                include_upcoming_reports=False,
+                include_quality_queue=False,
+                include_critical_agenda=False,
+                include_agenda_7d=False,
+                include_agenda_30d=False,
+                include_inbox=False,
+            ),
+        )
+        raised = False
+    except ValueError as exc:
+        raised = True
+        assert "ao menos um bloco" in str(exc)
+
+    assert raised is True
 
 
 def test_build_pdf_table_uses_wrappable_paragraph_cells():

@@ -1,4 +1,3 @@
-
 import pytest
 
 from app.services.access_service import AccessEnvironment, AppAccessSession, SupabaseAccessProfile
@@ -6,6 +5,10 @@ from app.services.supabase_admin_users_service import (
     AdminUsersError,
     SupabaseAdminUsersService,
 )
+
+
+STRONG_PASSWORD = "SenhaSegura1!"
+UPDATED_STRONG_PASSWORD = "SenhaNova123!"
 
 
 class _FakeResponse:
@@ -127,7 +130,7 @@ def test_create_user_raises_backend_error_message(monkeypatch, production_profil
         service.create_user(
             admin_session,
             email="dup@prefeitura.sp.gov.br",
-            password="senha-segura",
+            password=STRONG_PASSWORD,
             display_name="Duplicado",
             role="editor",
         )
@@ -155,7 +158,7 @@ def test_bootstrap_first_admin_appends_default_corporate_domain(monkeypatch, pro
 
     user = service.bootstrap_first_admin(
         email="david.oliveira",
-        password="senha-segura",
+        password=STRONG_PASSWORD,
         display_name="Administrador",
     )
 
@@ -186,13 +189,110 @@ def test_create_user_appends_default_corporate_domain(monkeypatch, production_pr
     user = service.create_user(
         admin_session,
         email="novo.usuario",
-        password="senha-segura",
+        password=STRONG_PASSWORD,
         display_name="Novo Usuario",
         role="editor",
     )
 
     assert user.email == "novo.usuario@saocarlos.sp.gov.br"
     assert captured["json"]["email"] == "novo.usuario@saocarlos.sp.gov.br"
+
+
+def test_update_user_posts_update_action(monkeypatch, production_profile, admin_session):
+    captured = {}
+
+    def fake_request(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse(
+            payload={
+                "user": {
+                    "id": "user-1",
+                    "email": "corrigido@saocarlos.sp.gov.br",
+                    "display_name": "Nome Corrigido",
+                    "role": "editor",
+                    "is_active": True,
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.services.supabase_admin_users_service.requests.request", fake_request)
+    service = SupabaseAdminUsersService(production_profile=production_profile)
+
+    user = service.update_user(
+        admin_session,
+        user_id="user-1",
+        email="corrigido",
+        display_name="Nome Corrigido",
+    )
+
+    assert user.email == "corrigido@saocarlos.sp.gov.br"
+    assert user.display_name == "Nome Corrigido"
+    assert captured["json"] == {
+        "action": "update",
+        "user_id": "user-1",
+        "email": "corrigido@saocarlos.sp.gov.br",
+        "display_name": "Nome Corrigido",
+    }
+
+
+def test_update_user_falls_back_to_rpc_when_edge_function_rejects_update(
+    monkeypatch,
+    production_profile,
+    admin_session,
+):
+    rpc_calls = {}
+
+    class _FakeAuth:
+        def set_session(self, access_token, refresh_token):
+            rpc_calls["session"] = (access_token, refresh_token)
+
+    class _FakeRpcRequest:
+        def execute(self):
+            class _RpcResult:
+                data = {
+                    "id": "user-1",
+                    "email": "corrigido@saocarlos.sp.gov.br",
+                    "display_name": "Nome Corrigido",
+                    "role": "editor",
+                    "is_active": True,
+                }
+
+            return _RpcResult()
+
+    class _FakeClient:
+        def __init__(self):
+            self.auth = _FakeAuth()
+
+        def rpc(self, function_name, params=None):
+            rpc_calls["function_name"] = function_name
+            rpc_calls["params"] = params
+            return _FakeRpcRequest()
+
+    monkeypatch.setattr(
+        "app.services.supabase_admin_users_service.requests.request",
+        lambda **kwargs: _FakeResponse(status_code=400, payload={"error": "Acao administrativa invalida."}),
+    )
+    monkeypatch.setattr(
+        "app.services.supabase_admin_users_service.load_supabase_create_client",
+        lambda: (lambda url, key: _FakeClient()),
+    )
+    service = SupabaseAdminUsersService(production_profile=production_profile)
+
+    user = service.update_user(
+        admin_session,
+        user_id="user-1",
+        email="corrigido",
+        display_name="Nome Corrigido",
+    )
+
+    assert user.email == "corrigido@saocarlos.sp.gov.br"
+    assert rpc_calls["session"] == ("access-token", "refresh-token")
+    assert rpc_calls["function_name"] == "rpc_admin_update_user"
+    assert rpc_calls["params"] == {
+        "p_user_id": "user-1",
+        "p_email": "corrigido@saocarlos.sp.gov.br",
+        "p_display_name": "Nome Corrigido",
+    }
 
 
 def test_reset_user_password_posts_reset_action(monkeypatch, production_profile, admin_session):
@@ -218,15 +318,35 @@ def test_reset_user_password_posts_reset_action(monkeypatch, production_profile,
     user = service.reset_user_password(
         admin_session,
         user_id="user-1",
-        password="senha-nova-segura",
+        password=UPDATED_STRONG_PASSWORD,
     )
 
     assert user.user_id == "user-1"
     assert captured["json"] == {
         "action": "reset_password",
         "user_id": "user-1",
-        "password": "senha-nova-segura",
+        "password": UPDATED_STRONG_PASSWORD,
     }
+
+
+def test_create_user_rejects_weak_password_before_request(monkeypatch, production_profile, admin_session):
+    called = []
+    monkeypatch.setattr(
+        "app.services.supabase_admin_users_service.requests.request",
+        lambda **kwargs: called.append(kwargs),
+    )
+    service = SupabaseAdminUsersService(production_profile=production_profile)
+
+    with pytest.raises(AdminUsersError, match="letra maiuscula"):
+        service.create_user(
+            admin_session,
+            email="novo.usuario",
+            password="fraca123456!",
+            display_name="Novo Usuario",
+            role="editor",
+        )
+
+    assert called == []
 
 
 def test_set_user_role_posts_role_change_action(monkeypatch, production_profile, admin_session):

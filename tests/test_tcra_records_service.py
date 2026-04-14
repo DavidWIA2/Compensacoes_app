@@ -373,9 +373,9 @@ def test_tcra_work_agenda_scopes_and_issue_suggestions():
     agenda = build_operational_agenda(records, today=today, limit=10)
 
     assert [item.uid for item in filter_agenda_items_by_scope(agenda, scope=AGENDA_SCOPE_VENCIDOS, today=today)] == ["tcra-1"]
-    assert [item.uid for item in filter_agenda_items_by_scope(agenda, scope=AGENDA_SCOPE_HOJE, today=today)] == ["tcra-1", "tcra-3"]
-    assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_7D, today=today, limit=10)] == ["tcra-1", "tcra-2", "tcra-3"]
-    assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_30D, today=today, limit=10)] == ["tcra-1", "tcra-2", "tcra-3"]
+    assert [item.uid for item in filter_agenda_items_by_scope(agenda, scope=AGENDA_SCOPE_HOJE, today=today)] == ["tcra-1"]
+    assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_7D, today=today, limit=10)] == ["tcra-1", "tcra-2"]
+    assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_30D, today=today, limit=10)] == ["tcra-1", "tcra-2"]
     assert [item.uid for item in build_work_agenda(records, scope=AGENDA_SCOPE_PENDENTES, today=today, limit=10)] == ["tcra-3"]
 
     assert "número oficial" in suggest_issue_fix("Sem numero TCRA").lower()

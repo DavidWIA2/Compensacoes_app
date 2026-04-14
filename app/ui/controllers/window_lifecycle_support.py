@@ -62,5 +62,6 @@ def run_startup_sequence(window) -> None:
     window._update_form_action_buttons()
     window._update_address_search_enabled()
     window._refresh_window_chrome()
+    window._on_tab_changed(window.tabs.currentIndex())
     window.setWindowModified(False)
     window.statusBar().showMessage("Pronto")

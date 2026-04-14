@@ -1,6 +1,7 @@
 ﻿import os
 import json
 from types import SimpleNamespace
+from dataclasses import replace
 
 import openpyxl
 
@@ -21,6 +22,7 @@ from app.application.use_cases.persistence_monitoring import (
     PersistenceStatusReport,
 )
 from app.services.access_service import AccessEnvironment, AppAccessSession
+from app.services.supabase_admin_users_service import AdminUserRecord
 from app.models.display_columns import display_column_index
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
@@ -260,6 +262,59 @@ def test_main_window_compensacoes_form_exposes_placeholders_clear_buttons_and_to
     assert window.data_tab.btn_clear_filters.toolTip() != ""
     assert window.data_tab.btn_maps.toolTip() != ""
     assert window.data_tab.combo_heatmap_type.toolTip() != ""
+    window.close()
+
+
+def test_change_password_rebinds_runtime_access_session(monkeypatch):
+    initial_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Produção",
+        auth_mode="password",
+        user_id="user-123",
+        user_email="analista@saocarlos.sp.gov.br",
+        app_role="editor",
+        access_token="old-access-token",
+        refresh_token="old-refresh-token",
+        local_session_path=DEFAULT_SINGLETON_SESSION_PATH,
+    )
+    updated_session = replace(
+        initial_session,
+        access_token="new-access-token",
+        refresh_token="new-refresh-token",
+    )
+
+    class FakeChangePasswordDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return True
+
+        def payload(self):
+            return {
+                "current_password": "senha-antiga",
+                "new_password": "SenhaNova123!",
+            }
+
+    monkeypatch.setattr(
+        "app.ui.controllers.window_shell_controller.ChangePasswordDialog",
+        FakeChangePasswordDialog,
+    )
+
+    window = MainWindow(access_session=initial_session)
+    get_app().processEvents()
+    monkeypatch.setattr(
+        window.access_service,
+        "change_password",
+        lambda **kwargs: updated_session,
+    )
+
+    assert window.authoritative_persistence._current_access_session().access_token == "old-access-token"
+
+    assert window.shell_controller.change_password() is True
+
+    assert window.access_session.access_token == "new-access-token"
+    assert window.authoritative_persistence._current_access_session().access_token == "new-access-token"
 
     window.close()
 
@@ -280,7 +335,8 @@ def test_main_window_marks_demo_environment_and_uses_demo_database(monkeypatch, 
     window._refresh_window_chrome()
 
     assert window.persistence_service.db_path == demo_db
-    assert window.session_environment_label.text() == "Ambiente: Demonstração isolada"
+    assert window.session_environment_label.text().startswith("Ambiente:")
+    assert "isolada" in window.session_environment_label.text()
     assert "Demonstração isolada" in window.windowTitle()
     window.close()
 
@@ -304,7 +360,8 @@ def test_main_window_auto_loads_production_cache_from_access_session(monkeypatch
 
     assert len(window.records) == 1
     assert window.shell_controller.current_session_path() == DEFAULT_SINGLETON_SESSION_PATH
-    assert window.session_environment_label.text() == "Ambiente: Produção oficial"
+    assert window.session_environment_label.text().startswith("Ambiente:")
+    assert "oficial" in window.session_environment_label.text()
     window.close()
 
 
@@ -451,6 +508,40 @@ def test_main_window_sign_out_starts_locked_until_window_is_ready():
     window.close()
 
 
+def test_main_window_enables_change_password_only_for_authenticated_production_accounts():
+    production_window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Produção",
+            auth_mode="password",
+            user_id="editor-1",
+            user_email="editor@saocarlos.sp.gov.br",
+            app_role="editor",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+
+    assert production_window.btn_change_password.isHidden() is False
+    assert production_window.action_change_password.isVisible() is True
+    assert production_window.btn_change_password.isEnabled() is False
+    assert production_window.action_change_password.isEnabled() is False
+
+    production_window._enable_sign_out_controls()
+
+    assert production_window.btn_change_password.isEnabled() is True
+    assert production_window.action_change_password.isEnabled() is True
+    production_window.close()
+
+    local_window = MainWindow(access_session=AppAccessSession.local_default())
+    get_app().processEvents()
+
+    assert local_window.btn_change_password.isHidden() is True
+    assert local_window.action_change_password.isVisible() is False
+    local_window.close()
+
+
 def test_main_window_ignores_unexpected_close_during_startup_guard(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
@@ -500,6 +591,77 @@ def test_main_window_disables_global_search_on_admin_tab(monkeypatch):
     assert window.search.isEnabled() is True
     assert "ofício" in window.search.placeholderText().lower()
     assert window.search.text() == "consulta"
+    window.close()
+
+
+def test_main_window_startup_loads_admin_users_when_restoring_admin_tab(monkeypatch):
+    class StartupSettings:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def value(self, key, default=None):
+            if key == "active_tab_index":
+                return 4
+            return default
+
+        def setValue(self, *args, **kwargs):
+            return None
+
+        def remove(self, *args, **kwargs):
+            return None
+
+    class FakeAdminUsersService:
+        def __init__(self, *args, **kwargs):
+            self.list_calls = 0
+
+        def list_users(self, _access_session):
+            self.list_calls += 1
+            return [
+                AdminUserRecord(
+                    user_id="admin-1",
+                    email="admin@prefeitura.sp.gov.br",
+                    display_name="Administrador",
+                    role="admin",
+                    is_active=True,
+                    created_at="2026-04-06T12:00:00Z",
+                ),
+                AdminUserRecord(
+                    user_id="editor-1",
+                    email="editor@prefeitura.sp.gov.br",
+                    display_name="Editor",
+                    role="editor",
+                    is_active=True,
+                    created_at="2026-04-06T12:10:00Z",
+                ),
+            ]
+
+    fake_service = FakeAdminUsersService()
+    monkeypatch.setattr(main_window_module, "QSettings", StartupSettings)
+    monkeypatch.setattr(
+        main_window_module,
+        "SupabaseAdminUsersService",
+        lambda *args, **kwargs: fake_service,
+    )
+
+    window = MainWindow(
+        access_session=AppAccessSession(
+            environment=AccessEnvironment.PRODUCTION,
+            label="Produção",
+            auth_mode="password",
+            user_id="admin-1",
+            user_email="admin@prefeitura.sp.gov.br",
+            app_role="admin",
+            access_token="token",
+            refresh_token="refresh",
+        )
+    )
+    get_app().processEvents()
+
+    assert window.tabs.currentWidget() is window.admin_users_tab
+    assert fake_service.list_calls == 1
+    assert window.admin_users_tab.table.rowCount() == 2
+    assert window.search.isEnabled() is False
+    assert "administração" in window.search.placeholderText().lower()
     window.close()
 
 

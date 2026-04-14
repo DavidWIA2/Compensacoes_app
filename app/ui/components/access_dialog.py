@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
@@ -28,6 +28,7 @@ from app.config import (
 )
 from app.services.access_service import AccessAuthError, AppAccessSession, SupabaseAccessService
 from app.services.app_settings import AppSettings
+from app.services.password_policy import PASSWORD_POLICY_SUMMARY, password_validation_error
 from app.services.supabase_admin_users_service import AdminUsersError, SupabaseAdminUsersService
 from app.ui.components.ui_utils import build_app_icon, resource_path
 
@@ -47,6 +48,17 @@ QFrame#accessSection, QFrame#accessStatusPanel {
 }
 QFrame#accessSection { border-radius: 18px; }
 QFrame#accessStatusPanel { border-radius: 16px; }
+QFrame#accessStatusPanel[state="error"] {
+    background-color: rgba(255,241,241,0.96);
+    border: 1px solid rgba(194,63,63,0.28);
+}
+QFrame#accessStatusPanel[state="error"] QLabel#sectionTitle { color: #8f2f2f; }
+QFrame#accessStatusPanel[state="error"] QLabel#accessHint { color: #7d3838; font-weight: 600; }
+QFrame#accessStatusPanel[state="error"] QLabel#accessBadge {
+    color: #7d3838;
+    background-color: rgba(194,63,63,0.08);
+    border: 1px solid rgba(194,63,63,0.18);
+}
 QLabel#accessEyebrow { color: #3c6ca8; font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
 QLabel#accessTitle { color: #0f2748; font-size: 28px; font-weight: 700; }
 QLabel#accessSubtitle { color: #5d7391; font-size: 13px; }
@@ -435,7 +447,10 @@ class BootstrapFirstAdminDialog(QDialog):
         layout.addWidget(form_host)
 
         helper = QLabel(
-            "Use o nome corporativo do servidor, defina uma senha inicial forte e confirme os dados antes de liberar o primeiro acesso.",
+            (
+                "Use o nome corporativo do servidor e defina uma senha inicial forte "
+                f"({PASSWORD_POLICY_SUMMARY}) antes de liberar o primeiro acesso."
+            ),
             shell,
         )
         helper.setObjectName("accessHint")
@@ -470,8 +485,9 @@ class BootstrapFirstAdminDialog(QDialog):
         if not payload["email"]:
             QMessageBox.warning(self, "Criar administrador", "Informe o email corporativo do administrador.")
             return
-        if len(payload["password"]) < 8:
-            QMessageBox.warning(self, "Criar administrador", "A senha precisa ter pelo menos 8 caracteres.")
+        password_error = password_validation_error(payload["password"])
+        if password_error:
+            QMessageBox.warning(self, "Criar administrador", password_error)
             return
         if payload["password"] != confirmation:
             QMessageBox.warning(self, "Criar administrador", "A confirmação da senha não confere.")
@@ -621,7 +637,11 @@ class CompletePasswordResetDialog(QDialog):
             placeholder="Cole o link ou código recebido",
             tooltip="Aceita link completo ou código recebido por email.",
         )
-        _configure_text_input(self.password_input, placeholder="Nova senha", password=True)
+        _configure_text_input(
+            self.password_input,
+            placeholder=f"Nova senha ({PASSWORD_POLICY_SUMMARY})",
+            password=True,
+        )
         _configure_text_input(self.confirm_password_input, placeholder="Repita a nova senha", password=True)
 
         rows = (
@@ -638,7 +658,10 @@ class CompletePasswordResetDialog(QDialog):
         layout.addWidget(form_host)
 
         helper = QLabel(
-            "Você pode colar o link completo recebido no email ou somente o código de recuperação, sem sair do aplicativo.",
+            (
+                "Voce pode colar o link completo recebido no email ou somente o codigo de recuperacao, "
+                f"sem sair do aplicativo. A nova senha deve seguir: {PASSWORD_POLICY_SUMMARY}."
+            ),
             shell,
         )
         helper.setObjectName("accessHint")
@@ -673,11 +696,190 @@ class CompletePasswordResetDialog(QDialog):
         if not payload["recovery_value"]:
             QMessageBox.warning(self, "Recuperar senha", "Cole o link ou código de recuperação recebido.")
             return
-        if len(payload["new_password"]) < 8:
-            QMessageBox.warning(self, "Recuperar senha", "A nova senha precisa ter pelo menos 8 caracteres.")
+        password_error = password_validation_error(payload["new_password"])
+        if password_error:
+            QMessageBox.warning(self, "Recuperar senha", password_error)
             return
         if payload["new_password"] != confirmation:
             QMessageBox.warning(self, "Recuperar senha", "A confirmação da nova senha não confere.")
+            return
+        self.accept()
+
+
+class ChangePasswordDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        title_text: str = "Alterar senha",
+        subtitle_text: str = "",
+        account_email: str = "",
+        require_current_password: bool = True,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("AccessAuxDialog")
+        self.setWindowTitle(title_text)
+        self.setModal(True)
+        self.setMinimumWidth(500)
+        self.require_current_password = bool(require_current_password)
+        self._title_text = str(title_text or "Alterar senha")
+        self._subtitle_text = str(subtitle_text or "").strip()
+        self._account_email = str(account_email or "").strip()
+        _apply_access_dialog_theme(self)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 20, 20, 20)
+
+        shell = QFrame(self)
+        shell.setObjectName("accessShell")
+        _apply_shadow(shell, blur_radius=26.0, offset_y=8.0)
+        root.addWidget(shell)
+
+        layout = QVBoxLayout(shell)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(16)
+
+        title = QLabel(self._title_text, shell)
+        title.setObjectName("accessTitle")
+        title.setStyleSheet("font-size: 22px;")
+        subtitle = QLabel(
+            self._subtitle_text
+            or (
+                "Confirme sua senha atual e defina uma nova senha pessoal para continuar."
+                if self.require_current_password
+                else "Este é o primeiro acesso com senha provisória. Defina agora sua senha pessoal."
+            ),
+            shell,
+        )
+        subtitle.setObjectName("accessSubtitle")
+        subtitle.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addWidget(
+            _build_access_badge_row(
+                "Conta corporativa",
+                "Senha pessoal",
+                "Confirmação segura",
+                parent=shell,
+            )
+        )
+
+        form_host = QFrame(shell)
+        form_host.setObjectName("accessSection")
+        form_layout = QFormLayout(form_host)
+        form_layout.setContentsMargins(18, 18, 18, 18)
+        form_layout.setSpacing(12)
+
+        self.current_password_input = QLineEdit(form_host)
+        self.new_password_input = QLineEdit(form_host)
+        self.confirm_password_input = QLineEdit(form_host)
+        current_password_row = None
+        self.current_password_toggle_button = None
+        if self.require_current_password:
+            current_password_row, self.current_password_toggle_button = _build_password_row(
+                self.current_password_input,
+                parent=form_host,
+            )
+        else:
+            self.current_password_input.hide()
+        new_password_row, self.new_password_toggle_button = _build_password_row(
+            self.new_password_input,
+            parent=form_host,
+        )
+        confirm_password_row, self.confirm_password_toggle_button = _build_password_row(
+            self.confirm_password_input,
+            parent=form_host,
+        )
+
+        _configure_text_input(
+            self.current_password_input,
+            placeholder="Senha atual",
+            tooltip="Informe a senha atual da sua conta para confirmar a troca.",
+            password=True,
+        )
+        _configure_text_input(
+            self.new_password_input,
+            placeholder=f"Nova senha ({PASSWORD_POLICY_SUMMARY})",
+            tooltip=f"A nova senha deve seguir: {PASSWORD_POLICY_SUMMARY}.",
+            password=True,
+        )
+        _configure_text_input(
+            self.confirm_password_input,
+            placeholder="Repita a nova senha",
+            tooltip="Repita a nova senha exatamente como foi definida acima.",
+            password=True,
+        )
+        self.confirm_password_input.returnPressed.connect(self._submit)
+
+        if self._account_email:
+            account_caption = QLabel("Conta", form_host)
+            account_caption.setObjectName("fieldLabel")
+            account_value = QLabel(self._account_email, form_host)
+            account_value.setObjectName("accessHint")
+            account_value.setWordWrap(True)
+            account_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            form_layout.addRow(account_caption, account_value)
+
+        if self.require_current_password and current_password_row is not None:
+            current_label = QLabel("Senha atual", form_host)
+            current_label.setObjectName("fieldLabel")
+            form_layout.addRow(current_label, current_password_row)
+
+        new_label = QLabel("Nova senha", form_host)
+        new_label.setObjectName("fieldLabel")
+        confirm_label = QLabel("Confirmar", form_host)
+        confirm_label.setObjectName("fieldLabel")
+        form_layout.addRow(new_label, new_password_row)
+        form_layout.addRow(confirm_label, confirm_password_row)
+
+        layout.addWidget(form_host)
+
+        helper = QLabel(
+            (
+                "A senha anterior deixa de ser necessaria assim que a atualizacao e concluida no ambiente oficial. "
+                f"Use uma senha forte: {PASSWORD_POLICY_SUMMARY}."
+            ),
+            shell,
+        )
+        helper.setObjectName("accessHint")
+        helper.setWordWrap(True)
+        layout.addWidget(helper)
+
+        actions = QHBoxLayout()
+        self.cancel_button = QPushButton("Cancelar", shell)
+        self.submit_button = QPushButton("Atualizar senha", shell)
+        _set_button_role(self.cancel_button, "subtle")
+        _set_button_role(self.submit_button, "primary")
+        self.cancel_button.clicked.connect(self.reject)
+        self.submit_button.clicked.connect(self._submit)
+        actions.addWidget(self.cancel_button)
+        actions.addStretch(1)
+        actions.addWidget(self.submit_button)
+        layout.addLayout(actions)
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "current_password": self.current_password_input.text(),
+            "new_password": self.new_password_input.text(),
+        }
+
+    def _submit(self) -> None:
+        payload = self.payload()
+        confirmation = self.confirm_password_input.text()
+        if self.require_current_password and not payload["current_password"]:
+            QMessageBox.warning(self, self._title_text, "Informe sua senha atual para continuar.")
+            return
+        password_error = password_validation_error(payload["new_password"])
+        if password_error:
+            QMessageBox.warning(self, self._title_text, password_error)
+            return
+        if self.require_current_password and payload["current_password"] == payload["new_password"]:
+            QMessageBox.warning(self, self._title_text, "A nova senha precisa ser diferente da senha atual.")
+            return
+        if payload["new_password"] != confirmation:
+            QMessageBox.warning(self, self._title_text, "A confirmação da nova senha não confere.")
             return
         self.accept()
 
@@ -697,6 +899,7 @@ class AccessDialog(QDialog):
         self.admin_users_service = admin_users_service or SupabaseAdminUsersService()
         self.access_session: AppAccessSession | None = None
         self._busy = False
+        self._status_panel_error = False
 
         self.setObjectName("AccessDialog")
         self.setWindowTitle(f"Acesso - {APP_NAME}")
@@ -898,6 +1101,7 @@ class AccessDialog(QDialog):
         status_title = QLabel("Orientação do acesso", self.status_panel)
         status_title.setObjectName("sectionTitle")
         status_title.setStyleSheet("font-size: 14px;")
+        self.status_title = status_title
         self.status_label = QLabel(
             "Selecione como deseja entrar. Produção usa autenticação institucional e a base oficial sincronizada; Demonstração abre uma base isolada e segura para treinamento.",
             self.status_panel,
@@ -910,7 +1114,7 @@ class AccessDialog(QDialog):
             "Administração: só em produção",
             parent=self.status_panel,
         )
-        status_layout.addWidget(status_title)
+        status_layout.addWidget(self.status_title)
         status_layout.addWidget(self.status_label)
         status_layout.addWidget(self.status_badges)
 
@@ -999,6 +1203,33 @@ class AccessDialog(QDialog):
         self.password_toggle_button.setText(
             "Ocultar" if self.password_toggle_button.isChecked() else ("Ver" if compact_mode else "Mostrar")
         )
+        if hasattr(self, "status_badges"):
+            self.status_badges.setVisible((not compact_mode) and not self._status_panel_error)
+
+    def _default_access_status_message(self) -> str:
+        return (
+            "Selecione como deseja entrar. A produção usa autenticação institucional e a base oficial "
+            "sincronizada; a demonstração abre uma base isolada e segura para treinamento."
+        )
+
+    def _apply_status_panel_state(self, state: str) -> None:
+        self.status_panel.setProperty("state", state)
+        self.status_panel.style().unpolish(self.status_panel)
+        self.status_panel.style().polish(self.status_panel)
+        self.status_panel.update()
+
+    def _set_production_context_message(self, message: str) -> None:
+        normalized_message = str(message or "").strip()
+        self.production_status.setText(normalized_message)
+        self.production_status.setVisible(bool(normalized_message))
+
+    def _set_access_status_message(self, message: str, *, is_error: bool = False) -> None:
+        normalized_message = str(message or "").strip() or self._default_access_status_message()
+        self._status_panel_error = bool(is_error)
+        self.status_title.setText("Erro de acesso" if is_error else "Orientação do acesso")
+        self.status_label.setText(normalized_message)
+        self._apply_status_panel_state("error" if is_error else "default")
+        self._apply_responsive_layout()
 
     def _apply_defaults(self) -> None:
         last_access_email = self.settings.last_access_email()
@@ -1023,7 +1254,7 @@ class AccessDialog(QDialog):
         )
 
         if production_available_resolver():
-            self.production_status.setText(
+            self._set_production_context_message(
                 "Produção oficial pronta para autenticação com email corporativo e sincronização da base protegida."
             )
             self.email_input.setEnabled(True)
@@ -1032,7 +1263,7 @@ class AccessDialog(QDialog):
             self.forgot_password_button.setEnabled(True)
             self.password_toggle_button.setEnabled(True)
         else:
-            self.production_status.setText(
+            self._set_production_context_message(
                 "A autenticação da produção oficial ainda não está configurada nesta instalação."
             )
             self.email_input.setEnabled(False)
@@ -1042,7 +1273,7 @@ class AccessDialog(QDialog):
             self.password_toggle_button.setEnabled(False)
 
         if not production_available_resolver():
-            self.production_status.setText(production_unavailability_reason)
+            self._set_production_context_message(production_unavailability_reason)
 
         demo_label_resolver = getattr(self.access_service, "demo_entry_label", None)
         demo_hint = demo_label_resolver() if callable(demo_label_resolver) else "Demonstração"
@@ -1060,6 +1291,8 @@ class AccessDialog(QDialog):
             self.email_input.setFocus()
         elif self.password_input.isEnabled():
             self.password_input.setFocus()
+
+        self._set_access_status_message(self._default_access_status_message(), is_error=False)
         self._apply_responsive_layout()
 
     def _set_busy(self, busy: bool, message: str = "") -> None:
@@ -1078,7 +1311,7 @@ class AccessDialog(QDialog):
             ):
                 widget.setEnabled(False)
             if message:
-                self.status_label.setText(message)
+                self._set_access_status_message(message, is_error=False)
             return
 
         while QApplication.overrideCursor() is not None:
@@ -1108,16 +1341,17 @@ class AccessDialog(QDialog):
         self.forgot_password_button.setEnabled(production_available)
         self.password_toggle_button.setEnabled(production_available)
         if not production_available:
-            self.production_status.setText(production_unavailability_reason)
+            self._set_production_context_message(production_unavailability_reason)
+
         can_open_demo = getattr(self.access_service, "can_open_demo", lambda: True)
         self.demo_button.setEnabled(bool(can_open_demo()))
         self._apply_bootstrap_availability()
+
         if message:
-            self.status_label.setText(message)
-        elif not self.status_label.text().strip():
-            self.status_label.setText(
-                "Selecione como deseja entrar. Produção usa autenticação institucional e a base oficial sincronizada; Demonstração abre uma base isolada e segura."
-            )
+            self._set_production_context_message("")
+            self._set_access_status_message(message, is_error=True)
+        elif not self.status_label.text().strip() or self._status_panel_error:
+            self._set_access_status_message(self._default_access_status_message(), is_error=False)
         self._apply_responsive_layout()
 
     def _apply_bootstrap_availability(self) -> None:
@@ -1134,7 +1368,7 @@ class AccessDialog(QDialog):
             status = self.admin_users_service.bootstrap_status()
         except AdminUsersError as exc:
             self.bootstrap_button.hide()
-            self.production_status.setText(str(exc))
+            self._set_production_context_message(str(exc))
             return
 
         should_show = bool(getattr(status, "allowed", False))
@@ -1142,12 +1376,14 @@ class AccessDialog(QDialog):
         self.bootstrap_button.setEnabled(should_show and not self._busy)
         status_message = str(getattr(status, "message", "") or "").strip()
         if status_message:
-            self.production_status.setText(status_message)
+            self._set_production_context_message(status_message)
 
     def _handle_production_login(self) -> None:
         email = _normalize_corporate_email_field(self.email_input)
         password = self.password_input.text()
         if not email or not password:
+            self._set_production_context_message("")
+            self._set_access_status_message("Informe email e senha para entrar em produção.", is_error=True)
             QMessageBox.warning(self, "Produção", "Informe email e senha para entrar em produção.")
             return
 
@@ -1156,16 +1392,17 @@ class AccessDialog(QDialog):
             session = self.access_service.sign_in_production(email=email, password=password)
         except AccessAuthError as exc:
             self.password_input.clear()
-            self.production_status.setText(str(exc))
+            self._set_production_context_message("")
             self._set_busy(False, str(exc))
             QMessageBox.warning(self, "Produção", str(exc))
             return
 
-        self.settings.set_last_access_environment("production")
-        self.settings.set_last_access_email(session.user_email or email)
-        self.access_session = session
         self._set_busy(False, "")
-        self.accept()
+        self._complete_production_access(
+            session=session,
+            email=email,
+            current_password=password,
+        )
 
     def _handle_password_reset_request(self) -> None:
         request_dialog = RequestPasswordResetDialog(self)
@@ -1230,11 +1467,12 @@ class AccessDialog(QDialog):
             QMessageBox.warning(self, "Criar administrador", str(exc))
             return
 
-        self.settings.set_last_access_environment("production")
-        self.settings.set_last_access_email(session.user_email or payload["email"])
-        self.access_session = session
         self._set_busy(False, "")
-        self.accept()
+        self._complete_production_access(
+            session=session,
+            email=payload["email"],
+            current_password=payload["password"],
+        )
 
     def _handle_demo_entry(self) -> None:
         self._set_busy(True, "Preparando o ambiente de demonstração...")
@@ -1249,3 +1487,56 @@ class AccessDialog(QDialog):
         self.access_session = session
         self._set_busy(False, "")
         self.accept()
+
+    def _complete_production_access(
+        self,
+        *,
+        session: AppAccessSession,
+        email: str,
+        current_password: str,
+    ) -> None:
+        finalized_session = session
+        if bool(getattr(session, "must_change_password", False)):
+            password_dialog = ChangePasswordDialog(
+                title_text="Definir senha pessoal",
+                subtitle_text=(
+                    "Este é o primeiro acesso com a senha provisória informada pelo administrador. "
+                    "Defina agora sua senha pessoal para concluir a entrada."
+                ),
+                account_email=session.user_email or email,
+                require_current_password=False,
+                parent=self,
+            )
+            if not password_dialog.exec():
+                self.access_service.sign_out_session(session)
+                self.password_input.clear()
+                message = "Defina sua senha pessoal para concluir o primeiro acesso."
+                self._set_production_context_message("")
+                self._set_access_status_message(message, is_error=False)
+                return
+
+            try:
+                finalized_session = self.access_service.change_password(
+                    access_session=session,
+                    current_password=current_password,
+                    new_password=password_dialog.payload()["new_password"],
+                )
+            except AccessAuthError as exc:
+                self.access_service.sign_out_session(session)
+                self.password_input.clear()
+                self._set_production_context_message("")
+                self._set_access_status_message(str(exc), is_error=True)
+                QMessageBox.warning(self, "Primeiro acesso", str(exc))
+                return
+
+            QMessageBox.information(
+                self,
+                "Primeiro acesso",
+                "Senha pessoal definida com sucesso. O acesso à produção foi concluído.",
+            )
+
+        self.settings.set_last_access_environment("production")
+        self.settings.set_last_access_email(finalized_session.user_email or email)
+        self.access_session = finalized_session
+        self.accept()
+

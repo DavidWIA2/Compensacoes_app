@@ -9,6 +9,7 @@ from app.application.use_cases.tcra_module_operations import TcraModuleOperation
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.access_service import AccessEnvironment, AppAccessSession
+from app.services.supabase_tcra_rpc_service import SupabaseTcraRpcError
 from app.services.tcra_excel_service import TCRA_SHEET_NAME
 from app.services.tcra_sqlite_service import TcraSqliteService
 
@@ -123,6 +124,15 @@ class FakeRemoteTcraRpcService:
     def save_records(self, client, **kwargs):
         self.save_records_calls.append({"client": client, **kwargs})
         return SimpleNamespace(uid="", tcra_count=len(kwargs["records"]), imported_count=len(kwargs["records"]))
+
+
+class FakeRemoteTcraRpcPermissionDeniedService(FakeRemoteTcraRpcService):
+    def save_record(self, client, **kwargs):
+        self.save_calls.append({"client": client, **kwargs})
+        raise SupabaseTcraRpcError(
+            "Falha ao executar a funcao remota de TCRA 'rpc_save_tcra_record': "
+            "{'message': 'permission denied for schema app_private', 'code': '42501'}"
+        )
 
 
 class FakeRemoteTcraSyncService:
@@ -444,6 +454,29 @@ def test_tcra_module_operations_remote_save_falls_back_to_local_cache_when_refre
     assert result.authority_source == "remote"
     assert "cache local de TCRA" in " | ".join(result.sync_issues)
     assert service.get_tcra("remote-tcra-1") is not None
+
+
+def test_tcra_module_operations_remote_save_falls_back_to_local_when_permission_is_denied(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    access_service = FakeAccessService(sync_service=FakeRemoteTcraSyncService())
+    remote_rpc = FakeRemoteTcraRpcPermissionDeniedService()
+    audit_calls: list[dict] = []
+    operations = make_operations(
+        service,
+        audit_calls,
+        access_session=make_production_session(),
+        access_service=access_service,
+        remote_tcra_service=remote_rpc,
+    )
+
+    result = operations.save_record(make_tcra(uid="", numero_tcra="TCRA-LOCAL-FALLBACK"))
+
+    assert result.status == "saved"
+    assert result.authority_source == "local"
+    assert result.saved_uid
+    assert service.get_tcra(result.saved_uid) is not None
+    assert "alteracao aplicada apenas no cache local" in " | ".join(result.sync_issues)
+    assert audit_calls[-1]["action"] == "TCRA_CREATE"
 
 
 def test_tcra_module_operations_uses_remote_bulk_and_import_in_production(tmp_path):

@@ -23,10 +23,14 @@ from app.services.tcra_records_service import (
     operational_sort_key,
     resolve_record_consistency_issues,
 )
-from app.services.tcra_report_service import export_tcra_excel_report, export_tcra_pdf_report
+from app.services.tcra_report_service import (
+    TcraPdfExportOptions,
+    export_tcra_excel_report,
+    export_tcra_pdf_report,
+)
 from app.services.tcra_sqlite_service import TcraSqliteService
 from app.services.access_service import AccessEnvironment, AppAccessSession, SupabaseAccessService
-from app.services.supabase_tcra_rpc_service import SupabaseTcraRpcService, serialize_tcra
+from app.services.supabase_tcra_rpc_service import SupabaseTcraRpcError, SupabaseTcraRpcService, serialize_tcra
 from app.utils.logger import get_logger
 
 
@@ -198,6 +202,27 @@ class TcraModuleOperations:
         self.access_service = access_service or SupabaseAccessService()
         self.remote_tcra_service = remote_tcra_service or SupabaseTcraRpcService()
 
+    @staticmethod
+    def _is_remote_write_permission_error(exc: Exception) -> bool:
+        normalized = _stringify(exc).lower()
+        if not normalized:
+            return False
+        return (
+            "permission denied" in normalized
+            or "42501" in normalized
+            or "sem permissao" in normalized
+            or "schema app_private" in normalized
+        )
+
+    @classmethod
+    def _build_remote_write_fallback_issue(cls, exc: Exception) -> str:
+        if cls._is_remote_write_permission_error(exc):
+            return (
+                "Escrita remota de TCRA negada pela producao oficial; "
+                "alteracao aplicada apenas no cache local desta sessao."
+            )
+        return ""
+
     def _audit_service(self):
         if self.audit_service_provider is None:
             return None
@@ -340,6 +365,38 @@ class TcraModuleOperations:
         except Exception as exc:
             logger.warning("Falha ao registrar auditoria do modulo TCRA (%s): %s", action, exc)
 
+    def _save_record_locally(
+        self,
+        record: Tcra,
+        *,
+        previous_record: Tcra | None,
+        pending_audit_metadata: Mapping[str, object] | None = None,
+        sync_issues: Sequence[str] = (),
+    ) -> TcraSaveResult:
+        saved_uid = self.sqlite_service.upsert_tcra(record)
+        saved_record = self.sqlite_service.get_tcra(saved_uid) or replace(record, uid=saved_uid)
+        action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
+        verb = "atualizado" if previous_record is not None else "cadastrado"
+        metadata = {"uid": saved_uid}
+        metadata["changed_fields"] = list(_changed_tcra_fields(previous_record, saved_record))
+        metadata.update(dict(pending_audit_metadata or {}))
+        self._append_audit_event(
+            action=action,
+            summary=f"TCRA {verb}: {_record_label(saved_record)}",
+            before_record=previous_record,
+            after_record=saved_record,
+            metadata=metadata,
+        )
+        return TcraSaveResult(
+            status="saved",
+            record=record,
+            previous_record=previous_record,
+            saved_record=saved_record,
+            saved_uid=saved_uid,
+            authority_source="local",
+            sync_issues=tuple(sync_issues),
+        )
+
     def load_records(self, *, refresh_remote: bool = False) -> TcraLoadResult:
         sync_issues = self.refresh_remote_cache_if_production() if refresh_remote else ()
         records = tuple(self.sqlite_service.list_tcras())
@@ -397,16 +454,28 @@ class TcraModuleOperations:
             metadata = {"uid": _stringify(record.uid), "authority": "supabase_remote", "environment": "production"}
             metadata["changed_fields"] = list(_changed_tcra_fields(previous_record, record))
             metadata.update(dict(pending_audit_metadata or {}))
-            remote_result = self.remote_tcra_service.save_record(
-                client,
-                record=record,
-                workbook_path=self._session_path(),
-                action=action,
-                summary=f"TCRA {verb}: {_record_label(record)}",
-                metadata=metadata,
-                before=_serialize_tcra(previous_record),
-                after=_serialize_tcra(record),
-            )
+            try:
+                remote_result = self.remote_tcra_service.save_record(
+                    client,
+                    record=record,
+                    workbook_path=self._session_path(),
+                    action=action,
+                    summary=f"TCRA {verb}: {_record_label(record)}",
+                    metadata=metadata,
+                    before=_serialize_tcra(previous_record),
+                    after=_serialize_tcra(record),
+                )
+            except SupabaseTcraRpcError as exc:
+                fallback_issue = self._build_remote_write_fallback_issue(exc)
+                if fallback_issue:
+                    logger.warning("RPC remota de TCRA sem permissao; aplicando fallback local. Detalhe: %s", exc)
+                    return self._save_record_locally(
+                        record,
+                        previous_record=previous_record,
+                        pending_audit_metadata=pending_audit_metadata,
+                        sync_issues=(fallback_issue,),
+                    )
+                raise
             saved_uid = _stringify(remote_result.uid or record.uid)
             saved_record = replace(record, uid=saved_uid) if saved_uid else record
             sync_issues = self._sync_remote_cache_after_write(
@@ -425,26 +494,10 @@ class TcraModuleOperations:
                 sync_issues=sync_issues,
             )
 
-        saved_uid = self.sqlite_service.upsert_tcra(record)
-        saved_record = self.sqlite_service.get_tcra(saved_uid) or replace(record, uid=saved_uid)
-        action = "TCRA_EDIT" if previous_record is not None else "TCRA_CREATE"
-        verb = "atualizado" if previous_record is not None else "cadastrado"
-        metadata = {"uid": saved_uid}
-        metadata["changed_fields"] = list(_changed_tcra_fields(previous_record, saved_record))
-        metadata.update(dict(pending_audit_metadata or {}))
-        self._append_audit_event(
-            action=action,
-            summary=f"TCRA {verb}: {_record_label(saved_record)}",
-            before_record=previous_record,
-            after_record=saved_record,
-            metadata=metadata,
-        )
-        return TcraSaveResult(
-            status="saved",
-            record=record,
+        return self._save_record_locally(
+            record,
             previous_record=previous_record,
-            saved_record=saved_record,
-            saved_uid=saved_uid,
+            pending_audit_metadata=pending_audit_metadata,
         )
 
     def delete_record(self, uid: str) -> TcraDeleteResult:
@@ -899,8 +952,23 @@ class TcraModuleOperations:
         export_tcra_excel_report(path, records, filter_summary=filter_summary, today=self.today)
         return TcraExportResult(export_format="excel", path=str(path), record_count=len(list(records)))
 
-    def export_pdf_report(self, path: str, records: Sequence[Tcra], *, filter_summary: str) -> TcraExportResult:
-        export_tcra_pdf_report(path, records, filter_summary=filter_summary, today=self.today)
+    def export_pdf_report(
+        self,
+        path: str,
+        records: Sequence[Tcra],
+        *,
+        filter_summary: str,
+        options: TcraPdfExportOptions | None = None,
+        emitted_by: str = "",
+    ) -> TcraExportResult:
+        export_tcra_pdf_report(
+            path,
+            records,
+            filter_summary=filter_summary,
+            today=self.today,
+            options=options,
+            emitted_by=emitted_by,
+        )
         return TcraExportResult(export_format="pdf", path=str(path), record_count=len(list(records)))
 
     def export_record_document(self, path: str, record: Tcra, *, kind: str = "cobranca") -> TcraExportResult:

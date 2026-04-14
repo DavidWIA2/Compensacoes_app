@@ -6,6 +6,8 @@ from typing import Any
 import requests
 
 from app.config import normalize_corporate_email
+from app.services.password_policy import password_validation_error
+from app.services.supabase_client_loader import load_supabase_create_client
 from app.services.access_service import (
     AccessEnvironment,
     AppAccessSession,
@@ -43,6 +45,7 @@ class AdminUserRecord:
 class SupabaseAdminUsersService:
     BOOTSTRAP_FUNCTION = "bootstrap-first-admin"
     ADMIN_USERS_FUNCTION = "admin-users"
+    UPDATE_RPC_FUNCTION = "rpc_admin_update_user"
 
     def __init__(
         self,
@@ -74,6 +77,7 @@ class SupabaseAdminUsersService:
         display_name: str = "",
     ) -> AdminUserRecord:
         normalized_email = normalize_corporate_email(email)
+        self._ensure_valid_password(password)
         payload = self._request_json(
             "POST",
             function_name=self.BOOTSTRAP_FUNCTION,
@@ -106,6 +110,7 @@ class SupabaseAdminUsersService:
         is_active: bool = True,
     ) -> AdminUserRecord:
         normalized_email = normalize_corporate_email(email)
+        self._ensure_valid_password(password)
         payload = self._request_json(
             "POST",
             function_name=self.ADMIN_USERS_FUNCTION,
@@ -120,6 +125,39 @@ class SupabaseAdminUsersService:
             access_session=access_session,
         )
         return self._parse_user(payload.get("user") or {})
+
+    def update_user(
+        self,
+        access_session: AppAccessSession,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str = "",
+    ) -> AdminUserRecord:
+        normalized_email = normalize_corporate_email(email)
+        payload = {
+            "action": "update",
+            "user_id": str(user_id or "").strip(),
+            "email": normalized_email,
+            "display_name": str(display_name or "").strip(),
+        }
+        try:
+            response = self._request_json(
+                "POST",
+                function_name=self.ADMIN_USERS_FUNCTION,
+                payload=payload,
+                access_session=access_session,
+            )
+        except AdminUsersError as exc:
+            if not self._should_fallback_to_update_rpc(exc):
+                raise
+            return self._update_user_via_rpc(
+                access_session,
+                user_id=payload["user_id"],
+                email=payload["email"],
+                display_name=payload["display_name"],
+            )
+        return self._parse_user(response.get("user") or {})
 
     def set_user_active(
         self,
@@ -182,6 +220,7 @@ class SupabaseAdminUsersService:
         user_id: str,
         password: str,
     ) -> AdminUserRecord:
+        self._ensure_valid_password(password)
         payload = self._request_json(
             "POST",
             function_name=self.ADMIN_USERS_FUNCTION,
@@ -193,6 +232,12 @@ class SupabaseAdminUsersService:
             access_session=access_session,
         )
         return self._parse_user(payload.get("user") or {})
+
+    @staticmethod
+    def _ensure_valid_password(password: str) -> None:
+        message = password_validation_error(str(password or ""))
+        if message:
+            raise AdminUsersError(message)
 
     def _request_json(
         self,
@@ -249,6 +294,60 @@ class SupabaseAdminUsersService:
             access_token = str(access_session.access_token or "").strip()
             headers["Authorization"] = f"Bearer {access_token}"
         return headers
+
+    def _update_user_via_rpc(
+        self,
+        access_session: AppAccessSession,
+        *,
+        user_id: str,
+        email: str,
+        display_name: str,
+    ) -> AdminUserRecord:
+        client = self._create_authenticated_client(access_session)
+        try:
+            response = client.rpc(
+                self.UPDATE_RPC_FUNCTION,
+                params={
+                    "p_user_id": str(user_id or "").strip(),
+                    "p_email": str(email or "").strip(),
+                    "p_display_name": str(display_name or "").strip(),
+                },
+            ).execute()
+        except Exception as exc:
+            raise AdminUsersError(f"Falha ao atualizar usuario na RPC administrativa: {exc}") from exc
+
+        payload = getattr(response, "data", None)
+        if not isinstance(payload, dict):
+            raise AdminUsersError("A RPC administrativa de usuarios retornou um payload invalido.")
+        return self._parse_user(payload)
+
+    def _create_authenticated_client(self, access_session: AppAccessSession):
+        self._validate_admin_session(access_session)
+        try:
+            create_client = load_supabase_create_client()
+        except ImportError as exc:
+            raise AdminUsersError(
+                "A dependencia 'supabase' nao esta disponivel para executar a RPC administrativa."
+            ) from exc
+        try:
+            client = create_client(self.production_profile.url, self.production_profile.publishable_key)
+            client.auth.set_session(
+                str(access_session.access_token or "").strip(),
+                str(access_session.refresh_token or "").strip(),
+            )
+        except Exception as exc:
+            raise AdminUsersError(
+                f"Nao foi possivel restaurar a sessao autenticada para a RPC administrativa: {exc}"
+            ) from exc
+        return client
+
+    @staticmethod
+    def _should_fallback_to_update_rpc(exc: AdminUsersError) -> bool:
+        normalized = str(exc or "").strip().lower()
+        return (
+            "acao administrativa invalida" in normalized
+            or ("update" in normalized and "inv" in normalized)
+        )
 
     @staticmethod
     def _validate_admin_session(access_session: AppAccessSession) -> None:

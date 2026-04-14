@@ -20,6 +20,11 @@ from app.services.supabase_workspace_sync_service import SupabaseWorkspaceSyncRe
 from app.services.tcra_sqlite_service import TcraSqliteService
 
 
+STRONG_PASSWORD = "SenhaSegura1!"
+UPDATED_STRONG_PASSWORD = "SenhaNova123!"
+CURRENT_STRONG_PASSWORD = "SenhaAtual123!"
+
+
 class _FakeProfileQuery:
     def __init__(self, profile_data):
         self.profile_data = profile_data
@@ -35,6 +40,18 @@ class _FakeProfileQuery:
 
     def execute(self):
         return SimpleNamespace(data=self.profile_data)
+
+
+class _FakeRpcQuery:
+    def __init__(self, calls, name, params=None, response_data=True):
+        self._calls = calls
+        self._name = name
+        self._params = params or {}
+        self._response_data = response_data
+
+    def execute(self):
+        self._calls.append({"name": self._name, "params": self._params})
+        return SimpleNamespace(data=self._response_data)
 
 
 class _FakeAuth:
@@ -55,10 +72,14 @@ class _FakeProductionClient:
     def __init__(self, *, response, profile_data):
         self.auth = _FakeAuth(response)
         self._profile_data = profile_data
+        self.rpc_calls = []
 
     def table(self, name):
         assert name == "profiles"
         return _FakeProfileQuery(self._profile_data)
+
+    def rpc(self, name, params=None):
+        return _FakeRpcQuery(self.rpc_calls, name, params)
 
 
 class _FakeRecoveryAuth:
@@ -66,6 +87,7 @@ class _FakeRecoveryAuth:
         self.otp_payload = None
         self.verify_payload = None
         self.update_payload = None
+        self.password_sign_in_payload = None
         self.session_calls = []
         self.signed_out = False
 
@@ -102,6 +124,20 @@ class _FakeRecoveryAuth:
         self.update_payload = payload
         return SimpleNamespace(user=SimpleNamespace(id="user-123"))
 
+    def sign_in_with_password(self, payload):
+        self.password_sign_in_payload = payload
+        return SimpleNamespace(
+            user=SimpleNamespace(
+                id="user-123",
+                email="analista@saocarlos.sp.gov.br",
+                is_anonymous=False,
+            ),
+            session=SimpleNamespace(
+                access_token="updated-token",
+                refresh_token="updated-refresh",
+            ),
+        )
+
     def sign_out(self):
         self.signed_out = True
 
@@ -110,10 +146,39 @@ class _FakeRecoveryClient:
     def __init__(self, *, profile_data):
         self.auth = _FakeRecoveryAuth()
         self._profile_data = profile_data
+        self.rpc_calls = []
 
     def table(self, name):
         assert name == "profiles"
         return _FakeProfileQuery(self._profile_data)
+
+    def rpc(self, name, params=None):
+        return _FakeRpcQuery(self.rpc_calls, name, params)
+
+
+class _FakeAuthenticatedAuth:
+    def __init__(self, *, response=None):
+        self.update_payload = None
+        self._response = response or SimpleNamespace(
+            user=SimpleNamespace(id="user-123"),
+            session=SimpleNamespace(
+                access_token="updated-token",
+                refresh_token="updated-refresh",
+            ),
+        )
+
+    def update_user(self, payload):
+        self.update_payload = payload
+        return self._response
+
+
+class _FakeAuthenticatedClient:
+    def __init__(self, *, response=None):
+        self.auth = _FakeAuthenticatedAuth(response=response)
+        self.rpc_calls = []
+
+    def rpc(self, name, params=None):
+        return _FakeRpcQuery(self.rpc_calls, name, params)
 
 
 def _mark_supabase_dependency_available(service: SupabaseAccessService) -> None:
@@ -284,6 +349,51 @@ def test_sign_in_production_builds_remote_session_from_supabase_response():
     }
 
 
+def test_sign_in_production_marks_session_for_password_change_when_profile_requires_it():
+    sync_result = SupabaseWorkspaceSyncResult(
+        local_db_path="C:/tmp/producao.db",
+        session_path=DEFAULT_SINGLETON_SESSION_PATH,
+        workbook_name="Base oficial",
+        workbook_path="session://banco-local",
+        synced_at="2026-04-07T12:00:00+00:00",
+        record_count=329,
+        plantio_count=4,
+        audit_event_count=0,
+        tcra_count=18,
+        tcra_event_count=17,
+    )
+    service = SupabaseAccessService(
+        production_sync_service=SimpleNamespace(
+            sync_authenticated_client=lambda client: sync_result
+        )
+    )
+    _mark_supabase_dependency_available(service)
+    fake_response = SimpleNamespace(
+        user=SimpleNamespace(
+            id="user-123",
+            email="analista@saocarlos.sp.gov.br",
+            is_anonymous=False,
+        ),
+        session=SimpleNamespace(access_token="token", refresh_token="refresh"),
+    )
+    fake_client = _FakeProductionClient(
+        response=fake_response,
+        profile_data={
+            "id": "user-123",
+            "email": "analista@saocarlos.sp.gov.br",
+            "display_name": "Analista",
+            "role": "editor",
+            "is_active": True,
+            "must_change_password": True,
+        },
+    )
+    service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
+
+    session = service.sign_in_production(email="analista", password="senha-segura")
+
+    assert session.must_change_password is True
+
+
 def test_sign_in_production_accepts_only_corporate_local_part():
     sync_result = SupabaseWorkspaceSyncResult(
         local_db_path="C:/tmp/producao.db",
@@ -351,7 +461,9 @@ def test_request_password_reset_appends_default_domain_and_requests_otp():
 
     message = service.request_password_reset(email="analista")
 
-    assert "cole esse link ou código no app" in message.lower()
+    lowered_message = message.lower()
+    assert "cole esse link" in lowered_message
+    assert "app" in lowered_message
     assert fake_auth.otp_payload == {
         "email": "analista@saocarlos.sp.gov.br",
         "options": {"should_create_user": False},
@@ -392,6 +504,7 @@ def test_complete_password_reset_verifies_otp_updates_password_and_signs_out():
             "display_name": "Analista",
             "role": "editor",
             "is_active": True,
+            "must_change_password": True,
         }
     )
     service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
@@ -399,7 +512,7 @@ def test_complete_password_reset_verifies_otp_updates_password_and_signs_out():
     message = service.complete_password_reset(
         email="analista",
         recovery_value="123456",
-        new_password="senha-nova",
+        new_password=UPDATED_STRONG_PASSWORD,
     )
 
     assert "Senha atualizada com sucesso" in message
@@ -414,8 +527,101 @@ def test_complete_password_reset_verifies_otp_updates_password_and_signs_out():
             "refresh_token": "reset-refresh",
         }
     ]
-    assert fake_client.auth.update_payload == {"password": "senha-nova"}
+    assert fake_client.auth.update_payload == {"password": UPDATED_STRONG_PASSWORD}
+    assert fake_client.auth.password_sign_in_payload == {
+        "email": "analista@saocarlos.sp.gov.br",
+        "password": UPDATED_STRONG_PASSWORD,
+    }
+    assert fake_client.rpc_calls == [
+        {"name": "rpc_complete_password_change", "params": {}}
+    ]
     assert fake_client.auth.signed_out is True
+
+
+def test_change_password_verifies_current_password_updates_session_and_clears_rotation_flag():
+    service = SupabaseAccessService()
+    _mark_supabase_dependency_available(service)
+    verification_client = _FakeProductionClient(
+        response=SimpleNamespace(
+            user=SimpleNamespace(
+                id="user-123",
+                email="analista@saocarlos.sp.gov.br",
+                is_anonymous=False,
+            ),
+            session=SimpleNamespace(access_token="token", refresh_token="refresh"),
+        ),
+        profile_data={
+            "id": "user-123",
+            "email": "analista@saocarlos.sp.gov.br",
+            "display_name": "Analista",
+            "role": "editor",
+            "is_active": True,
+            "must_change_password": True,
+        },
+    )
+    authenticated_client = _FakeAuthenticatedClient()
+    created_clients = []
+
+    def _create_client(profile):
+        created_clients.append(profile.environment)
+        return verification_client
+
+    service._create_client = _create_client  # type: ignore[method-assign]
+    service.create_authenticated_client = lambda access_session: authenticated_client  # type: ignore[method-assign]
+    access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Produção",
+        auth_mode="password",
+        user_id="user-123",
+        user_email="analista@saocarlos.sp.gov.br",
+        app_role="editor",
+        access_token="token",
+        refresh_token="refresh",
+        must_change_password=True,
+    )
+
+    updated_session = service.change_password(
+        access_session=access_session,
+        current_password=CURRENT_STRONG_PASSWORD,
+        new_password=UPDATED_STRONG_PASSWORD,
+    )
+
+    assert created_clients == [AccessEnvironment.PRODUCTION]
+    assert verification_client.auth.last_payload == {
+        "email": "analista@saocarlos.sp.gov.br",
+        "password": CURRENT_STRONG_PASSWORD,
+    }
+    assert verification_client.auth.signed_out is True
+    assert authenticated_client.auth.update_payload == {
+        "password": UPDATED_STRONG_PASSWORD
+    }
+    assert authenticated_client.rpc_calls == [
+        {"name": "rpc_complete_password_change", "params": {}}
+    ]
+    assert updated_session.access_token == "updated-token"
+    assert updated_session.refresh_token == "updated-refresh"
+    assert updated_session.must_change_password is False
+
+
+def test_change_password_rejects_weak_password_before_touching_supabase():
+    service = SupabaseAccessService()
+    access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Producao",
+        auth_mode="password",
+        user_id="user-123",
+        user_email="analista@saocarlos.sp.gov.br",
+        app_role="editor",
+        access_token="token",
+        refresh_token="refresh",
+    )
+
+    with pytest.raises(AccessAuthError, match="letra maiuscula"):
+        service.change_password(
+            access_session=access_session,
+            current_password=CURRENT_STRONG_PASSWORD,
+            new_password="fraca123456!",
+        )
 
 
 def test_sign_in_production_preserves_authorized_profile_role():
@@ -494,7 +700,7 @@ def test_sign_in_production_blocks_inactive_profile_and_signs_out():
     )
     service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
 
-    with pytest.raises(AccessAuthError, match="não foi liberado"):
+    with pytest.raises(AccessAuthError, match="liberado"):
         service.sign_in_production(
             email="analista@prefeitura.sp.gov.br",
             password="senha-segura",

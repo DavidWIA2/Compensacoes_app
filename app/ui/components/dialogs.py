@@ -34,6 +34,7 @@ from app.application.use_cases.table_fullscreen_layout import (
 from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.display_columns import display_column_index
 from app.services.tcra_excel_service import TcraWorkbookAnalysis
+from app.services.tcra_report_service import TcraPdfExportOptions
 from app.services.tcra_records_service import (
     STATUS_ARQUIVADO,
     STATUS_CUMPRIDO,
@@ -156,6 +157,193 @@ TCRA_EVENT_PRESETS = (
         "descricao": "Termo arquivado administrativamente.",
     },
 )
+
+
+class TcraPdfExportDialog(QDialog):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        options: TcraPdfExportOptions | None = None,
+    ):
+        super().__init__(parent)
+        self._options = options if options is not None else TcraPdfExportOptions.empty_selection()
+        self.setWindowTitle("Exportar PDF de TCRAs")
+        self.resize(480, 410)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("Escolha os blocos do relat\u00f3rio")
+        title.setProperty("role", "section-title")
+        layout.addWidget(title)
+
+        subtitle = QLabel(
+            "O cabe\u00e7alho e o rodap\u00e9 institucionais ser\u00e3o inclu\u00eddos automaticamente. "
+            "Nenhum bloco vem pr\u00e9-selecionado para evitar um PDF polu\u00eddo."
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setObjectName("FormStateLabel")
+        layout.addWidget(subtitle)
+
+        checks_frame = QFrame(self)
+        checks_layout = QVBoxLayout(checks_frame)
+        checks_layout.setContentsMargins(10, 10, 10, 10)
+        checks_layout.setSpacing(8)
+
+        self.chk_summary = QCheckBox("Resumo executivo")
+        self.chk_summary.setChecked(self._options.include_summary)
+        checks_layout.addWidget(self.chk_summary)
+
+        self.chk_current_records = QCheckBox("Recorte atual da tabela")
+        self.chk_current_records.setChecked(self._options.include_current_records)
+        checks_layout.addWidget(self.chk_current_records)
+
+        self.chk_upcoming_reports = QCheckBox("Pr\u00f3ximos relat\u00f3rios")
+        self.chk_upcoming_reports.setChecked(self._options.include_upcoming_reports)
+        checks_layout.addWidget(self.chk_upcoming_reports)
+
+        self.chk_quality_queue = QCheckBox("Qualidade cadastral")
+        self.chk_quality_queue.setChecked(self._options.include_quality_queue)
+        checks_layout.addWidget(self.chk_quality_queue)
+
+        self.chk_critical_agenda = QCheckBox("Pend\u00eancias cr\u00edticas")
+        self.chk_critical_agenda.setChecked(self._options.include_critical_agenda)
+        checks_layout.addWidget(self.chk_critical_agenda)
+
+        self.chk_agenda_7d = QCheckBox("Agenda de trabalho - 7 dias")
+        self.chk_agenda_7d.setChecked(self._options.include_agenda_7d)
+        checks_layout.addWidget(self.chk_agenda_7d)
+
+        self.chk_agenda_30d = QCheckBox("Agenda de trabalho - 30 dias")
+        self.chk_agenda_30d.setChecked(self._options.include_agenda_30d)
+        checks_layout.addWidget(self.chk_agenda_30d)
+
+        self.chk_inbox = QCheckBox("Inbox operacional")
+        self.chk_inbox.setChecked(self._options.include_inbox)
+        checks_layout.addWidget(self.chk_inbox)
+
+        self._checkboxes = (
+            self.chk_summary,
+            self.chk_current_records,
+            self.chk_upcoming_reports,
+            self.chk_quality_queue,
+            self.chk_critical_agenda,
+            self.chk_agenda_7d,
+            self.chk_agenda_30d,
+            self.chk_inbox,
+        )
+
+        layout.addWidget(checks_frame)
+
+        quick_actions = QHBoxLayout()
+        quick_actions.setSpacing(6)
+        self.btn_select_recommended = QPushButton("Resumo + tabela")
+        self.btn_select_recommended.setProperty("kind", "chip-quiet")
+        self.btn_select_all = QPushButton("Selecionar tudo")
+        self.btn_select_all.setProperty("kind", "chip-quiet")
+        self.btn_clear_selection = QPushButton("Limpar seleção")
+        self.btn_clear_selection.setProperty("kind", "secondary")
+        quick_actions.addWidget(self.btn_select_recommended)
+        quick_actions.addWidget(self.btn_select_all)
+        quick_actions.addWidget(self.btn_clear_selection)
+        quick_actions.addStretch(1)
+        layout.addLayout(quick_actions)
+
+        self.warning_label = QLabel("")
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setObjectName("FormStateLabel")
+        self.warning_label.setStyleSheet("color: #C44747;")
+        layout.addWidget(self.warning_label)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        ok_button = self.button_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setText("Gerar PDF")
+        cancel_button = self.button_box.button(QDialogButtonBox.Cancel)
+        if cancel_button is not None:
+            cancel_button.setText("Cancelar")
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        for checkbox in self._checkboxes:
+            checkbox.toggled.connect(self._refresh_accept_state)
+        self.btn_select_recommended.clicked.connect(self._select_recommended)
+        self.btn_select_all.clicked.connect(self._select_all)
+        self.btn_clear_selection.clicked.connect(self._clear_selection)
+
+        self._refresh_accept_state()
+
+    def _apply_options(self, options: TcraPdfExportOptions) -> None:
+        for checkbox, checked in zip(
+            self._checkboxes,
+            (
+                options.include_summary,
+                options.include_current_records,
+                options.include_upcoming_reports,
+                options.include_quality_queue,
+                options.include_critical_agenda,
+                options.include_agenda_7d,
+                options.include_agenda_30d,
+                options.include_inbox,
+            ),
+        ):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(checked)
+            checkbox.blockSignals(False)
+        self._refresh_accept_state()
+
+    def _select_recommended(self) -> None:
+        self._apply_options(
+            TcraPdfExportOptions(
+                include_summary=True,
+                include_current_records=True,
+                include_upcoming_reports=False,
+                include_quality_queue=False,
+                include_critical_agenda=False,
+                include_agenda_7d=False,
+                include_agenda_30d=False,
+                include_inbox=False,
+            )
+        )
+
+    def _select_all(self) -> None:
+        self._apply_options(
+            TcraPdfExportOptions(
+                include_summary=True,
+                include_current_records=True,
+                include_upcoming_reports=True,
+                include_quality_queue=True,
+                include_critical_agenda=True,
+                include_agenda_7d=True,
+                include_agenda_30d=True,
+                include_inbox=True,
+            )
+        )
+
+    def _clear_selection(self) -> None:
+        self._apply_options(TcraPdfExportOptions.empty_selection())
+
+    def _refresh_accept_state(self) -> None:
+        has_any = self.selected_options().has_any_section()
+        ok_button = self.button_box.button(QDialogButtonBox.Ok)
+        if ok_button is not None:
+            ok_button.setEnabled(has_any)
+        self.warning_label.setText("" if has_any else "Selecione ao menos um bloco para montar o PDF.")
+
+    def selected_options(self) -> TcraPdfExportOptions:
+        return TcraPdfExportOptions(
+            include_summary=self.chk_summary.isChecked(),
+            include_current_records=self.chk_current_records.isChecked(),
+            include_upcoming_reports=self.chk_upcoming_reports.isChecked(),
+            include_quality_queue=self.chk_quality_queue.isChecked(),
+            include_critical_agenda=self.chk_critical_agenda.isChecked(),
+            include_agenda_7d=self.chk_agenda_7d.isChecked(),
+            include_agenda_30d=self.chk_agenda_30d.isChecked(),
+            include_inbox=self.chk_inbox.isChecked(),
+        )
 
 
 class ImportPreviewDialog(QDialog):

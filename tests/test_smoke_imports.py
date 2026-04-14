@@ -42,6 +42,14 @@ def test_theme_qss_emphasizes_checked_checkboxes_and_radios():
     assert 'assets/radio_on.svg")' in qss
     assert "QTextEdit" in qss
     assert "QPlainTextEdit" in qss
+    assert "QAbstractSpinBox" in qss
+    assert "QAbstractSpinBox QLineEdit" in qss
+    assert "QAbstractSpinBox::up-button" in qss
+    assert "QAbstractSpinBox::up-arrow" in qss
+    assert "QAbstractSpinBox::down-arrow" in qss
+    assert 'assets/spin_up.svg")' in qss
+    assert 'assets/spin_down.svg")' in qss
+    assert THEME_DARK["input_text"] in qss
 
 
 def test_columns_dialog_buttons_work_without_name_errors(qt_app):

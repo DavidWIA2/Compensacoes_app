@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.application.use_cases.tcra_module_operations import TcraModuleOperations
+from app.config import display_corporate_email_local_part
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.tcra_insights_service import (
@@ -97,6 +98,7 @@ from app.ui.components.dialogs import (
     TcraBulkActionDialog,
     TcraEventoEditorDialog,
     TcraImportPreviewDialog,
+    TcraPdfExportDialog,
 )
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.widgets import CheckableComboBox, KPICard
@@ -329,7 +331,7 @@ class TcraRecordDetailsDialog(QDialog):
         self.tabs.addTab(self.summary_page, "Resumo")
         self.tabs.addTab(self.deadline_page, "Prazos")
         self.tabs.addTab(self.events_page, "Eventos")
-        self.tabs.addTab(self.notes_page, "Observacoes")
+        self.tabs.addTab(self.notes_page, "Observações")
         layout.addWidget(self.tabs, 1)
 
         button_layout = QHBoxLayout()
@@ -362,12 +364,12 @@ class TcraRecordDetailsDialog(QDialog):
                 f"Status: {record.status or '--'}",
                 f"Data de assinatura: {_format_date(record.data_assinatura)}",
                 f"Prazo final: {_format_date(record.prazo_final)}",
-                f"Periodicidade de relatorio: {record.periodicidade_relatorio_meses or '--'} mes(es)",
-                f"Ultimo relatorio: {_format_date(record.data_ultimo_relatorio)}",
-                f"Proximo relatorio: {_format_date(record.data_proximo_relatorio)}",
+                f"Periodicidade de relatório: {record.periodicidade_relatorio_meses or '--'} mes(es)",
+                f"Último relatório: {_format_date(record.data_ultimo_relatorio)}",
+                f"Próximo relatório: {_format_date(record.data_proximo_relatorio)}",
                 "",
-                f"Responsavel: {record.responsavel_execucao or '--'}",
-                f"Orgao: {normalize_orgao_label(record.orgao_acompanhamento) or record.orgao_acompanhamento or '--'}",
+                f"Responsável: {record.responsavel_execucao or '--'}",
+                f"Órgão: {normalize_orgao_label(record.orgao_acompanhamento) or record.orgao_acompanhamento or '--'}",
                 f"MPSP: {record.mpsp_relacionado or '--'}",
                 f"Inquerito civil: {record.inquerito_civil or '--'}",
             ]
@@ -377,8 +379,8 @@ class TcraRecordDetailsDialog(QDialog):
         return "\n\n".join(
             [
                 f"Servicos exigidos:\n{record.servicos_exigidos or '--'}",
-                f"Observacoes:\n{record.observacoes or '--'}",
-                f"Endereco:\n{record.endereco or '--'}",
+                f"Observações:\n{record.observacoes or '--'}",
+                f"Endereço:\n{record.endereco or '--'}",
                 f"Bairro:\n{record.bairro or '--'}",
                 (
                     "Area / mudas:\n"
@@ -638,7 +640,7 @@ class TcraRecordDetailsDialog(QDialog):
     def _open_document_reference(self, document_ref: str) -> None:
         target = _stringify(document_ref)
         if not target:
-            QMessageBox.warning(self, "Aviso", "O evento selecionado nao possui documento vinculado.")
+            QMessageBox.warning(self, "Aviso", "O evento selecionado não possui documento vinculado.")
             return
         if target.lower().startswith(("http://", "https://")):
             QDesktopServices.openUrl(QUrl(target))
@@ -647,7 +649,7 @@ class TcraRecordDetailsDialog(QDialog):
         if candidate.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate)))
             return
-        QMessageBox.warning(self, "Aviso", f"Documento nao encontrado: {target}")
+        QMessageBox.warning(self, "Aviso", f"Documento não encontrado: {target}")
 
     def _open_selected_event_document(self, *_args) -> None:
         selected = self._selected_event()
@@ -1034,7 +1036,7 @@ class TcraTab(QWidget):
         self.btn_agenda_quick_event = QPushButton("Registrar evento")
         self.btn_agenda_quick_event.setProperty("kind", "chip-quiet")
         self.btn_agenda_quick_event.setEnabled(False)
-        self.btn_agenda_quick_event.setToolTip("Registra uma movimentacao rapida para o item selecionado sem abrir todo o painel de dados.")
+        self.btn_agenda_quick_event.setToolTip("Registra uma movimentação rápida para o item selecionado sem abrir todo o painel de dados.")
         self.btn_agenda_assign_responsavel = QPushButton("Atribuir responsável")
         self.btn_agenda_assign_responsavel.setProperty("kind", "chip-quiet")
         self.btn_agenda_assign_responsavel.setEnabled(False)
@@ -1073,7 +1075,7 @@ class TcraTab(QWidget):
         self.agenda_helper.setProperty("role", "helper")
         self.agenda_helper.setWordWrap(True)
         self.agenda_table = QTableWidget(0, 6, self)
-        self.agenda_table.setHorizontalHeaderLabels(["Prioridade", "Termo", "Status", "Referencia", "Local", "Ação"])
+        self.agenda_table.setHorizontalHeaderLabels(["Prioridade", "Termo", "Status", "Referência", "Local", "Ação"])
         self.agenda_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.agenda_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.agenda_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -1258,7 +1260,7 @@ class TcraTab(QWidget):
         self.more_actions_menu.addSeparator()
         self.action_priority_map = self.more_actions_menu.addAction("Mapa de prioridades")
         self.action_operational_route = self.more_actions_menu.addAction("Rota operacional")
-        self.action_responsavel_digest = self.more_actions_menu.addAction("Resumo por responsavel")
+        self.action_responsavel_digest = self.more_actions_menu.addAction("Resumo por responsável")
         self.action_bulk_campaign = self.more_actions_menu.addAction("Campanha de cobranca")
         self.action_generate_document = self.more_actions_menu.addAction("Gerar minuta")
         self.action_record_audit = self.more_actions_menu.addAction("Histórico do TCRA")
@@ -1423,12 +1425,12 @@ class TcraTab(QWidget):
             if header_item is not None:
                 header_item.setToolTip(tooltip)
         for column_index, tooltip in {
-            4: "Ultimo evento registrado para o termo e data da ultima movimentacao.",
-            5: "Acao sugerida para o proximo passo de acompanhamento.",
+            4: "Último evento registrado para o termo e data da última movimentação.",
+            5: "Ação sugerida para o próximo passo de acompanhamento.",
             6: "Prazo final do termo.",
-            7: "Proxima data de relatorio periodico.",
-            8: "Responsavel pela execucao/acompanhamento.",
-            9: "Orgao de acompanhamento e indicacao de MPSP quando aplicavel.",
+            7: "Próxima data de relatório periódico.",
+            8: "Responsável pela execução/acompanhamento.",
+            9: "Órgão de acompanhamento e indicação de MPSP quando aplicável.",
             10: "Local principal do termo.",
         }.items():
             header_item = self.table.horizontalHeaderItem(column_index)
@@ -1503,9 +1505,9 @@ class TcraTab(QWidget):
         event_spotlight_layout = QVBoxLayout(self.event_spotlight_frame)
         event_spotlight_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
         event_spotlight_layout.setSpacing(int(6 * self.sf))
-        self.lbl_event_spotlight_title = QLabel("Ultimo evento: nenhum registro")
+        self.lbl_event_spotlight_title = QLabel("Último evento: nenhum registro")
         self.lbl_event_spotlight_title.setObjectName("FormStateLabel")
-        self.lbl_event_spotlight_meta = QLabel("Status resultante, prazo gerado e protocolo aparecerao aqui.")
+        self.lbl_event_spotlight_meta = QLabel("Status resultante, prazo gerado e protocolo aparecerão aqui.")
         self.lbl_event_spotlight_meta.setWordWrap(True)
         self.lbl_event_spotlight_helper = QLabel("Use este quadro apenas para consultar o último evento sem perder o cadastro de vista.")
         self.lbl_event_spotlight_helper.setWordWrap(True)
@@ -1518,7 +1520,7 @@ class TcraTab(QWidget):
         self.btn_event_register_primary = QPushButton("Registrar evento")
         self.btn_event_register_primary.setProperty("kind", "primary")
         self.btn_event_register_primary.setToolTip("Abre a janela de detalhes para consultar e registrar eventos do TCRA.")
-        self.btn_event_open_latest_document = QPushButton("Abrir doc. do ultimo")
+        self.btn_event_open_latest_document = QPushButton("Abrir doc. do último")
         self.btn_event_open_latest_document.setProperty("kind", "chip-quiet")
         self.btn_event_open_audit = QPushButton("Auditoria")
         self.btn_event_open_audit.setProperty("kind", "ghost")
@@ -1573,7 +1575,7 @@ class TcraTab(QWidget):
         form_nav_layout.addStretch(1)
         form_layout.addLayout(form_nav_layout)
 
-        self.lbl_fix_guidance = QLabel("Correcao assistida: cadastro pronto para revisão.")
+        self.lbl_fix_guidance = QLabel("Correção assistida: cadastro pronto para revisão.")
         self.lbl_fix_guidance.setWordWrap(True)
         self.lbl_fix_guidance.setObjectName("FormStateLabel")
         form_layout.addWidget(self.lbl_fix_guidance)
@@ -2200,7 +2202,7 @@ class TcraTab(QWidget):
                 f"Alertas {int(base_metrics.get('count_alertas', 0))}",
                 f"Relatorios {int(base_metrics.get('count_relatorio_pendente', 0))}",
                 f"Sem mov. {int(base_metrics.get('count_sem_movimentacao', 0))}",
-                f"Sem responsavel {int(base_metrics.get('count_sem_responsavel', 0))}",
+                f"Sem responsável {int(base_metrics.get('count_sem_responsavel', 0))}",
             ]
             digest_text = " | ".join(digest_parts)
             tooltip_parts = [
@@ -2216,7 +2218,7 @@ class TcraTab(QWidget):
         if self.lbl_sync_status.isVisible():
             tooltip_parts.append(self.lbl_sync_status.text())
         if self.lbl_import_status.isVisible():
-            digest_text = f"{digest_text} | Importacao ativa" if digest_text else "Importacao ativa"
+            digest_text = f"{digest_text} | Importação ativa" if digest_text else "Importação ativa"
             tooltip_parts.append(self.lbl_import_status.text())
 
         self.lbl_workspace_digest.setText(digest_text)
@@ -2273,7 +2275,7 @@ class TcraTab(QWidget):
         self.btn_more_actions.setText("Ações" if compact_mode else "Mais ações")
         self.btn_clear_filters.setText("Limpar" if compact_mode else "Limpar")
         self.btn_event_register_primary.setText("Evento" if compact_mode else "Registrar evento")
-        self.btn_event_open_latest_document.setText("Abrir doc" if compact_mode else "Abrir doc. do ultimo")
+        self.btn_event_open_latest_document.setText("Abrir doc" if compact_mode else "Abrir doc. do último")
         self.btn_event_open_audit.setText("Historico" if compact_mode else "Auditoria")
         self.btn_open_event_document.setText("Doc" if compact_mode else "Abrir documento")
         self.btn_toggle_workspace_context.setText(
@@ -2574,6 +2576,10 @@ class TcraTab(QWidget):
         for name in sorted(views):
             action = self.saved_views_menu.addAction(name)
             action.triggered.connect(lambda _checked=False, view_name=name: self._apply_saved_view(view_name))
+        self.saved_views_menu.addSeparator()
+        for name in sorted(views):
+            action = self.saved_views_menu.addAction(f"Excluir: {name}")
+            action.triggered.connect(lambda _checked=False, view_name=name: self._delete_saved_view(view_name))
 
     def _apply_saved_view(self, name: str) -> None:
         state = self._saved_views().get(name)
@@ -2583,6 +2589,27 @@ class TcraTab(QWidget):
         self._restore_filter_state_if_pending()
         self._apply_filters(preferred_uid=self.current_form_uid or self.selected_uid)
         self._set_sync_status(f"Visão aplicada: {name}", visible=True)
+
+    def _delete_saved_view(self, name: str) -> None:
+        if (
+            self.main_window is None
+            or not hasattr(self.main_window, "settings_controller")
+            or not hasattr(self.main_window.settings_controller, "set_tcra_saved_views")
+        ):
+            QMessageBox.warning(self, "Aviso", "Não foi possível acessar as configurações locais.")
+            return
+        views = self._saved_views()
+        if name not in views:
+            return
+        if not msg_confirm(
+            self,
+            "Excluir visão salva",
+            f'Deseja excluir a visão salva "{name}"?',
+        ):
+            return
+        del views[name]
+        self.main_window.settings_controller.set_tcra_saved_views(views)
+        self._set_sync_status(f"Visão removida: {name}", visible=True)
 
     def _configure_operational_rules(self) -> None:
         upcoming_days, ok = QInputDialog.getInt(
@@ -2966,8 +2993,8 @@ class TcraTab(QWidget):
         if self.current_form_uid == target_uid and self.has_pending_form_changes():
             QMessageBox.warning(
                 self,
-                "Cadastro com alteracoes pendentes",
-                "Salve ou descarte as alteracoes do cadastro antes de registrar eventos pela janela de detalhes.",
+                "Cadastro com alterações pendentes",
+                "Salve ou descarte as alterações do cadastro antes de registrar eventos pela janela de detalhes.",
             )
             return None
         try:
@@ -2978,7 +3005,7 @@ class TcraTab(QWidget):
             return None
 
         if result.status == "duplicate":
-            QMessageBox.warning(self, "Aviso", "Nao foi possivel salvar o TCRA por possivel duplicidade.")
+            QMessageBox.warning(self, "Aviso", "Não foi possível salvar o TCRA por possível duplicidade.")
             return None
 
         consistency_issues = list(result.consistency_issues)
@@ -3003,7 +3030,7 @@ class TcraTab(QWidget):
             return
         audit_service = getattr(self.main_window, "audit_service", None)
         if audit_service is None or not hasattr(audit_service, "list_events_for_session"):
-            QMessageBox.warning(self, "Aviso", "Historico de auditoria indisponivel nesta sessao.")
+            QMessageBox.warning(self, "Aviso", "Histórico de auditoria indisponível nesta sessão.")
             return
         filtered_events = self._audit_events_for_record(record)
         if not filtered_events:
@@ -3059,7 +3086,7 @@ class TcraTab(QWidget):
             return
         record = self._record_by_uid(target_uid)
         if record is None:
-            QMessageBox.warning(self, "Aviso", "Nao foi possivel localizar o TCRA atual para abrir os eventos do termo.")
+            QMessageBox.warning(self, "Aviso", "Não foi possível localizar o TCRA atual para abrir os eventos do termo.")
             return
         self._open_record_details_for_record(record, event_preset=event_preset)
 
@@ -3118,12 +3145,12 @@ class TcraTab(QWidget):
     def _open_operational_route(self) -> None:
         records = list(self._selected_table_records() or self.filtered_tcras or self.base_filtered_tcras or self.all_tcras)
         if not records:
-            QMessageBox.warning(self, "Aviso", "Nao ha TCRAs no recorte atual para montar a rota.")
+            QMessageBox.warning(self, "Aviso", "Não há TCRAs no recorte atual para montar a rota.")
             return
         route_plan = build_priority_route(records, today=self.today, rules=self.operational_rules, limit=8)
         queries = [stop.query for stop in route_plan.stops if _stringify(stop.query)]
         if not queries:
-            QMessageBox.warning(self, "Aviso", "Os TCRAs selecionados nao tem endereco/local suficiente para rota.")
+            QMessageBox.warning(self, "Aviso", "Os TCRAs selecionados não têm endereço/local suficiente para rota.")
             return
         preview_lines = [route_plan.summary_text, ""] + [
             f"- {stop.label} | {stop.bairro} | {stop.reason} | score {stop.priority_score}"
@@ -3145,11 +3172,11 @@ class TcraTab(QWidget):
     def _open_responsavel_digest(self) -> None:
         records = list(self.base_filtered_tcras or self.filtered_tcras or self.all_tcras)
         if not records:
-            QMessageBox.warning(self, "Aviso", "Nao ha TCRAs no recorte atual para montar o resumo.")
+            QMessageBox.warning(self, "Aviso", "Não há TCRAs no recorte atual para montar o resumo.")
             return
         digests = build_responsavel_digests(records, today=self.today, rules=self.operational_rules, cadence="daily")
         workload_snapshot = build_workload_snapshot(records, today=self.today, rules=self.operational_rules)
-        summary_lines = ["Resumo por responsavel", ""]
+        summary_lines = ["Resumo por responsável", ""]
         summary_lines.extend(item.summary for item in digests[:8])
         if workload_snapshot.suggestions:
             summary_lines.extend(["", "Sugestoes de redistribuicao:"])
@@ -3163,7 +3190,7 @@ class TcraTab(QWidget):
             summary_lines.extend(digest.message_lines)
         TcraTextPreviewDialog(
             self,
-            title="Resumo por responsavel",
+            title="Resumo por responsável",
             text="\n".join(summary_lines),
             default_file_name="tcra_responsaveis.txt",
         ).exec()
@@ -3211,7 +3238,7 @@ class TcraTab(QWidget):
     def _open_document_reference(self, document_ref: str) -> None:
         target = _stringify(document_ref)
         if not target:
-            QMessageBox.warning(self, "Aviso", "O evento selecionado nao possui documento vinculado.")
+            QMessageBox.warning(self, "Aviso", "O evento selecionado não possui documento vinculado.")
             return
         if target.lower().startswith(("http://", "https://")):
             QDesktopServices.openUrl(QUrl(target))
@@ -3220,7 +3247,7 @@ class TcraTab(QWidget):
         if candidate.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate)))
             return
-        QMessageBox.warning(self, "Aviso", f"Documento nao encontrado: {target}")
+        QMessageBox.warning(self, "Aviso", f"Documento não encontrado: {target}")
 
     def _open_selected_event_document(self, *_args) -> None:
         row = self.events_table.currentRow()
@@ -3560,6 +3587,7 @@ class TcraTab(QWidget):
         self.selection_actions_frame.setVisible(bool(visible))
 
     def _set_overview_panel_visible(self, visible: bool) -> None:
+        was_visible = self._overview_panel_visible
         self._overview_panel_visible = bool(visible)
         self.overview_panel.setVisible(True)
         self._apply_table_column_visibility(
@@ -3572,6 +3600,8 @@ class TcraTab(QWidget):
             self.operational_dialog.show()
             self.operational_dialog.raise_()
             self.operational_dialog.activateWindow()
+            if not was_visible:
+                self._apply_filters(preferred_uid=self.current_form_uid or self.selected_uid)
         else:
             self.operational_dialog.hide()
 
@@ -3753,7 +3783,7 @@ class TcraTab(QWidget):
             for suggestion in workload_snapshot.suggestions[:6]:
                 lines.append(f"- {suggestion.record_label} -> {suggestion.suggested_responsavel} | {suggestion.reason}")
         if responsavel_digests:
-            lines.extend(["", "Resumo por responsavel:"])
+            lines.extend(["", "Resumo por responsável:"])
             for digest in responsavel_digests[:4]:
                 lines.append(f"- {digest.summary}")
         if route_plan.stops:
@@ -4058,11 +4088,20 @@ class TcraTab(QWidget):
         if not self.filtered_tcras:
             QMessageBox.warning(self, "Aviso", "Não há TCRAs no recorte atual para exportar.")
             return
+        export_dialog = TcraPdfExportDialog(self)
+        if not export_dialog.exec():
+            return
         path = self._get_export_path("Salvar relatório de TCRAs", "PDF (*.pdf)")
         if not path:
             return
         try:
-            self.module_operations.export_pdf_report(path, self.filtered_tcras, filter_summary=self._build_filter_summary())
+            self.module_operations.export_pdf_report(
+                path,
+                self.filtered_tcras,
+                filter_summary=self._build_filter_summary(),
+                options=export_dialog.selected_options(),
+                emitted_by=self._current_export_user_name(),
+            )
         except Exception as exc:
             logger.exception("Falha ao exportar relatório de TCRA em PDF: %s", path)
             QMessageBox.critical(self, "Erro", f"Falha ao exportar o relatório em PDF: {exc}")
@@ -4297,6 +4336,9 @@ class TcraTab(QWidget):
             self.in_status.blockSignals(False)
 
     def _apply_filters(self, *_args, preferred_uid: str | None = None):
+        preview_limit = self.OVERVIEW_PREVIEW_LIMIT
+        if self._overview_panel_visible:
+            preview_limit = max(preview_limit, len(self.all_tcras))
         snapshot = build_workspace_snapshot(
             self.all_tcras,
             filters=self._build_workspace_filters(),
@@ -4304,7 +4346,7 @@ class TcraTab(QWidget):
             agenda_scope=self.agenda_scope,
             agenda_expanded=self._agenda_expanded,
             quality_expanded=self._quality_expanded,
-            preview_limit=self.OVERVIEW_PREVIEW_LIMIT,
+            preview_limit=preview_limit,
             today=self.today,
             rules=self.operational_rules,
         )
@@ -4337,8 +4379,8 @@ class TcraTab(QWidget):
         self.lbl_upcoming_reports.setText(snapshot.upcoming_summary_text)
         self._update_workspace_digest(snapshot)
         self._set_overview_tab_counts(
-            inbox_count=snapshot.agenda_button_count,
-            quality_count=snapshot.quality_button_count,
+            inbox_count=snapshot.agenda_total_count,
+            quality_count=snapshot.quality_total_count,
         )
         self.btn_summary_inbox.setToolTip(snapshot.agenda_summary_text)
         self.btn_summary_quality.setToolTip(snapshot.data_quality_text)
@@ -4731,6 +4773,13 @@ class TcraTab(QWidget):
             parts.append("Flags: " + ", ".join(flags))
         return " | ".join(parts)
 
+    def _current_export_user_name(self) -> str:
+        access_session = getattr(self.main_window, "access_session", None)
+        user_email = str(getattr(access_session, "user_email", "") or "").strip()
+        if not user_email:
+            return ""
+        return display_corporate_email_local_part(user_email) or user_email
+
     def _apply_form_snapshot_updates(self, snapshot: dict[str, object]) -> None:
         if not snapshot:
             return
@@ -4845,7 +4894,8 @@ class TcraTab(QWidget):
             self.btn_open_selected.setEnabled(True)
             self.btn_record_edit.setEnabled(True)
             self._update_record_panel(record)
-            self.overview_tabs.setCurrentIndex(0)
+            if not self._overview_panel_visible or self.overview_tabs.currentIndex() == 0:
+                self.overview_tabs.setCurrentIndex(0)
             return
 
     def _refresh_selection(self):
@@ -4893,7 +4943,8 @@ class TcraTab(QWidget):
         self.btn_open_selected.setText("Abrir termo")
         self.btn_record_edit.setEnabled(True)
         self._update_record_panel(record)
-        self.overview_tabs.setCurrentIndex(0)
+        if not self._overview_panel_visible or self.overview_tabs.currentIndex() == 0:
+            self.overview_tabs.setCurrentIndex(0)
 
     def _load_record_into_form(self, record: Tcra, *, mark_clean: bool):
         self.current_form_uid = record.uid
@@ -5172,7 +5223,7 @@ class TcraTab(QWidget):
             servicos_exigidos=self.in_servicos.toPlainText().strip(),
             responsavel_execucao=self.in_responsavel.text().strip(),
             observacoes=self.in_observacoes.toPlainText().strip(),
-            mpsp_relacionado="Sim" if self.chk_mpsp.isChecked() else "NÃ£o",
+            mpsp_relacionado="Sim" if self.chk_mpsp.isChecked() else "Não",
             inquerito_civil=self.in_inquerito.text().strip(),
             eventos=list(self.form_eventos),
         )
@@ -5302,14 +5353,14 @@ class TcraTab(QWidget):
         self.lbl_recent_event_cards.setText("Linha do tempo visual" if event_count else "Linha do tempo visual (vazia)")
 
         if latest_record_event is None:
-            self.lbl_event_spotlight_title.setText("Ultimo evento: nenhum registro")
+            self.lbl_event_spotlight_title.setText("Último evento: nenhum registro")
             self.lbl_event_spotlight_meta.setText(
                 "Status atual: "
                 + (_stringify(preview_record.status) or "--")
-                + " | Ultima movimentacao: sem registro"
+                + " | Última movimentação: sem registro"
             )
             self.lbl_event_spotlight_helper.setText(
-                "Proxima acao sugerida: " + resolve_record_next_action(preview_record, today=self.today)
+                "Próxima ação sugerida: " + resolve_record_next_action(preview_record, today=self.today)
             )
             self.btn_event_open_latest_document.setEnabled(False)
             return
@@ -5317,7 +5368,7 @@ class TcraTab(QWidget):
         days_since = None
         if latest_record_event.data_evento is not None:
             days_since = max((self.today - latest_record_event.data_evento).days, 0)
-        title_parts = ["Ultimo evento:"]
+        title_parts = ["Último evento:"]
         if latest_record_event.data_evento is not None:
             title_parts.append(_format_date(latest_record_event.data_evento))
         title_parts.append(latest_record_event.tipo_evento or "Evento")
@@ -5325,7 +5376,7 @@ class TcraTab(QWidget):
 
         meta_parts = [
             f"Status atual: {_stringify(preview_record.status) or '--'}",
-            "Ult. movimento: " + (f"ha {days_since} dia(s)" if days_since is not None else "sem data"),
+            "Últ. movimento: " + (f"há {days_since} dia(s)" if days_since is not None else "sem data"),
         ]
         if latest_record_event.status_resultante:
             meta_parts.append(f"Status do evento: {latest_record_event.status_resultante}")
@@ -5336,7 +5387,7 @@ class TcraTab(QWidget):
         meta_parts.append(format_latest_event_label(preview_record))
         self.lbl_event_spotlight_meta.setText(" | ".join(meta_parts))
         self.lbl_event_spotlight_helper.setText(
-            "Proxima acao sugerida: " + resolve_record_next_action(preview_record, today=self.today)
+            "Próxima ação sugerida: " + resolve_record_next_action(preview_record, today=self.today)
         )
         self.btn_event_open_latest_document.setEnabled(bool(_stringify(getattr(latest_record_event, "documento_ref", ""))))
         self.btn_event_open_audit.setEnabled(bool(self.current_form_uid or self.selected_uid))
@@ -5344,7 +5395,7 @@ class TcraTab(QWidget):
     def _open_latest_event_document(self) -> None:
         latest_record_event = self._latest_event()
         if latest_record_event is None:
-            QMessageBox.warning(self, "Aviso", "Nao ha evento recente com documento para abrir.")
+            QMessageBox.warning(self, "Aviso", "Não há evento recente com documento para abrir.")
             return
         self._open_document_reference(_stringify(getattr(latest_record_event, "documento_ref", "")))
 

@@ -81,10 +81,12 @@ def test_build_workspace_snapshot_summarizes_counts_and_preview_limits():
     assert snapshot.context_text.startswith("3 termos |")
     assert snapshot.agenda_total_count >= 2
     assert len(snapshot.agenda_items) == 2
+    assert snapshot.agenda_button_count == 2
     assert snapshot.agenda_view_all_enabled is True
     assert "mostrando 2" in snapshot.agenda_summary_text
     assert snapshot.quality_total_count >= 2
     assert len(snapshot.quality_items) == min(snapshot.quality_total_count, 2)
+    assert snapshot.quality_button_count == len(snapshot.quality_items)
     assert snapshot.quality_view_all_enabled is (snapshot.quality_total_count > 2)
     assert snapshot.upcoming_button_enabled is False
 

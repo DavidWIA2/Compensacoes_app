@@ -8,15 +8,16 @@ from openpyxl import load_workbook
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QWidget
 
 import app.ui.tabs.tcra_tab as tcra_tab_module
 from app.models.tcra import Tcra
 from app.models.tcra_evento import TcraEvento
 from app.services.tcra_excel_service import TCRA_SHEET_NAME, TcraExcelService
+from app.services.tcra_report_service import TcraPdfExportOptions
 from app.services.tcra_sqlite_service import TcraSqliteService
 from app.ui.components.date_input import DatePickerLineEdit
-from app.ui.components.dialogs import TcraEventoEditorDialog, TcraImportPreviewDialog
+from app.ui.components.dialogs import TcraEventoEditorDialog, TcraImportPreviewDialog, TcraPdfExportDialog
 from app.ui.tabs.tcra_tab import TcraTab
 
 
@@ -337,10 +338,30 @@ def test_tcra_tab_surfaces_event_context_at_top_of_editor(tmp_path):
     tab.btn_open_selected.click()
     get_app().processEvents()
 
-    assert "Ultimo evento:" in tab.lbl_event_spotlight_title.text()
+    assert "Último evento:" in tab.lbl_event_spotlight_title.text()
     assert "SEI-321" in tab.lbl_event_spotlight_meta.text()
     assert tab.editor_tabs.tabText(1).startswith("Eventos")
     assert tab.btn_event_open_latest_document.isEnabled() is True
+
+
+def test_tcra_pdf_export_dialog_requires_explicit_selection():
+    dialog = TcraPdfExportDialog()
+    get_app().processEvents()
+
+    ok_button = dialog.button_box.button(QDialogButtonBox.Ok)
+
+    assert dialog.selected_options().has_any_section() is False
+    assert ok_button.isEnabled() is False
+    assert "Selecione ao menos um bloco" in dialog.warning_label.text()
+
+    dialog.btn_select_recommended.click()
+    get_app().processEvents()
+
+    assert dialog.chk_summary.isChecked() is True
+    assert dialog.chk_current_records.isChecked() is True
+    assert dialog.chk_upcoming_reports.isChecked() is False
+    assert dialog.chk_critical_agenda.isChecked() is False
+    assert ok_button.isEnabled() is True
 
 
 def test_tcra_tab_compacts_list_header_by_default_but_can_expand_context(tmp_path):
@@ -364,7 +385,7 @@ def test_tcra_tab_compacts_list_header_by_default_but_can_expand_context(tmp_pat
     assert tab.summary_details_frame.isHidden() is True
     assert tab.filters_hint.isHidden() is True
     assert "Alertas" in tab.lbl_workspace_digest.text()
-    assert "Sem responsavel" in tab.lbl_workspace_digest.text()
+    assert "Sem responsável" in tab.lbl_workspace_digest.text()
 
     tab.btn_toggle_workspace_context.click()
     get_app().processEvents()
@@ -662,7 +683,7 @@ def test_tcra_tab_operational_dialog_opens_and_closes_from_summary_actions(tmp_p
     assert tab.lbl_overview_title.text() == "Qualidade cadastral"
 
 
-def test_tcra_tab_inbox_and_quality_expand_from_compact_preview(tmp_path):
+def test_tcra_tab_operational_dialog_opens_with_full_inbox_and_quality_queues(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     service.replace_all(
         [
@@ -682,16 +703,57 @@ def test_tcra_tab_inbox_and_quality_expand_from_compact_preview(tmp_path):
     tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
     get_app().processEvents()
 
-    assert tab.agenda_table.rowCount() == 3
-    assert tab.quality_table.rowCount() == 3
+    assert tab.btn_summary_inbox.text() == "Inbox (5)"
+    assert tab.btn_summary_quality.text() == "Qualidade (5)"
+    assert tab.overview_tabs.tabText(1) == "Inbox operacional (5)"
+    assert tab.overview_tabs.tabText(2) == "Qualidade cadastral (5)"
 
-    tab.btn_agenda_view_all.click()
+    tab.btn_summary_inbox.click()
     get_app().processEvents()
     assert tab.agenda_table.rowCount() == 5
+    assert tab.btn_agenda_view_all.isEnabled() is False
 
-    tab.btn_quality_view_all.click()
+    tab.btn_summary_quality.click()
     get_app().processEvents()
     assert tab.quality_table.rowCount() == 5
+    assert tab.btn_quality_view_all.isEnabled() is False
+
+    assert tab.btn_summary_inbox.text() == "Inbox (5)"
+    assert tab.overview_tabs.tabText(1) == "Inbox operacional (5)"
+    assert tab.btn_summary_quality.text() == "Qualidade (5)"
+    assert tab.overview_tabs.tabText(2) == "Qualidade cadastral (5)"
+
+
+def test_tcra_tab_operational_inbox_keeps_active_tab_during_selection_refresh(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all(
+        [
+            make_tcra(
+                uid=f"tcra-{index}",
+                numero_tcra="",
+                numero_processo=f"{26000 + index}/2019",
+                local=f"Area {index}",
+                prazo_final=date(2026, 3, 1),
+                data_proximo_relatorio=date(2026, 3, 1),
+                responsavel_execucao="",
+                orgao_acompanhamento="",
+                eventos=[],
+            )
+            for index in range(5)
+        ]
+    )
+
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    get_app().processEvents()
+
+    tab.btn_summary_inbox.click()
+    get_app().processEvents()
+    assert tab.overview_tabs.currentIndex() == 1
+
+    tab.table.selectRow(0)
+    get_app().processEvents()
+
+    assert tab.overview_tabs.currentIndex() == 1
 
 
 def test_tcra_tab_agenda_scope_buttons_filter_work_queue(tmp_path):
@@ -714,13 +776,17 @@ def test_tcra_tab_agenda_scope_buttons_filter_work_queue(tmp_path):
     get_app().processEvents()
 
     assert tab.agenda_scope == tcra_tab_module.AGENDA_SCOPE_HOJE
-    assert tab.agenda_table.rowCount() == 2
+    assert tab.agenda_table.rowCount() == 1
 
     tab.agenda_scope_buttons[tcra_tab_module.AGENDA_SCOPE_7D].click()
     get_app().processEvents()
-    assert tab.agenda_table.rowCount() == 3
+    assert tab.agenda_table.rowCount() == 2
 
     tab.agenda_scope_buttons[tcra_tab_module.AGENDA_SCOPE_VENCIDOS].click()
+    get_app().processEvents()
+    assert tab.agenda_table.rowCount() == 1
+
+    tab.agenda_scope_buttons[tcra_tab_module.AGENDA_SCOPE_PENDENTES].click()
     get_app().processEvents()
     assert tab.agenda_table.rowCount() == 1
 
@@ -1478,6 +1544,28 @@ def test_tcra_tab_exports_excel_and_pdf_reports(tmp_path, monkeypatch):
         "information",
         lambda *args, **kwargs: info_messages.append(args[2] if len(args) > 2 else ""),
     )
+    monkeypatch.setattr(
+        tcra_tab_module,
+        "TcraPdfExportDialog",
+        type(
+            "FakePdfDialog",
+            (),
+            {
+                "__init__": lambda self, *args, **kwargs: None,
+                "exec": lambda self: True,
+                "selected_options": lambda self: TcraPdfExportOptions(
+                    include_summary=True,
+                    include_current_records=True,
+                    include_upcoming_reports=False,
+                    include_quality_queue=False,
+                    include_critical_agenda=True,
+                    include_agenda_7d=False,
+                    include_agenda_30d=False,
+                    include_inbox=False,
+                ),
+            },
+        ),
+    )
 
     tab.export_excel_report()
     tab.export_pdf_report()
@@ -1487,6 +1575,68 @@ def test_tcra_tab_exports_excel_and_pdf_reports(tmp_path, monkeypatch):
     assert (tmp_path / "tcra-export.pdf").exists() is True
     assert (tmp_path / "tcra-export.pdf").stat().st_size > 0
     assert len(info_messages) == 2
+
+
+def test_tcra_tab_pdf_export_forwards_selected_sections_and_user(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    tab.main_window = SimpleNamespace(
+        access_session=SimpleNamespace(user_email="david.oliveira@saocarlos.sp.gov.br")
+    )
+    get_app().processEvents()
+    captured = {}
+
+    selected_options = TcraPdfExportOptions(
+        include_summary=True,
+        include_current_records=True,
+        include_upcoming_reports=False,
+        include_quality_queue=True,
+        include_critical_agenda=False,
+        include_agenda_7d=False,
+        include_agenda_30d=False,
+        include_inbox=False,
+    )
+
+    monkeypatch.setattr(
+        tcra_tab_module,
+        "TcraPdfExportDialog",
+        type(
+            "FakePdfDialog",
+            (),
+            {
+                "__init__": lambda self, *args, **kwargs: None,
+                "exec": lambda self: True,
+                "selected_options": lambda self: selected_options,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        tcra_tab_module.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(tmp_path / "tcra-export.pdf"), "PDF (*.pdf)"),
+    )
+    monkeypatch.setattr(
+        tab.module_operations,
+        "export_pdf_report",
+        lambda path, records, *, filter_summary, options=None, emitted_by="": captured.update(
+            {
+                "path": path,
+                "record_count": len(list(records)),
+                "filter_summary": filter_summary,
+                "options": options,
+                "emitted_by": emitted_by,
+            }
+        ),
+    )
+    monkeypatch.setattr(tcra_tab_module.QMessageBox, "information", lambda *args, **kwargs: None)
+
+    tab.export_pdf_report()
+
+    assert captured["path"].endswith("tcra-export.pdf")
+    assert captured["record_count"] == 1
+    assert captured["options"] == selected_options
+    assert captured["emitted_by"] == "david.oliveira"
 
 
 def test_tcra_tab_restores_and_persists_filter_state(tmp_path):
@@ -1536,6 +1686,66 @@ def test_tcra_tab_restores_and_persists_filter_state(tmp_path):
     assert saved_states[-1]["only_mpsp"] is True
     assert "selected_responsaveis" in saved_states[-1]
     assert "responsaveis_all_selected" in saved_states[-1]
+
+
+def test_tcra_tab_saves_named_view_to_settings(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
+    persisted_views = []
+    settings_controller = SimpleNamespace(
+        tcra_saved_views=lambda: {"Base": {"search_text": "centro"}},
+        set_tcra_saved_views=lambda views: persisted_views.append(dict(views)),
+        set_tcra_filter_state=lambda state: None,
+    )
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    tab.main_window = SimpleNamespace(settings_controller=settings_controller)
+
+    monkeypatch.setattr(
+        tcra_tab_module.QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("Equipe TCRA", True),
+    )
+
+    tab._save_current_view()
+
+    assert persisted_views
+    assert "Base" in persisted_views[-1]
+    assert "Equipe TCRA" in persisted_views[-1]
+    assert persisted_views[-1]["Equipe TCRA"]["status"] == tab.filter_status.currentText()
+    assert persisted_views[-1]["Equipe TCRA"]["quick_filter_mode"] == tab.quick_filter_mode
+
+
+def test_tcra_tab_saved_views_menu_allows_deletion(tmp_path, monkeypatch):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    service.replace_all([make_tcra(uid="tcra-1")])
+    saved_views = {
+        "Alertas": {"search_text": "atrasado"},
+        "Base": {"search_text": ""},
+    }
+
+    def _set_saved_views(views):
+        saved_views.clear()
+        saved_views.update(dict(views))
+
+    settings_controller = SimpleNamespace(
+        tcra_saved_views=lambda: dict(saved_views),
+        set_tcra_saved_views=_set_saved_views,
+        set_tcra_filter_state=lambda state: None,
+    )
+    tab = TcraTab(sqlite_service=service, today=date(2026, 4, 3))
+    tab.main_window = SimpleNamespace(settings_controller=settings_controller)
+    monkeypatch.setattr(tcra_tab_module, "msg_confirm", lambda *args, **kwargs: True)
+
+    tab._rebuild_saved_views_menu()
+    action_texts = [action.text() for action in tab.saved_views_menu.actions()]
+
+    assert "Alertas" in action_texts
+    assert "Excluir: Alertas" in action_texts
+
+    tab._delete_saved_view("Alertas")
+
+    assert "Alertas" not in saved_views
+    assert "Base" in saved_views
 
 
 def test_tcra_tab_bulk_action_updates_selected_records(tmp_path, monkeypatch):

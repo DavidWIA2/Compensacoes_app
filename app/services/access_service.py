@@ -1,7 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +16,7 @@ from app.config import (
     SUPABASE_PRODUCTION_URL_ENV_VAR,
     normalize_corporate_email,
 )
+from app.services.password_policy import password_validation_error
 from app.services.supabase_workspace_sync_service import (
     PRODUCTION_CACHE_SESSION_PATH,
     SupabaseWorkspaceSyncResult,
@@ -63,6 +64,7 @@ class AppAccessSession:
     app_role: str = ""
     access_token: str = ""
     refresh_token: str = ""
+    must_change_password: bool = False
 
     @classmethod
     def local_default(cls) -> "AppAccessSession":
@@ -274,6 +276,7 @@ class SupabaseAccessService:
             app_role=str(profile.get("role", "") or ""),
             access_token=remote_session.access_token,
             refresh_token=remote_session.refresh_token,
+            must_change_password=bool(profile.get("must_change_password", False)),
         )
 
     def can_request_password_reset(self) -> bool:
@@ -321,13 +324,14 @@ class SupabaseAccessService:
             raise AccessAuthError("Informe seu email corporativo para concluir a recuperação.")
         if not normalized_recovery_value:
             raise AccessAuthError("Cole o link ou o código recebido no email corporativo.")
-        if len(normalized_password) < 8:
-            raise AccessAuthError("A nova senha precisa ter pelo menos 8 caracteres.")
+        password_error = password_validation_error(normalized_password)
+        if password_error:
+            raise AccessAuthError(password_error)
         if not self._has_supabase_dependency():
             message = self.production_sign_in_unavailability_reason()
             if message:
                 raise AccessAuthError(message)
-            raise AccessAuthError("A dependencia 'supabase' nao esta disponivel nesta instalacao.")
+            raise AccessAuthError("A dependência 'supabase' não está disponível nesta instalação.")
 
         try:
             client = self._create_client(self.production_profile)
@@ -355,14 +359,85 @@ class SupabaseAccessService:
                     "Seu usuário existe, mas ainda não foi liberado para o ambiente de produção. "
                     "Peça a um administrador para ativar seu perfil no Supabase."
                 )
-            client.auth.update_user({"password": normalized_password})
-            self._best_effort_sign_out(client)
+            update_response = client.auth.update_user({"password": normalized_password})
+            rotation_client, _access_token, _refresh_token = self._restore_password_change_session(
+                email=normalized_email,
+                new_password=normalized_password,
+                update_response=update_response,
+            )
+            self._clear_password_rotation_flag(rotation_client)
+            self._best_effort_sign_out(rotation_client)
+            if rotation_client is not client:
+                self._best_effort_sign_out(client)
         except AccessAuthError:
             raise
         except Exception as exc:
             raise AccessAuthError(f"Falha ao concluir a redefinição da senha: {exc}") from exc
 
         return "Senha atualizada com sucesso. Você já pode voltar ao app e entrar com a nova senha."
+
+    def change_password(
+        self,
+        *,
+        access_session: AppAccessSession,
+        current_password: str,
+        new_password: str,
+    ) -> AppAccessSession:
+        if access_session.environment != AccessEnvironment.PRODUCTION:
+            raise AccessAuthError("A troca de senha só está disponível na produção oficial.")
+        normalized_email = normalize_corporate_email(access_session.user_email)
+        normalized_current_password = str(current_password or "")
+        normalized_new_password = str(new_password or "")
+        if not normalized_email:
+            raise AccessAuthError("A sessão atual não possui email corporativo válido.")
+        if not normalized_current_password:
+            raise AccessAuthError("Informe sua senha atual para confirmar a troca.")
+        password_error = password_validation_error(normalized_new_password)
+        if password_error:
+            raise AccessAuthError(password_error)
+        if normalized_current_password == normalized_new_password:
+            raise AccessAuthError("A nova senha precisa ser diferente da senha atual.")
+        if not self._has_supabase_dependency():
+            message = self.production_sign_in_unavailability_reason()
+            if message:
+                raise AccessAuthError(message)
+            raise AccessAuthError("A dependência 'supabase' não está disponível nesta instalação.")
+
+        verification_client = None
+        session_client = None
+        rotation_client = None
+        try:
+            verification_client = self._create_client(self.production_profile)
+            verification_client.auth.sign_in_with_password(
+                {
+                    "email": normalized_email,
+                    "password": normalized_current_password,
+                }
+            )
+
+            session_client = self.create_authenticated_client(access_session)
+            response = session_client.auth.update_user({"password": normalized_new_password})
+            rotation_client, updated_access_token, updated_refresh_token = self._restore_password_change_session(
+                email=normalized_email,
+                new_password=normalized_new_password,
+                update_response=response,
+                access_session=access_session,
+            )
+            self._clear_password_rotation_flag(rotation_client)
+        except AccessAuthError:
+            raise
+        except Exception as exc:
+            raise AccessAuthError(f"Falha ao atualizar a senha da sua conta: {exc}") from exc
+        finally:
+            self._best_effort_sign_out(verification_client)
+            if session_client is not None and session_client is not rotation_client:
+                self._best_effort_sign_out(session_client)
+        return replace(
+            access_session,
+            access_token=updated_access_token,
+            refresh_token=updated_refresh_token,
+            must_change_password=False,
+        )
 
     def enter_demo(self) -> AppAccessSession:
         if self.demo_profile.is_configured and self.demo_profile.allow_anonymous:
@@ -548,7 +623,7 @@ class SupabaseAccessService:
         try:
             response = (
                 client.table("profiles")
-                .select("id, email, display_name, role, is_active")
+                .select("id, email, display_name, role, is_active, must_change_password")
                 .eq("id", normalized_user_id)
                 .maybe_single()
                 .execute()
@@ -562,6 +637,57 @@ class SupabaseAccessService:
                 "Seu usuário ainda não possui um perfil configurado no ambiente de produção."
             )
         return dict(payload)
+
+    def _clear_password_rotation_flag(self, client: Any) -> None:
+        try:
+            client.rpc("rpc_complete_password_change", params={}).execute()
+        except Exception as exc:
+            raise AccessAuthError(
+                f"A senha foi atualizada, mas não foi possível concluir a liberação do primeiro acesso: {exc}"
+            ) from exc
+
+    def _restore_password_change_session(
+        self,
+        *,
+        email: str,
+        new_password: str,
+        update_response: Any,
+        access_session: AppAccessSession | None = None,
+    ) -> tuple[Any, str, str]:
+        response_session = getattr(update_response, "session", None)
+        updated_access_token = str(getattr(response_session, "access_token", "") or "").strip()
+        updated_refresh_token = str(getattr(response_session, "refresh_token", "") or "").strip()
+
+        if updated_access_token and updated_refresh_token:
+            if access_session is not None:
+                refreshed_session = replace(
+                    access_session,
+                    access_token=updated_access_token,
+                    refresh_token=updated_refresh_token,
+                )
+                return self.create_authenticated_client(refreshed_session), updated_access_token, updated_refresh_token
+
+            refreshed_client = self._create_client(self.production_profile)
+            refreshed_client.auth.set_session(updated_access_token, updated_refresh_token)
+            return refreshed_client, updated_access_token, updated_refresh_token
+
+        refreshed_client = self._create_client(self.production_profile)
+        auth_response = refreshed_client.auth.sign_in_with_password(
+            {
+                "email": email,
+                "password": new_password,
+            }
+        )
+        refreshed_remote_session = self._build_remote_session(
+            self.production_profile,
+            auth_response,
+            auth_mode="password",
+        )
+        return (
+            refreshed_client,
+            refreshed_remote_session.access_token,
+            refreshed_remote_session.refresh_token,
+        )
 
     def _fetch_production_profile_from_session(self, client: Any) -> dict[str, Any]:
         try:
@@ -615,3 +741,4 @@ class SupabaseAccessService:
                 sign_out()
             except Exception:
                 logger.warning("Falha ao encerrar sessão Supabase após login bloqueado.", exc_info=True)
+

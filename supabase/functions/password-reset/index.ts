@@ -10,6 +10,8 @@ const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "https://yonvcnnkewzoqwnnmc
 const supabasePublishableKey = (
   Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "sb_publishable_89kyRD3GfnaLBZmwnlkA_g_4a_k5_5R"
 ).trim();
+const passwordPolicySummary =
+  "12+ caracteres, com letra maiuscula, minuscula, numero e simbolo";
 
 function renderPage(): string {
   return `<!doctype html>
@@ -169,7 +171,7 @@ function renderPage(): string {
           <input id="confirm-password" type="password" placeholder="Repita a nova senha" autocomplete="new-password" />
         </div>
         <div class="block muted">
-          A senha precisa ter pelo menos 8 caracteres.
+          A senha precisa seguir: ${passwordPolicySummary}.
         </div>
         <div class="block">
           <button id="submit-button" type="submit">Atualizar senha</button>
@@ -188,6 +190,38 @@ function renderPage(): string {
     const passwordEl = document.getElementById("password");
     const confirmPasswordEl = document.getElementById("confirm-password");
     const submitButton = document.getElementById("submit-button");
+
+    function passwordValidationError(password) {
+      const requirements = [];
+      if (password.length < 12) {
+        requirements.push("pelo menos 12 caracteres");
+      }
+      if (!/[a-z]/.test(password)) {
+        requirements.push("uma letra minuscula");
+      }
+      if (!/[A-Z]/.test(password)) {
+        requirements.push("uma letra maiuscula");
+      }
+      if (!/[0-9]/.test(password)) {
+        requirements.push("um numero");
+      }
+      if (!/[^A-Za-z0-9\s]/.test(password)) {
+        requirements.push("um simbolo");
+      }
+      if (requirements.length === 0) {
+        return "";
+      }
+      if (requirements.length === 1) {
+        return "A nova senha precisa ter " + requirements[0] + ".";
+      }
+      return (
+        "A nova senha precisa ter " +
+        requirements.slice(0, -1).join(", ") +
+        " e " +
+        requirements[requirements.length - 1] +
+        "."
+      );
+    }
 
     function showStatus(kind, message) {
       statusEl.className = "status show block " + kind;
@@ -258,8 +292,9 @@ function renderPage(): string {
       const password = passwordEl.value;
       const confirmPassword = confirmPasswordEl.value;
 
-      if (password.length < 8) {
-        showStatus("warning", "A nova senha precisa ter pelo menos 8 caracteres.");
+      const passwordError = passwordValidationError(password);
+      if (passwordError) {
+        showStatus("warning", passwordError);
         passwordEl.focus();
         return;
       }

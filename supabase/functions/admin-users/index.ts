@@ -11,6 +11,8 @@ import {
   normalizeRole,
   normalizeUserId,
   normalizeUserPayload,
+  normalizeUserUpdatePayload,
+  passwordValidationError,
   upsertProfile,
 } from "../_shared/admin_helpers.ts";
 
@@ -69,6 +71,60 @@ Deno.serve(async (req: Request) => {
       }
 
       return jsonResponse({ ok: true, user: profile });
+    }
+
+    if (action === "update") {
+      const userId = normalizeUserId(payload?.user_id);
+      const updatedUser = normalizeUserUpdatePayload(payload);
+
+      const { data: existing, error: existingError } = await service
+        .from("profiles")
+        .select("id, email, display_name, role, is_active, created_at, updated_at")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingError) {
+        throw new HttpError(500, `Falha ao localizar usuario: ${existingError.message}`);
+      }
+      if (!existing) {
+        throw new HttpError(404, "Usuario nao encontrado.");
+      }
+
+      const nextEmail = updatedUser.email;
+      const nextDisplayName = updatedUser.displayName;
+      const emailChanged = nextEmail !== String(existing.email ?? "");
+      const displayNameChanged = nextDisplayName !== String(existing.display_name ?? "");
+
+      if (emailChanged || displayNameChanged) {
+        const authUpdatePayload: Record<string, unknown> = {};
+        if (emailChanged) {
+          authUpdatePayload.email = nextEmail;
+          authUpdatePayload.email_confirm = true;
+        }
+        if (displayNameChanged) {
+          authUpdatePayload.user_metadata = {
+            full_name: nextDisplayName,
+            name: nextDisplayName,
+          };
+        }
+
+        const { data: updatedAuthData, error: updateError } = await service.auth.admin.updateUserById(
+          userId,
+          authUpdatePayload,
+        );
+        if (updateError || !updatedAuthData.user) {
+          throw new HttpError(500, `Falha ao atualizar os dados do usuario: ${updateError?.message ?? "sem usuario"}`);
+        }
+      }
+
+      const refreshed = await upsertProfile(service, {
+        id: existing.id,
+        email: nextEmail,
+        display_name: nextDisplayName,
+        role: normalizeRole(existing.role),
+        is_active: Boolean(existing.is_active),
+      });
+      return jsonResponse({ ok: true, user: refreshed });
     }
 
     if (action === "set_active") {
@@ -185,8 +241,9 @@ Deno.serve(async (req: Request) => {
     if (action === "reset_password") {
       const userId = normalizeUserId(payload?.user_id);
       const password = String(payload?.password ?? "");
-      if (password.length < 8) {
-        throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
+      const passwordError = passwordValidationError(password);
+      if (passwordError) {
+        throw new HttpError(400, passwordError);
       }
 
       const { data: existing, error: existingError } = await service

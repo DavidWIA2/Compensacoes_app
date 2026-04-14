@@ -18,6 +18,9 @@ export type ProfileRow = {
   updated_at?: string | null;
 };
 
+export const PASSWORD_POLICY_SUMMARY =
+  "12+ caracteres, com letra maiuscula, minuscula, numero e simbolo";
+
 export class HttpError extends Error {
   status: number;
 
@@ -133,6 +136,36 @@ export function normalizeRole(value: unknown): "viewer" | "editor" | "admin" {
   throw new HttpError(400, "Perfil invalido. Use viewer, editor ou admin.");
 }
 
+export function passwordValidationError(password: string): string | null {
+  const normalized = String(password ?? "");
+  const requirements: string[] = [];
+
+  if (normalized.length < 12) {
+    requirements.push("pelo menos 12 caracteres");
+  }
+  if (!/[a-z]/.test(normalized)) {
+    requirements.push("uma letra minuscula");
+  }
+  if (!/[A-Z]/.test(normalized)) {
+    requirements.push("uma letra maiuscula");
+  }
+  if (!/[0-9]/.test(normalized)) {
+    requirements.push("um numero");
+  }
+  if (!/[^A-Za-z0-9\s]/.test(normalized)) {
+    requirements.push("um simbolo");
+  }
+
+  if (requirements.length === 0) {
+    return null;
+  }
+  if (requirements.length === 1) {
+    return `A senha precisa ter ${requirements[0]}.`;
+  }
+  const lastRequirement = requirements.at(-1) ?? "";
+  return `A senha precisa ter ${requirements.slice(0, -1).join(", ")} e ${lastRequirement}.`;
+}
+
 export function normalizeUserPayload(payload: unknown): {
   email: string;
   password: string;
@@ -150,10 +183,25 @@ export function normalizeUserPayload(payload: unknown): {
   if (!email || !email.includes("@")) {
     throw new HttpError(400, "Informe um email valido.");
   }
-  if (password.length < 8) {
-    throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
+  const passwordError = passwordValidationError(password);
+  if (passwordError) {
+    throw new HttpError(400, passwordError);
   }
   return { email, password, displayName, role, isActive };
+}
+
+export function normalizeUserUpdatePayload(payload: unknown): {
+  email: string;
+  displayName: string;
+} {
+  const data = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
+  const email = String(data.email ?? "").trim().toLowerCase();
+  const displayName = String(data.display_name ?? "").trim();
+
+  if (!email || !email.includes("@")) {
+    throw new HttpError(400, "Informe um email valido.");
+  }
+  return { email, displayName };
 }
 
 export function normalizeUserId(value: unknown): string {

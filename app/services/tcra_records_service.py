@@ -760,13 +760,13 @@ def filter_agenda_items_by_scope(
         if normalized_scope == AGENDA_SCOPE_VENCIDOS:
             return item.priority_rank == 0
         if normalized_scope == AGENDA_SCOPE_PENDENTES:
-            return item.priority_rank in {1, 3, 4, 5, 6, 7}
+            return item.priority_rank in {3, 4, 5, 6, 7}
         if normalized_scope == AGENDA_SCOPE_HOJE:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
+            if item.priority_rank in {0, 1}:
                 return True
             return bool(item.priority_rank == 2 and item.data_referencia and item.data_referencia <= current_day)
         if normalized_scope == AGENDA_SCOPE_7D:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
+            if item.priority_rank in {0, 1}:
                 return True
             return bool(
                 item.priority_rank == 2
@@ -774,7 +774,7 @@ def filter_agenda_items_by_scope(
                 and item.data_referencia <= current_day + timedelta(days=7)
             )
         if normalized_scope == AGENDA_SCOPE_30D:
-            if item.priority_rank in {0, 1, 3, 4, 5, 6, 7}:
+            if item.priority_rank in {0, 1}:
                 return True
             return bool(
                 item.priority_rank == 2

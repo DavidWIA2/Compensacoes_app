@@ -173,6 +173,18 @@ class MainWindow(QMainWindow):
             self.btn_sign_out.setEnabled(state)
         if hasattr(self, "action_sign_out"):
             self.action_sign_out.setEnabled(state)
+        can_change_password = False
+        if hasattr(self, "shell_controller"):
+            try:
+                can_change_password = bool(self.shell_controller.can_change_password())
+            except RuntimeError:
+                can_change_password = False
+        if hasattr(self, "btn_change_password"):
+            self.btn_change_password.setEnabled(state and can_change_password)
+            self.btn_change_password.setVisible(can_change_password)
+        if hasattr(self, "action_change_password"):
+            self.action_change_password.setEnabled(state and can_change_password)
+            self.action_change_password.setVisible(can_change_password)
 
     def _enable_sign_out_controls(self) -> None:
         self._sign_out_ready = True

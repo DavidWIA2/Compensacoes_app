@@ -32,6 +32,7 @@ from app.application.use_cases.persistence_monitoring import (
     PersistenceStatusReport,
 )
 from app.config import APP_WINDOW_TITLE
+from app.services.access_service import AccessAuthError
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
 from app.services.records_service import (
     STANDARD_TIPO_OPTIONS,
@@ -41,6 +42,7 @@ from app.services.records_service import (
     normalize_microbacia_key,
     tipo_is_eletronico,
 )
+from app.ui.components.access_dialog import ChangePasswordDialog
 from app.ui.components.themes import THEME_DARK, THEME_LIGHT, get_app_qss
 from app.ui.components.widgets import ColumnsDialog
 from app.ui.controllers.window_shell_support import (
@@ -153,6 +155,20 @@ class WindowShellController:
         self.window.btn_theme.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.window.btn_theme.setToolTip("Alterna entre tema claro e escuro.")
 
+        self.window.btn_change_password = QPushButton("Alterar senha")
+        self.window.btn_change_password.setProperty("kind", "ghost")
+        self.window.btn_change_password.setMinimumWidth(int(108 * self.window.scale_factor))
+        self.window.btn_change_password.setMaximumWidth(int(132 * self.window.scale_factor))
+        self.window.btn_change_password.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.window.btn_change_password.setAutoDefault(False)
+        self.window.btn_change_password.setDefault(False)
+        self.window.btn_change_password.setFocusPolicy(Qt.ClickFocus)
+        self.window.btn_change_password.setEnabled(False)
+        self.window.btn_change_password.setToolTip(
+            "Abre a troca de senha da conta institucional autenticada."
+        )
+        self.window.btn_change_password.setVisible(self.can_change_password())
+
         self.window.session_user_label = QLabel(
             build_user_identity_label_text(getattr(self.window, "access_session", None))
         )
@@ -230,6 +246,7 @@ class WindowShellController:
         account_actions_row.addWidget(self.window.session_role_label)
         account_actions_row.addStretch(1)
         account_actions_row.addWidget(self.window.btn_theme)
+        account_actions_row.addWidget(self.window.btn_change_password)
         account_actions_row.addWidget(self.window.btn_sign_out)
         account_layout.addLayout(account_actions_row)
         account_layout.addWidget(self.window.session_context_label)
@@ -347,6 +364,13 @@ class WindowShellController:
         role = str(getattr(access_session, "app_role", "") or "").strip().lower()
         return environment == "production" and role == "admin"
 
+    def can_change_password(self) -> bool:
+        access_session = getattr(self.window, "access_session", None)
+        environment = str(getattr(access_session, "environment", "") or "").strip().lower()
+        user_email = str(getattr(access_session, "user_email", "") or "").strip()
+        is_anonymous = bool(getattr(access_session, "is_anonymous", False))
+        return environment == "production" and bool(user_email) and not is_anonymous
+
     def _build_account_role_text(self) -> str:
         access_session = getattr(self.window, "access_session", None)
         role = str(getattr(access_session, "app_role", "") or "").strip().lower()
@@ -397,6 +421,11 @@ class WindowShellController:
             self.window.account_environment_chip.setText(
                 getattr(access_session, "environment_chip_text", "Ambiente: Contingência local")
             )
+        can_change_password = self.can_change_password()
+        if hasattr(self.window, "btn_change_password"):
+            self.window.btn_change_password.setVisible(can_change_password)
+        if hasattr(self.window, "action_change_password"):
+            self.window.action_change_password.setVisible(can_change_password)
 
     def _is_compact_layout(self) -> bool:
         try:
@@ -526,6 +555,10 @@ class WindowShellController:
             if hasattr(self.window, "btn_theme"):
                 self.window.btn_theme.setMaximumWidth(
                     max(int((52 if tight_mode else 56 if compact_mode else 72) * scale_factor), 48)
+                )
+            if hasattr(self.window, "btn_change_password"):
+                self.window.btn_change_password.setMaximumWidth(
+                    max(int((92 if tight_mode else 108 if compact_mode else 132) * scale_factor), 78)
                 )
             if hasattr(self.window, "btn_sign_out"):
                 self.window.btn_sign_out.setMaximumWidth(
@@ -859,6 +892,52 @@ class WindowShellController:
     def sign_out(self):
         return self.window.request_sign_out()
 
+    def _apply_updated_access_session(self, access_session) -> None:
+        self.window.access_session = access_session
+        self._bind_runtime_persistence_service()
+        self.refresh_window_chrome()
+
+    def change_password(self) -> bool:
+        if not self.can_change_password():
+            QMessageBox.information(
+                self.window,
+                "Alterar senha",
+                "A troca de senha só está disponível para contas autenticadas na produção oficial.",
+            )
+            return False
+
+        access_session = getattr(self.window, "access_session", None)
+        dialog = ChangePasswordDialog(
+            title_text="Alterar senha",
+            subtitle_text=(
+                "Confirme sua senha atual e defina uma nova senha pessoal para manter o acesso protegido."
+            ),
+            account_email=str(getattr(access_session, "user_email", "") or "").strip(),
+            require_current_password=True,
+            parent=self.window,
+        )
+        if not dialog.exec():
+            return False
+
+        payload = dialog.payload()
+        try:
+            updated_session = self.window.access_service.change_password(
+                access_session=access_session,
+                current_password=payload["current_password"],
+                new_password=payload["new_password"],
+            )
+        except AccessAuthError as exc:
+            QMessageBox.warning(self.window, "Alterar senha", str(exc))
+            return False
+
+        self._apply_updated_access_session(updated_session)
+        QMessageBox.information(
+            self.window,
+            "Alterar senha",
+            "Senha atualizada com sucesso.",
+        )
+        return True
+
     def setup_menus(self):
         build_command = self.window.command_controller.build_handler
         menubar = self.window.menuBar()
@@ -875,6 +954,14 @@ class WindowShellController:
         self.window.action_operation_history = QAction("Hist\u00f3rico de Opera\u00e7\u00f5es", self.window)
         self.window.action_operation_history.triggered.connect(build_command("show_operation_history"))
         file_menu.addAction(self.window.action_operation_history)
+
+        file_menu.addSeparator()
+
+        self.window.action_change_password = QAction("Alterar senha", self.window)
+        self.window.action_change_password.triggered.connect(build_command("change_password"))
+        self.window.action_change_password.setEnabled(False)
+        self.window.action_change_password.setVisible(self.can_change_password())
+        file_menu.addAction(self.window.action_change_password)
 
         file_menu.addSeparator()
 
@@ -909,6 +996,7 @@ class WindowShellController:
         build_command = self.window.command_controller.build_handler
 
         self.window.btn_theme.clicked.connect(build_command("toggle_theme"))
+        self.window.btn_change_password.clicked.connect(build_command("change_password"))
         self.window.btn_sign_out.clicked.connect(build_command("sign_out"))
 
         self.window.search.textChanged.connect(self.window.schedule_apply_filter)

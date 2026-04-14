@@ -112,6 +112,8 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
     t_on = resource_path("assets", "toggle_on.svg").replace("\\", "/")
     r_off = resource_path("assets", "radio_off.svg").replace("\\", "/")
     r_on = resource_path("assets", "radio_on.svg").replace("\\", "/")
+    spin_up = resource_path("assets", "spin_up.svg").replace("\\", "/")
+    spin_down = resource_path("assets", "spin_down.svg").replace("\\", "/")
     
     return f"""
         /* ===== Base ===== */
@@ -320,7 +322,7 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             border-bottom: {int(3*sf)}px solid {t['btn_primary']};
         }}
 
-        QLineEdit, QComboBox, QTextEdit, QPlainTextEdit {{
+        QLineEdit, QComboBox, QTextEdit, QPlainTextEdit, QAbstractSpinBox {{
             background-color: {t['input_bg']};
             border: 1px solid {t['input_border']};
             border-radius: {radius}px;
@@ -328,13 +330,42 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             color: {t['input_text']};
             min-height: {min_h_input}px;
         }}
-        QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+        QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus, QAbstractSpinBox:focus {{
             border: 1px solid {t['btn_primary']};
             background-color: {t['bg_panel']};
         }}
         QTextEdit:read-only, QPlainTextEdit:read-only {{
             background-color: {t['bg_subtle']};
             border-color: {t['kpi_border']};
+        }}
+        QAbstractSpinBox QLineEdit {{
+            background-color: transparent;
+            border: none;
+            padding: 0px;
+            color: {t['input_text']};
+            selection-background-color: {t['btn_primary']};
+            selection-color: {t['btn_text']};
+        }}
+        QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{
+            background-color: transparent;
+            border: none;
+            width: {max(int(22 * sf), 22)}px;
+        }}
+        QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {{
+            background-color: {t['btn_secondary_hover']};
+        }}
+        QAbstractSpinBox::up-button:pressed, QAbstractSpinBox::down-button:pressed {{
+            background-color: {t['btn_secondary_pressed']};
+        }}
+        QAbstractSpinBox::up-arrow, QAbstractSpinBox::down-arrow {{
+            width: {max(int(10 * sf), 10)}px;
+            height: {max(int(10 * sf), 10)}px;
+        }}
+        QAbstractSpinBox::up-arrow {{
+            image: url("{spin_up}");
+        }}
+        QAbstractSpinBox::down-arrow {{
+            image: url("{spin_down}");
         }}
         QLineEdit::placeholder, QTextEdit::placeholder, QPlainTextEdit::placeholder {{ color: {t['placeholder']}; }}
         

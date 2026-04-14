@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QBoxLayout,
     QDialog,
     QFormLayout,
     QFrame,
@@ -26,6 +27,7 @@ from app.config import (
     display_corporate_email_local_part,
 )
 from app.services.access_service import AccessEnvironment, AppAccessSession
+from app.services.password_policy import PASSWORD_POLICY_SUMMARY, password_validation_error
 from app.services.supabase_admin_users_service import (
     AdminUserRecord,
     AdminUsersError,
@@ -55,6 +57,10 @@ def _role_capabilities_text(role: str) -> str:
 
 def _is_admin_role(role: str) -> bool:
     return str(role or "").strip().lower() == "admin"
+
+
+def _normalize_email_local_part(value: str) -> str:
+    return display_corporate_email_local_part(value)
 
 
 def _configure_text_input(
@@ -134,8 +140,8 @@ class ResetUserPasswordDialog(QDialog):
         self.password_input = QLineEdit(self)
         _configure_text_input(
             self.password_input,
-            placeholder="Senha provisória com 8+ caracteres",
-            tooltip="Informe uma senha provisória segura para o usuário selecionado.",
+            placeholder=f"Senha provisoria ({PASSWORD_POLICY_SUMMARY})",
+            tooltip=f"Informe uma senha provisoria segura. Requisitos: {PASSWORD_POLICY_SUMMARY}.",
             password=True,
         )
         self.confirm_password_input = QLineEdit(self)
@@ -179,13 +185,280 @@ class ResetUserPasswordDialog(QDialog):
     def _submit(self) -> None:
         password = self.password_input.text()
         confirm_password = self.confirm_password_input.text()
-        if len(password) < 8:
-            self.status_label.setText("A senha precisa ter pelo menos 8 caracteres.")
+        password_error = password_validation_error(password)
+        if password_error:
+            self.status_label.setText(password_error)
             self.password_input.setFocus()
             return
         if password != confirm_password:
             self.status_label.setText("A confirmação da senha não confere.")
             self.confirm_password_input.setFocus()
+            return
+        self.accept()
+
+
+class CreateUserDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Novo usuário")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Cadastre uma nova conta corporativa para acesso ao sistema.")
+        title.setWordWrap(True)
+        title.setObjectName("FormStateLabel")
+        layout.addWidget(title)
+
+        helper = QLabel(
+            (
+                "Informe o identificador do email, nome de exibicao, senha provisoria, perfil e situacao inicial "
+                f"da conta. Senha exigida: {PASSWORD_POLICY_SUMMARY}."
+            )
+        )
+        helper.setWordWrap(True)
+        helper.setProperty("role", "helper")
+        layout.addWidget(helper)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+
+        self.domain_hint_label = QLabel(
+            "O domínio corporativo é acrescentado automaticamente. Informe apenas a parte antes de @saocarlos.sp.gov.br."
+        )
+        self.domain_hint_label.setWordWrap(True)
+        self.domain_hint_label.setProperty("role", "helper")
+        form.addRow(self.domain_hint_label)
+
+        self.permissions_hint_label = QLabel(
+            "Administradores podem cadastrar, redefinir senhas e controlar o status de acesso dos demais usuários."
+        )
+        self.permissions_hint_label.setWordWrap(True)
+        self.permissions_hint_label.setProperty("role", "helper")
+        form.addRow(self.permissions_hint_label)
+
+        self.role_preview_label = QLabel(_role_capabilities_text("editor"))
+        self.role_preview_label.setWordWrap(True)
+        self.role_preview_label.setProperty("role", "helper")
+        form.addRow(self.role_preview_label)
+
+        self.email_input = QLineEdit(self)
+        _configure_text_input(
+            self.email_input,
+            placeholder="nome.sobrenome",
+            tooltip="Informe apenas o identificador do email corporativo; o domínio é preenchido ao lado.",
+        )
+        self.email_input.editingFinished.connect(self._normalize_email_field)
+
+        self.display_name_input = QLineEdit(self)
+        _configure_text_input(
+            self.display_name_input,
+            placeholder="Nome para exibição",
+            tooltip="Nome exibido no app para o usuário cadastrado.",
+        )
+
+        self.password_input = QLineEdit(self)
+        _configure_text_input(
+            self.password_input,
+            placeholder=f"Senha provisoria ({PASSWORD_POLICY_SUMMARY})",
+            tooltip=f"Senha inicial entregue ao usuario para o primeiro acesso. Requisitos: {PASSWORD_POLICY_SUMMARY}.",
+            password=True,
+        )
+        self.password_input.returnPressed.connect(self._submit)
+        self.password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=self)
+
+        self.role_combo = QComboBox(self)
+        self.role_combo.addItem("Editor", "editor")
+        self.role_combo.addItem("Leitor", "viewer")
+        self.role_combo.addItem("Administrador", "admin")
+        self.role_combo.setToolTip("Define o nível de permissão do usuário.")
+        self.role_combo.currentIndexChanged.connect(self._refresh_role_preview)
+
+        self.is_active_combo = QComboBox(self)
+        self.is_active_combo.addItem("Ativo", True)
+        self.is_active_combo.addItem("Inativo", False)
+        self.is_active_combo.setToolTip("Escolhe se o usuário já entra liberado ou bloqueado.")
+
+        email_row = QWidget(self)
+        email_layout = QHBoxLayout(email_row)
+        email_layout.setContentsMargins(0, 0, 0, 0)
+        email_layout.setSpacing(8)
+        email_suffix = QLabel(DEFAULT_CORPORATE_EMAIL_SUFFIX, email_row)
+        email_suffix.setObjectName("FormStateLabel")
+        email_layout.addWidget(self.email_input, 1)
+        email_layout.addWidget(email_suffix, 0, Qt.AlignVCenter)
+
+        form.addRow("Email:", email_row)
+        form.addRow("Nome:", self.display_name_input)
+        form.addRow("Senha:", self.password_row)
+        form.addRow("Perfil:", self.role_combo)
+        form.addRow("Liberação:", self.is_active_combo)
+        layout.addLayout(form)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.status_label.setObjectName("FormStateLabel")
+        layout.addWidget(self.status_label)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel_button = QPushButton("Cancelar")
+        cancel_button.setProperty("kind", "ghost")
+        cancel_button.clicked.connect(self.reject)
+        submit_button = QPushButton("Cadastrar usuário")
+        submit_button.setProperty("kind", "primary")
+        submit_button.clicked.connect(self._submit)
+        actions.addWidget(cancel_button)
+        actions.addWidget(submit_button)
+        layout.addLayout(actions)
+
+        self._refresh_role_preview()
+
+    def values(self) -> dict[str, object]:
+        return {
+            "email": self.email_input.text(),
+            "display_name": self.display_name_input.text(),
+            "password": self.password_input.text(),
+            "role": str(self.role_combo.currentData() or "editor"),
+            "is_active": bool(self.is_active_combo.currentData()),
+        }
+
+    def _normalize_email_field(self) -> None:
+        local_part = _normalize_email_local_part(self.email_input.text())
+        if local_part != self.email_input.text():
+            self.email_input.setText(local_part)
+
+    def _refresh_role_preview(self) -> None:
+        self.role_preview_label.setText(_role_capabilities_text(str(self.role_combo.currentData() or "editor")))
+
+    def _submit(self) -> None:
+        self._normalize_email_field()
+        if not self.email_input.text().strip():
+            self.status_label.setText("Informe o identificador do email corporativo.")
+            self.email_input.setFocus()
+            return
+        password_error = password_validation_error(self.password_input.text())
+        if password_error:
+            self.status_label.setText(password_error)
+            self.password_input.setFocus()
+            return
+        self.accept()
+
+
+class EditUserDialog(QDialog):
+    def __init__(self, *, email: str, display_name: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Editar usuário")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+        self._initial_email = str(email or "")
+        self._initial_display_name = str(display_name or "")
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Corrija os dados cadastrais da conta selecionada.")
+        title.setWordWrap(True)
+        title.setObjectName("FormStateLabel")
+        layout.addWidget(title)
+
+        helper = QLabel(
+            "Use esta janela para ajustar email corporativo e nome de exibição. Perfil, acesso e senha continuam nas ações da lateral."
+        )
+        helper.setWordWrap(True)
+        helper.setProperty("role", "helper")
+        layout.addWidget(helper)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+
+        self.domain_hint_label = QLabel(
+            "O domínio corporativo é acrescentado automaticamente. Informe apenas a parte antes de @saocarlos.sp.gov.br."
+        )
+        self.domain_hint_label.setWordWrap(True)
+        self.domain_hint_label.setProperty("role", "helper")
+        form.addRow(self.domain_hint_label)
+
+        self.email_input = QLineEdit(self)
+        _configure_text_input(
+            self.email_input,
+            placeholder="nome.sobrenome",
+            tooltip="Informe apenas o identificador do email corporativo; o domínio é preenchido ao lado.",
+        )
+        self.email_input.setText(_normalize_email_local_part(self._initial_email))
+        self.email_input.editingFinished.connect(self._normalize_email_field)
+
+        self.display_name_input = QLineEdit(self)
+        _configure_text_input(
+            self.display_name_input,
+            placeholder="Nome para exibição",
+            tooltip="Nome exibido no app para o usuário cadastrado.",
+        )
+        self.display_name_input.setText(self._initial_display_name)
+        self.display_name_input.returnPressed.connect(self._submit)
+
+        email_row = QWidget(self)
+        email_layout = QHBoxLayout(email_row)
+        email_layout.setContentsMargins(0, 0, 0, 0)
+        email_layout.setSpacing(8)
+        email_suffix = QLabel(DEFAULT_CORPORATE_EMAIL_SUFFIX, email_row)
+        email_suffix.setObjectName("FormStateLabel")
+        email_layout.addWidget(self.email_input, 1)
+        email_layout.addWidget(email_suffix, 0, Qt.AlignVCenter)
+
+        form.addRow("Email:", email_row)
+        form.addRow("Nome:", self.display_name_input)
+        layout.addLayout(form)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.status_label.setObjectName("FormStateLabel")
+        layout.addWidget(self.status_label)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel_button = QPushButton("Cancelar")
+        cancel_button.setProperty("kind", "ghost")
+        cancel_button.clicked.connect(self.reject)
+        submit_button = QPushButton("Salvar correções")
+        submit_button.setProperty("kind", "primary")
+        submit_button.clicked.connect(self._submit)
+        actions.addWidget(cancel_button)
+        actions.addWidget(submit_button)
+        layout.addLayout(actions)
+
+    def values(self) -> dict[str, str]:
+        return {
+            "email": self.email_input.text(),
+            "display_name": self.display_name_input.text(),
+        }
+
+    def _normalize_email_field(self) -> None:
+        local_part = _normalize_email_local_part(self.email_input.text())
+        if local_part != self.email_input.text():
+            self.email_input.setText(local_part)
+
+    def _submit(self) -> None:
+        self._normalize_email_field()
+        if not self.email_input.text().strip():
+            self.status_label.setText("Informe o identificador do email corporativo.")
+            self.email_input.setFocus()
             return
         self.accept()
 
@@ -247,6 +520,11 @@ class AdminUsersTab(QWidget):
         title_text_layout.addWidget(self.header_subtitle)
         title_text_layout.addLayout(header_badges)
         title_row.addLayout(title_text_layout, 1)
+        self.btn_new_user = QPushButton("Novo usuário")
+        self.btn_new_user.setProperty("kind", "primary")
+        self.btn_new_user.setToolTip("Abre uma janela para cadastrar uma nova conta no ambiente oficial.")
+        self.btn_new_user.setMinimumHeight(int(28 * self.sf))
+        title_row.addWidget(self.btn_new_user, 0, Qt.AlignTop)
         self.btn_refresh = QPushButton("Atualizar")
         self.btn_refresh.setProperty("kind", "ghost")
         self.btn_refresh.setToolTip("Recarrega a lista de usuários e o estado de cada perfil.")
@@ -325,6 +603,7 @@ class AdminUsersTab(QWidget):
         content_layout.setSpacing(int(8 * self.sf))
 
         table_panel = QFrame(self)
+        self.table_panel = table_panel
         table_panel.setProperty("panel", "section")
         table_panel_layout = QVBoxLayout(table_panel)
         table_panel_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
@@ -392,6 +671,7 @@ class AdminUsersTab(QWidget):
         profile_editor_caption.setProperty("role", "panel-caption")
         manage_layout.addWidget(profile_editor_caption)
         role_editor_row = QHBoxLayout()
+        self.role_editor_row = role_editor_row
         role_editor_row.setSpacing(int(6 * self.sf))
         self.manage_role_combo = QComboBox(self)
         self.manage_role_combo.addItem("Administrador", "admin")
@@ -405,8 +685,14 @@ class AdminUsersTab(QWidget):
         role_editor_row.addWidget(self.manage_role_combo, 1)
         role_editor_row.addWidget(self.btn_apply_role, 0)
         manage_layout.addLayout(role_editor_row)
+        self.btn_edit_user = QPushButton("Editar dados")
+        self.btn_edit_user.setProperty("kind", "ghost")
+        self.btn_edit_user.setMinimumHeight(int(28 * self.sf))
+        self.btn_edit_user.setToolTip("Corrige email corporativo e nome de exibição da conta selecionada.")
+        manage_layout.addWidget(self.btn_edit_user, 0, Qt.AlignLeft)
 
         action_row = QHBoxLayout()
+        self.action_row_primary = action_row
         action_row.setSpacing(int(6 * self.sf))
         self.btn_activate = QPushButton("Reativar acesso")
         self.btn_activate.setProperty("kind", "success")
@@ -431,6 +717,7 @@ class AdminUsersTab(QWidget):
         manage_layout.addWidget(actions_caption)
         manage_layout.addLayout(action_row)
         action_row_secondary = QHBoxLayout()
+        self.action_row_secondary = action_row_secondary
         action_row_secondary.setSpacing(int(6 * self.sf))
         action_row_secondary.addWidget(self.btn_reset_password)
         action_row_secondary.addWidget(self.btn_delete)
@@ -439,84 +726,6 @@ class AdminUsersTab(QWidget):
         manage_layout.addWidget(self.selection_hint)
         sidebar_layout.addWidget(manage_group)
 
-        create_group = QGroupBox("Cadastrar nova conta")
-        create_layout = QFormLayout(create_group)
-        create_layout.setContentsMargins(int(10 * self.sf), int(10 * self.sf), int(10 * self.sf), int(10 * self.sf))
-        create_layout.setHorizontalSpacing(int(12 * self.sf))
-        create_layout.setVerticalSpacing(int(8 * self.sf))
-        self.create_hint = QLabel("Preencha os dados essenciais para liberar o primeiro acesso da conta corporativa.")
-        self.create_hint.setProperty("role", "helper")
-        self.create_hint.setWordWrap(True)
-        create_layout.addRow(self.create_hint)
-        self.create_role_hint = QLabel(
-            "Administradores podem cadastrar, redefinir senhas e controlar o status de acesso dos demais usuários."
-        )
-        self.create_role_hint.setProperty("role", "helper")
-        self.create_role_hint.setWordWrap(True)
-        create_layout.addRow(self.create_role_hint)
-        self.create_permissions_label = QLabel(_role_capabilities_text("editor"))
-        self.create_permissions_label.setProperty("role", "helper")
-        self.create_permissions_label.setWordWrap(True)
-        create_layout.addRow(self.create_permissions_label)
-        self.create_domain_hint = QLabel(
-            "O domínio corporativo é acrescentado automaticamente. Informe apenas a parte antes de @saocarlos.sp.gov.br.",
-            create_group,
-        )
-        self.create_domain_hint.setProperty("role", "helper")
-        self.create_domain_hint.setWordWrap(True)
-        create_layout.addRow(self.create_domain_hint)
-
-        self.email_input = QLineEdit(self)
-        _configure_text_input(
-            self.email_input,
-            placeholder="nome.sobrenome",
-            tooltip="Informe apenas o identificador do email corporativo; o domínio é preenchido ao lado.",
-        )
-        self.email_input.editingFinished.connect(self._normalize_email_field)
-        self.display_name_input = QLineEdit(self)
-        _configure_text_input(
-            self.display_name_input,
-            placeholder="Nome para exibição",
-            tooltip="Nome exibido no app para o usuário cadastrado.",
-        )
-        self.password_input = QLineEdit(self)
-        _configure_text_input(
-            self.password_input,
-            placeholder="Senha provisória",
-            tooltip="Senha inicial entregue ao usuário para o primeiro acesso.",
-            password=True,
-        )
-        self.password_row, self.password_toggle_button = _build_password_row(self.password_input, parent=create_group)
-        self.role_combo = QComboBox(self)
-        self.role_combo.addItem("Editor", "editor")
-        self.role_combo.addItem("Leitor", "viewer")
-        self.role_combo.addItem("Administrador", "admin")
-        self.role_combo.setToolTip("Define o nível de permissão do usuário.")
-        self.is_active_combo = QComboBox(self)
-        self.is_active_combo.addItem("Ativo", True)
-        self.is_active_combo.addItem("Inativo", False)
-        self.is_active_combo.setToolTip("Escolhe se o usuário já entra liberado ou bloqueado.")
-        self.btn_create = QPushButton("Cadastrar usuário")
-        self.btn_create.setProperty("kind", "primary")
-        self.btn_create.setToolTip("Cria um novo usuário de produção com o perfil informado.")
-        self.btn_create.setMinimumHeight(int(30 * self.sf))
-
-        email_row = QWidget(self)
-        email_layout = QHBoxLayout(email_row)
-        email_layout.setContentsMargins(0, 0, 0, 0)
-        email_layout.setSpacing(int(8 * self.sf))
-        email_suffix = QLabel(DEFAULT_CORPORATE_EMAIL_SUFFIX, email_row)
-        email_suffix.setObjectName("FormStateLabel")
-        email_layout.addWidget(self.email_input, 1)
-        email_layout.addWidget(email_suffix, 0, Qt.AlignVCenter)
-
-        create_layout.addRow("Email:", email_row)
-        create_layout.addRow("Nome:", self.display_name_input)
-        create_layout.addRow("Senha:", self.password_row)
-        create_layout.addRow("Perfil:", self.role_combo)
-        create_layout.addRow("Liberação:", self.is_active_combo)
-        create_layout.addRow("", self.btn_create)
-        sidebar_layout.addWidget(create_group)
         sidebar_layout.addStretch(1)
 
         content_layout.addWidget(table_panel, 3)
@@ -524,21 +733,20 @@ class AdminUsersTab(QWidget):
         layout.addLayout(content_layout, 1)
 
         self.btn_refresh.clicked.connect(self.refresh_users)
-        self.btn_create.clicked.connect(self._handle_create_user)
+        self.btn_new_user.clicked.connect(self._open_create_user_dialog)
         self.btn_activate.clicked.connect(lambda: self._handle_set_active(True))
         self.btn_deactivate.clicked.connect(lambda: self._handle_set_active(False))
         self.btn_reset_password.clicked.connect(self._handle_reset_password)
         self.btn_delete.clicked.connect(self._handle_delete_user)
         self.btn_apply_role.clicked.connect(self._handle_set_role)
+        self.btn_edit_user.clicked.connect(self._handle_edit_user)
         self.table.itemSelectionChanged.connect(self._refresh_action_state)
         self.table_search_input.textChanged.connect(self._populate_table)
         self.status_filter_combo.currentIndexChanged.connect(self._populate_table)
         self.role_filter_combo.currentIndexChanged.connect(self._populate_table)
         self.manage_role_combo.currentIndexChanged.connect(self._refresh_action_state)
-        self.role_combo.currentIndexChanged.connect(self._refresh_create_role_preview)
         self._refresh_summary_chips(0)
         self._refresh_operator_context()
-        self._refresh_create_role_preview()
         self._refresh_action_state()
         self._apply_responsive_layout()
 
@@ -562,18 +770,19 @@ class AdminUsersTab(QWidget):
 
     def _apply_responsive_layout(self) -> None:
         compact_mode = self._is_compact_layout()
+        self.content_layout.setDirection(QBoxLayout.TopToBottom if compact_mode else QBoxLayout.LeftToRight)
+        self.role_editor_row.setDirection(QBoxLayout.TopToBottom if compact_mode else QBoxLayout.LeftToRight)
+        self.action_row_primary.setDirection(QBoxLayout.TopToBottom if compact_mode else QBoxLayout.LeftToRight)
+        self.action_row_secondary.setDirection(QBoxLayout.TopToBottom if compact_mode else QBoxLayout.LeftToRight)
         self.header_subtitle.setVisible(not compact_mode)
         self.filters_hint.setVisible(not compact_mode)
         self.table_hint.setVisible(not compact_mode)
         self.manage_hint.setVisible(not compact_mode)
-        self.create_hint.setVisible(not compact_mode)
-        self.create_role_hint.setVisible(not compact_mode)
         self.operator_context_label.setVisible(not compact_mode)
-        self.create_domain_hint.setVisible(not compact_mode)
-        self.create_permissions_label.setVisible(True)
         self.selection_permissions_label.setVisible(True)
 
-        self.sidebar.setMinimumWidth(max(int((260 if compact_mode else 320) * self.sf), 220))
+        self.sidebar.setMinimumWidth(0 if compact_mode else max(int(320 * self.sf), 220))
+        self.btn_new_user.setText("Novo" if compact_mode else "Novo usuário")
         self.btn_activate.setText("Reativar" if compact_mode else "Reativar acesso")
         self.btn_deactivate.setText("Desativar" if compact_mode else "Desativar acesso")
         self.btn_reset_password.setText("Senha" if compact_mode else "Redefinir senha")
@@ -758,6 +967,7 @@ class AdminUsersTab(QWidget):
         )
         self.btn_reset_password.setEnabled(can_manage)
         self.btn_delete.setEnabled(can_manage and not can_manage_self and not is_last_active_admin)
+        self.btn_edit_user.setEnabled(can_manage)
         self.manage_role_combo.setEnabled(can_manage and not can_manage_self)
         self.btn_apply_role.setEnabled(
             can_manage
@@ -807,21 +1017,20 @@ class AdminUsersTab(QWidget):
                 f"Conta pronta para gestão: {user.email} • {_format_role(user.role)} • {user.status_label}"
             )
 
-    def _normalize_email_field(self) -> None:
-        local_part = display_corporate_email_local_part(self.email_input.text())
-        if local_part != self.email_input.text():
-            self.email_input.setText(local_part)
-
-    def _handle_create_user(self) -> None:
+    def _open_create_user_dialog(self) -> None:
+        dialog = CreateUserDialog(self)
+        if not dialog.exec():
+            return
+        values = dialog.values()
         self._set_busy(True, "Cadastrando usuário...")
         try:
             created = self.admin_service.create_user(
                 self._access_session(),
-                email=self.email_input.text(),
-                password=self.password_input.text(),
-                display_name=self.display_name_input.text(),
-                role=str(self.role_combo.currentData() or "editor"),
-                is_active=bool(self.is_active_combo.currentData()),
+                email=str(values.get("email") or ""),
+                password=str(values.get("password") or ""),
+                display_name=str(values.get("display_name") or ""),
+                role=str(values.get("role") or "editor"),
+                is_active=bool(values.get("is_active")),
             )
         except AdminUsersError as exc:
             self._set_busy(False, str(exc))
@@ -832,13 +1041,47 @@ class AdminUsersTab(QWidget):
             QMessageBox.critical(self, "Administração", f"Falha inesperada ao cadastrar usuário: {exc}")
             return
 
-        self.email_input.clear()
-        self.display_name_input.clear()
-        self.password_input.clear()
-        self.role_combo.setCurrentIndex(0)
-        self.is_active_combo.setCurrentIndex(0)
-        self.status_label.setText(f"Usuário {created.email} cadastrado com sucesso.")
+        success_message = f"Usuário {created.email} cadastrado com sucesso."
+        self._set_busy(False, success_message)
         self.refresh_users()
+        self.status_label.setText(success_message)
+
+    def _handle_edit_user(self) -> None:
+        user = self._selected_user()
+        if user is None:
+            return
+
+        dialog = EditUserDialog(
+            email=user.email,
+            display_name=user.display_name,
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+
+        values = dialog.values()
+        self._set_busy(True, "Atualizando dados do usuário...")
+        try:
+            updated = self.admin_service.update_user(
+                self._access_session(),
+                user_id=user.user_id,
+                email=str(values.get("email") or ""),
+                display_name=str(values.get("display_name") or ""),
+            )
+        except AdminUsersError as exc:
+            self._set_busy(False, str(exc))
+            QMessageBox.warning(self, "Administração", str(exc))
+            return
+        except Exception as exc:
+            self._set_busy(False, f"Falha inesperada: {exc}")
+            QMessageBox.critical(self, "Administração", f"Falha inesperada ao atualizar usuário: {exc}")
+            return
+
+        success_message = f"Dados atualizados: {updated.email}."
+        self._set_busy(False, success_message)
+        self.refresh_users()
+        self._select_user_by_id(updated.user_id)
+        self.status_label.setText(success_message)
 
     def _handle_set_active(self, is_active: bool) -> None:
         user = self._selected_user()
@@ -875,10 +1118,10 @@ class AdminUsersTab(QWidget):
             QMessageBox.critical(self, "Administração", f"Falha inesperada ao atualizar usuário: {exc}")
             return
 
-        self.status_label.setText(
-            f"Usuário {updated.email} agora está {'ativo' if updated.is_active else 'inativo'}."
-        )
+        success_message = f"Usuário {updated.email} agora está {'ativo' if updated.is_active else 'inativo'}."
+        self._set_busy(False, success_message)
         self.refresh_users()
+        self.status_label.setText(success_message)
 
     def _handle_delete_user(self) -> None:
         user = self._selected_user()
@@ -912,8 +1155,10 @@ class AdminUsersTab(QWidget):
             QMessageBox.critical(self, "Administração", f"Falha inesperada ao excluir usuário: {exc}")
             return
 
-        self.status_label.setText(f"Usuário {user.email} excluído com sucesso.")
+        success_message = f"Usuário {user.email} excluído com sucesso."
+        self._set_busy(False, success_message)
         self.refresh_users()
+        self.status_label.setText(success_message)
 
     def _handle_reset_password(self) -> None:
         user = self._selected_user()
@@ -987,31 +1232,41 @@ class AdminUsersTab(QWidget):
             QMessageBox.critical(self, "Administração", f"Falha inesperada ao atualizar perfil: {exc}")
             return
 
-        self.status_label.setText(
-            f"Perfil atualizado: {updated.email} agora é {_format_role(updated.role)}."
-        )
+        success_message = f"Perfil atualizado: {updated.email} agora é {_format_role(updated.role)}."
+        self._set_busy(False, success_message)
         self.refresh_users()
+        self.status_label.setText(success_message)
 
     def _set_busy(self, busy: bool, message: str) -> None:
         self._busy = busy
         self.status_label.setText(message)
         self.btn_refresh.setEnabled(not busy)
-        self.btn_create.setEnabled(not busy)
+        self.btn_new_user.setEnabled(not busy)
         self.btn_reset_password.setEnabled(not busy and self._selected_user() is not None)
         for widget in (
             self.table_search_input,
             self.status_filter_combo,
             self.role_filter_combo,
-            self.email_input,
-            self.display_name_input,
-            self.password_input,
-            self.role_combo,
-            self.is_active_combo,
             self.manage_role_combo,
             self.table,
         ):
             widget.setEnabled(not busy)
         self._refresh_action_state()
+
+    def _select_user_by_id(self, user_id: str) -> None:
+        target = str(user_id or "").strip()
+        if not target:
+            return
+        for row_index in range(self.table.rowCount()):
+            item = self.table.item(row_index, 0)
+            if item is None:
+                continue
+            if str(item.data(Qt.UserRole) or "").strip() != target:
+                continue
+            self.table.selectRow(row_index)
+            self.table.setCurrentCell(row_index, 0)
+            self._refresh_action_state()
+            return
 
     def _access_session(self) -> AppAccessSession:
         access_session = getattr(self.main_window, "access_session", None)

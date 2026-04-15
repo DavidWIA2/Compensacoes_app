@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List, Sequence
 
+from reportlab.lib import colors
+from reportlab.pdfbase.pdfmetrics import stringWidth
+
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_LABEL_BY_ATTR, display_column_label
 from app.services.coordinates import format_coordinate_pair
@@ -115,6 +118,32 @@ def build_report_metadata_rows(
         ReportMetadataRow("Emitido em", format_report_timestamp(generated_at)),
         ReportMetadataRow("Escopo", normalized_filter),
     )
+
+
+def build_footer_right_text(*, generated_label: str, page_number: int, emitted_by: str = "") -> str:
+    parts = [f"Emitido em {generated_label}"]
+    normalized_user = str(emitted_by or "").strip()
+    if normalized_user:
+        parts.append(f"por {normalized_user}")
+    parts.append(f"P\u00e1gina {page_number}")
+    return " | ".join(parts)
+
+
+def draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str, emitted_by: str = "") -> None:
+    canvas.saveState()
+    canvas.setStrokeColor(colors.HexColor("#C8D5E3"))
+    canvas.line(doc.leftMargin, 18, doc.pagesize[0] - doc.rightMargin, 18)
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#486581"))
+    canvas.drawString(doc.leftMargin, 8, f"{INSTITUTIONAL_APP_NAME} | {title}")
+    right_text = build_footer_right_text(
+        generated_label=generated_label,
+        page_number=canvas.getPageNumber(),
+        emitted_by=emitted_by,
+    )
+    text_width = stringWidth(right_text, "Helvetica", 8)
+    canvas.drawString(doc.pagesize[0] - doc.rightMargin - text_width, 8, right_text)
+    canvas.restoreState()
 
 
 def resolve_report_logo_path() -> str:

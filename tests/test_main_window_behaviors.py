@@ -308,6 +308,8 @@ def test_change_password_rebinds_runtime_access_session(monkeypatch):
         "change_password",
         lambda **kwargs: updated_session,
     )
+    window._remote_snapshot_refresh_status = object()
+    window.data_controller._last_remote_operational_refresh_monotonic = 42.0
 
     assert window.authoritative_persistence._current_access_session().access_token == "old-access-token"
 
@@ -315,6 +317,8 @@ def test_change_password_rebinds_runtime_access_session(monkeypatch):
 
     assert window.access_session.access_token == "new-access-token"
     assert window.authoritative_persistence._current_access_session().access_token == "new-access-token"
+    assert window._remote_snapshot_refresh_status is None
+    assert window.data_controller._last_remote_operational_refresh_monotonic == 0.0
 
     window.close()
 
@@ -1888,6 +1892,13 @@ def test_export_csv_uses_shell_visible_records(monkeypatch, tmp_path):
 def test_export_ficha_pdf_prompts_observation_and_forwards_it(monkeypatch, tmp_path):
     window = MainWindow()
     window.selected = make_record(oficio_processo="ABC-1")
+    window.access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="Produção",
+        auth_mode="password",
+        user_email="david.oliveira@saocarlos.sp.gov.br",
+        display_name="David Wiliam Pinheiro de Oliveira",
+    )
     captured = {}
 
     monkeypatch.setattr(window, "_get_save_path", lambda *args, **kwargs: str(tmp_path / "ficha.pdf"))
@@ -1897,11 +1908,13 @@ def test_export_ficha_pdf_prompts_observation_and_forwards_it(monkeypatch, tmp_p
     )
     monkeypatch.setattr(
         "app.ui.controllers.export_controller.export_individual_pdf",
-        lambda path, record, observation="": captured.update(
+        lambda path, record, observation="", emitted_by="", signature_name="": captured.update(
             {
                 "path": path,
                 "record": record,
                 "observation": observation,
+                "emitted_by": emitted_by,
+                "signature_name": signature_name,
             }
         ),
     )
@@ -1911,6 +1924,8 @@ def test_export_ficha_pdf_prompts_observation_and_forwards_it(monkeypatch, tmp_p
     assert captured["path"].endswith("ficha.pdf")
     assert captured["record"] is window.selected
     assert captured["observation"] == "Observacao de teste"
+    assert captured["emitted_by"] == "david.oliveira"
+    assert captured["signature_name"] == "David Wiliam Pinheiro de Oliveira"
     window.close()
 
 

@@ -3,6 +3,7 @@ from app.models.plantio_item import PlantioItem
 from app.services.ficha_report_service import (
     _build_ficha_rows,
     _build_plantios_rows,
+    _resolve_signature_label,
     _resolve_ficha_logo_path,
     export_individual_pdf,
 )
@@ -43,13 +44,40 @@ def test_ficha_logo_prefers_prefeitura_asset():
     assert logo_path.endswith("assets/logo_prefeitura.png")
 
 
-def test_export_individual_pdf_generates_file_with_header_and_observation(tmp_path):
-    path = tmp_path / "ficha.pdf"
+def test_resolve_signature_label_prefers_logged_user_name():
+    assert _resolve_signature_label("David Wiliam Pinheiro de Oliveira") == "David Wiliam Pinheiro de Oliveira"
+    assert _resolve_signature_label("") == "Assinatura do T\u00e9cnico Respons\u00e1vel"
 
-    export_individual_pdf(str(path), make_record(), "Observacao de teste")
+
+def test_export_individual_pdf_generates_file_with_header_observation_and_footer(tmp_path, monkeypatch):
+    path = tmp_path / "ficha.pdf"
+    footer_calls = []
+
+    monkeypatch.setattr(
+        "app.services.ficha_report_service.draw_pdf_page_frame",
+        lambda canvas, doc, *, title, generated_label, emitted_by="": footer_calls.append(
+            {
+                "title": title,
+                "generated_label": generated_label,
+                "emitted_by": emitted_by,
+            }
+        ),
+    )
+
+    export_individual_pdf(
+        str(path),
+        make_record(),
+        "Observacao de teste",
+        emitted_by="david.oliveira",
+        signature_name="David Wiliam Pinheiro de Oliveira",
+    )
 
     assert path.exists()
     assert path.stat().st_size > 0
+    assert len(footer_calls) == 1
+    assert footer_calls[0]["title"] == "Ficha de Compensa\u00e7\u00e3o Ambiental"
+    assert footer_calls[0]["generated_label"]
+    assert footer_calls[0]["emitted_by"] == "david.oliveira"
 
 
 def test_build_plantios_rows_lists_all_registered_plantios():

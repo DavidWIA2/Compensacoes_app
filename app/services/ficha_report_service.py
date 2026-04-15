@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from typing import List
 from xml.sax.saxutils import escape
 
@@ -14,8 +15,14 @@ from app.services.plantio_service import record_plantio_items
 from app.services.report_service_support import (
     build_department_header_html_lines,
     build_individual_report_rows,
+    draw_pdf_page_frame,
+    format_report_timestamp,
     resolve_report_logo_path,
 )
+
+
+FICHA_REPORT_TITLE = "Ficha de Compensa\u00e7\u00e3o Ambiental"
+DEFAULT_SIGNATURE_LABEL = "Assinatura do T\u00e9cnico Respons\u00e1vel"
 
 
 def _resolve_ficha_logo_path() -> str:
@@ -97,10 +104,24 @@ def _build_plantios_rows(record: Compensacao) -> List[List[str]]:
     return rows
 
 
-def export_individual_pdf(filepath: str, record: Compensacao, observation: str = ""):
+def _resolve_signature_label(signature_name: str = "") -> str:
+    normalized = str(signature_name or "").strip()
+    return normalized or DEFAULT_SIGNATURE_LABEL
+
+
+def export_individual_pdf(
+    filepath: str,
+    record: Compensacao,
+    observation: str = "",
+    *,
+    emitted_by: str = "",
+    signature_name: str = "",
+):
     def paragraph_text(value: object) -> str:
         return escape(str(value or "")).replace("\r\n", "\n").replace("\n", "<br/>")
 
+    generated_label = format_report_timestamp()
+    signature_label = _resolve_signature_label(signature_name)
     doc = SimpleDocTemplate(
         filepath,
         pagesize=A4,
@@ -158,7 +179,7 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
 
     elements = [
         *_build_ficha_header(styles),
-        Paragraph("Ficha de Compensação Ambiental", title_style),
+        Paragraph(FICHA_REPORT_TITLE, title_style),
         Spacer(1, 0.12 * inch),
     ]
 
@@ -234,6 +255,17 @@ def export_individual_pdf(filepath: str, record: Compensacao, observation: str =
     elements.append(Spacer(1, 0.5 * inch))
     elements.append(Spacer(1, 1.5 * inch))
     elements.append(Paragraph("_" * 40, signature_style))
-    elements.append(Paragraph("Assinatura do Técnico Responsável", signature_subtitle_style))
+    elements.append(Spacer(1, 0.08 * inch))
+    elements.append(Paragraph(signature_label, signature_subtitle_style))
 
-    doc.build(elements)
+    footer_callback = partial(
+        draw_pdf_page_frame,
+        title=FICHA_REPORT_TITLE,
+        generated_label=generated_label,
+        emitted_by=emitted_by,
+    )
+    doc.build(
+        elements,
+        onFirstPage=footer_callback,
+        onLaterPages=footer_callback,
+    )

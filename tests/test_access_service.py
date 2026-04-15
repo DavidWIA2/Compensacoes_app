@@ -58,14 +58,16 @@ class _FakeAuth:
     def __init__(self, response):
         self._response = response
         self.signed_out = False
+        self.sign_out_calls = []
         self.last_payload = None
 
     def sign_in_with_password(self, payload):
         self.last_payload = payload
         return self._response
 
-    def sign_out(self):
+    def sign_out(self, options=None):
         self.signed_out = True
+        self.sign_out_calls.append(options)
 
 
 class _FakeProductionClient:
@@ -90,6 +92,7 @@ class _FakeRecoveryAuth:
         self.password_sign_in_payload = None
         self.session_calls = []
         self.signed_out = False
+        self.sign_out_calls = []
 
     def sign_in_with_otp(self, payload):
         self.otp_payload = payload
@@ -138,8 +141,9 @@ class _FakeRecoveryAuth:
             ),
         )
 
-    def sign_out(self):
+    def sign_out(self, options=None):
         self.signed_out = True
+        self.sign_out_calls.append(options)
 
 
 class _FakeRecoveryClient:
@@ -159,6 +163,8 @@ class _FakeRecoveryClient:
 class _FakeAuthenticatedAuth:
     def __init__(self, *, response=None):
         self.update_payload = None
+        self.signed_out = False
+        self.sign_out_calls = []
         self._response = response or SimpleNamespace(
             user=SimpleNamespace(id="user-123"),
             session=SimpleNamespace(
@@ -170,6 +176,10 @@ class _FakeAuthenticatedAuth:
     def update_user(self, payload):
         self.update_payload = payload
         return self._response
+
+    def sign_out(self, options=None):
+        self.signed_out = True
+        self.sign_out_calls.append(options)
 
 
 class _FakeAuthenticatedClient:
@@ -338,6 +348,7 @@ def test_sign_in_production_builds_remote_session_from_supabase_response():
     assert session.environment == AccessEnvironment.PRODUCTION
     assert session.user_id == "user-123"
     assert session.user_email == "analista@prefeitura.sp.gov.br"
+    assert session.display_name == "Analista"
     assert session.is_anonymous is False
     assert session.local_db_path == "C:/tmp/producao.db"
     assert session.local_session_path == DEFAULT_SINGLETON_SESSION_PATH
@@ -536,6 +547,7 @@ def test_complete_password_reset_verifies_otp_updates_password_and_signs_out():
         {"name": "rpc_complete_password_change", "params": {}}
     ]
     assert fake_client.auth.signed_out is True
+    assert fake_client.auth.sign_out_calls == [{"scope": "local"}]
 
 
 def test_change_password_verifies_current_password_updates_session_and_clears_rotation_flag():
@@ -559,12 +571,34 @@ def test_change_password_verifies_current_password_updates_session_and_clears_ro
             "must_change_password": True,
         },
     )
+    refreshed_client = _FakeProductionClient(
+        response=SimpleNamespace(
+            user=SimpleNamespace(
+                id="user-123",
+                email="analista@saocarlos.sp.gov.br",
+                is_anonymous=False,
+            ),
+            session=SimpleNamespace(
+                access_token="updated-token",
+                refresh_token="updated-refresh",
+            ),
+        ),
+        profile_data={
+            "id": "user-123",
+            "email": "analista@saocarlos.sp.gov.br",
+            "display_name": "Analista",
+            "role": "editor",
+            "is_active": True,
+            "must_change_password": False,
+        },
+    )
     authenticated_client = _FakeAuthenticatedClient()
     created_clients = []
+    created_client_instances = [verification_client, refreshed_client]
 
     def _create_client(profile):
         created_clients.append(profile.environment)
-        return verification_client
+        return created_client_instances.pop(0)
 
     service._create_client = _create_client  # type: ignore[method-assign]
     service.create_authenticated_client = lambda access_session: authenticated_client  # type: ignore[method-assign]
@@ -586,16 +620,26 @@ def test_change_password_verifies_current_password_updates_session_and_clears_ro
         new_password=UPDATED_STRONG_PASSWORD,
     )
 
-    assert created_clients == [AccessEnvironment.PRODUCTION]
+    assert created_clients == [
+        AccessEnvironment.PRODUCTION,
+        AccessEnvironment.PRODUCTION,
+    ]
     assert verification_client.auth.last_payload == {
         "email": "analista@saocarlos.sp.gov.br",
         "password": CURRENT_STRONG_PASSWORD,
     }
     assert verification_client.auth.signed_out is True
+    assert verification_client.auth.sign_out_calls == [{"scope": "local"}]
     assert authenticated_client.auth.update_payload == {
         "password": UPDATED_STRONG_PASSWORD
     }
-    assert authenticated_client.rpc_calls == [
+    assert authenticated_client.auth.signed_out is True
+    assert authenticated_client.auth.sign_out_calls == [{"scope": "local"}]
+    assert refreshed_client.auth.last_payload == {
+        "email": "analista@saocarlos.sp.gov.br",
+        "password": UPDATED_STRONG_PASSWORD,
+    }
+    assert refreshed_client.rpc_calls == [
         {"name": "rpc_complete_password_change", "params": {}}
     ]
     assert updated_session.access_token == "updated-token"
@@ -707,6 +751,7 @@ def test_sign_in_production_blocks_inactive_profile_and_signs_out():
         )
 
     assert fake_client.auth.signed_out is True
+    assert fake_client.auth.sign_out_calls == [{"scope": "local"}]
 
 
 def test_create_authenticated_client_restores_session_tokens():
@@ -803,7 +848,9 @@ def test_refresh_production_cache_reuses_authenticated_session_tokens():
 def test_sign_out_session_reuses_authenticated_client_and_signs_out():
     service = SupabaseAccessService()
     signed_out = []
-    fake_client = SimpleNamespace(auth=SimpleNamespace(sign_out=lambda: signed_out.append(True)))
+    fake_client = SimpleNamespace(
+        auth=SimpleNamespace(sign_out=lambda options=None: signed_out.append(options))
+    )
     service.create_authenticated_client = lambda access_session: fake_client  # type: ignore[method-assign]
     access_session = AppAccessSession(
         environment=AccessEnvironment.PRODUCTION,
@@ -815,7 +862,7 @@ def test_sign_out_session_reuses_authenticated_client_and_signs_out():
 
     service.sign_out_session(access_session)
 
-    assert signed_out == [True]
+    assert signed_out == [{"scope": "local"}]
 
 
 def test_sign_out_session_ignores_local_sessions():

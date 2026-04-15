@@ -2,9 +2,10 @@
 import os
 import tempfile
 import uuid
+import base64
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QEventLoop, QTimer, Qt, QUrl
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -31,8 +32,10 @@ from app.ui.tabs.dashboard_tab_support import (
     build_tcra_dashboard_export_context,
     build_tcra_summary_text,
 )
+from app.utils.logger import get_logger
 
 QWebEngineView = None
+logger = get_logger("UI.Dashboard")
 
 
 def _ensure_webengine_view_cls():
@@ -439,6 +442,8 @@ class DashboardTab(QWidget):
         html_path = resource_path("app", "ui", "dashboard_echarts.html")
         if os.path.exists(html_path):
             web.setUrl(QUrl.fromLocalFile(html_path))
+        else:
+            logger.error("Arquivo HTML do dashboard nao encontrado: %s", html_path)
         return web
 
     def _on_load_finished(self, kind: str, ok: bool) -> None:
@@ -560,9 +565,25 @@ class DashboardTab(QWidget):
                 self._send_to_js("tcra", payload)
 
     def export_images(self) -> Tuple[str, str]:
-        active_web = self.comp_web if self.scope_tabs.currentWidget() is self.comp_page else self.tcra_web
+        active_kind = "compensacoes" if self.scope_tabs.currentWidget() is self.comp_page else "tcra"
+        active_web = self._ensure_dashboard_webview(active_kind)
         if active_web is None:
             return "", ""
+        exported_paths = self._export_images_via_javascript(active_web)
+        if any(exported_paths):
+            return exported_paths
+        payload = self._last_chart_payload.get(active_kind)
+        if self._page_loaded.get(active_kind) and payload:
+            self._send_to_js(active_kind, payload)
+            retry_loop = QEventLoop(self)
+            QTimer.singleShot(120, retry_loop.quit)
+            retry_loop.exec()
+            retry_paths = self._export_images_via_javascript(active_web)
+            if any(retry_paths):
+                return retry_paths
+        return self._export_images_from_grab(active_web)
+
+    def _export_images_from_grab(self, active_web) -> Tuple[str, str]:
         pixmap = active_web.grab()
         if pixmap.isNull():
             return "", ""
@@ -585,6 +606,80 @@ class DashboardTab(QWidget):
         pie_pixmap.save(pie_path)
         bar_pixmap.save(bar_path)
         return pie_path, bar_path
+
+    def _export_images_via_javascript(self, active_web) -> Tuple[str, str]:
+        page_getter = getattr(active_web, "page", None)
+        if not callable(page_getter):
+            return "", ""
+        page = page_getter()
+        run_javascript = getattr(page, "runJavaScript", None)
+        if not callable(run_javascript):
+            return "", ""
+
+        result_holder = {"value": None}
+        loop = QEventLoop(self)
+        timeout = QTimer(self)
+        timeout.setSingleShot(True)
+        timeout.timeout.connect(loop.quit)
+
+        def _handle_result(value):
+            result_holder["value"] = value
+            if loop.isRunning():
+                loop.quit()
+
+        script = "typeof window.exportDashboardCharts === 'function' ? window.exportDashboardCharts() : '';"
+        callback_registered = False
+        try:
+            run_javascript(script, 0, _handle_result)
+            callback_registered = True
+        except TypeError:
+            try:
+                run_javascript(script, _handle_result)
+                callback_registered = True
+            except TypeError:
+                try:
+                    result_holder["value"] = run_javascript(script)
+                except Exception:
+                    return "", ""
+        except Exception:
+            return "", ""
+
+        if callback_registered and result_holder["value"] is None:
+            timeout.start(900)
+            loop.exec()
+        timeout.stop()
+
+        raw_payload = result_holder["value"]
+        if isinstance(raw_payload, dict):
+            payload = raw_payload
+        else:
+            normalized_payload = str(raw_payload or "").strip()
+            if not normalized_payload:
+                return "", ""
+            try:
+                payload = json.loads(normalized_payload)
+            except (TypeError, ValueError):
+                return "", ""
+
+        token = uuid.uuid4().hex
+        pie_path = self._write_chart_data_url_to_file(payload.get("pie"), f"dash_pie_{token}.png")
+        bar_path = self._write_chart_data_url_to_file(payload.get("bar"), f"dash_bar_{token}.png")
+        return pie_path, bar_path
+
+    @staticmethod
+    def _write_chart_data_url_to_file(data_url: object, filename: str) -> str:
+        normalized = str(data_url or "").strip()
+        if not normalized.startswith("data:image/png;base64,"):
+            return ""
+        encoded_content = normalized.split(",", 1)[1]
+        try:
+            binary = base64.b64decode(encoded_content)
+        except Exception:
+            return ""
+        path = os.path.join(tempfile.gettempdir(), filename)
+        with open(path, "wb") as file_handle:
+            file_handle.write(binary)
+        return path
 
     def current_export_context(self) -> Optional[DashboardExportContext]:
         if self.scope_tabs.currentWidget() is self.tcra_page:

@@ -1,3 +1,6 @@
+import json
+import os
+
 from PySide6 import QtWidgets
 from PySide6.QtCore import Signal
 
@@ -12,6 +15,17 @@ class _DummyPage:
 
     def setBackgroundColor(self, *args, **kwargs):
         return None
+
+
+class _ExportPage:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def runJavaScript(self, _script, *args):
+        if len(args) == 2 and args[0] == 0 and callable(args[1]):
+            args[1](self._payload)
+            return None
+        raise TypeError("callback must be passed as the third argument")
 
 
 class MockQWebEngineView(QtWidgets.QWidget):
@@ -105,6 +119,79 @@ def test_dashboard_tab_shows_local_sqlite_overview(monkeypatch, qt_app):
     tab._ensure_dashboard_webview("compensacoes")
     assert getattr(tab, "compensacoes_web_placeholder_container") is None
 
+    tab.close()
+    parent.close()
+
+
+def test_dashboard_tab_exports_chart_images_from_javascript(monkeypatch, qt_app):
+    import app.ui.tabs.dashboard_tab as dashboard_tab_module
+
+    monkeypatch.setattr(dashboard_tab_module, "QWebEngineView", MockQWebEngineView)
+
+    parent = QtWidgets.QWidget()
+    parent.scale_factor = 1.0
+    parent.is_dark_mode = False
+
+    tab = dashboard_tab_module.DashboardTab(parent)
+    tab._ensure_dashboard_webview("compensacoes")
+
+    png_data_url = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/qxoAAAAASUVORK5CYII="
+    )
+    tab.comp_web._page = _ExportPage(json.dumps({"pie": png_data_url, "bar": png_data_url}))
+
+    pie_path, bar_path = tab.export_images()
+
+    assert os.path.exists(pie_path)
+    assert os.path.exists(bar_path)
+    with open(pie_path, "rb") as pie_file:
+        assert pie_file.read(8) == b"\x89PNG\r\n\x1a\n"
+    with open(bar_path, "rb") as bar_file:
+        assert bar_file.read(8) == b"\x89PNG\r\n\x1a\n"
+
+    os.remove(pie_path)
+    os.remove(bar_path)
+    tab.close()
+    parent.close()
+
+
+def test_dashboard_tab_exports_tcra_chart_images_from_active_scope(monkeypatch, qt_app):
+    import app.ui.tabs.dashboard_tab as dashboard_tab_module
+
+    monkeypatch.setattr(dashboard_tab_module, "QWebEngineView", MockQWebEngineView)
+
+    parent = QtWidgets.QWidget()
+    parent.scale_factor = 1.0
+    parent.is_dark_mode = False
+
+    tab = dashboard_tab_module.DashboardTab(parent)
+    tab._ensure_dashboard_webview("compensacoes")
+    tab._ensure_dashboard_webview("tcra")
+    tab.scope_tabs.setCurrentWidget(tab.tcra_page)
+
+    comp_png_data_url = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAS9P4xQAAAAASUVORK5CYII="
+    )
+    tcra_png_data_url = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/qxoAAAAASUVORK5CYII="
+    )
+    tab.comp_web._page = _ExportPage(json.dumps({"pie": comp_png_data_url, "bar": comp_png_data_url}))
+    tab.tcra_web._page = _ExportPage(json.dumps({"pie": tcra_png_data_url, "bar": tcra_png_data_url}))
+
+    pie_path, bar_path = tab.export_images()
+
+    assert os.path.exists(pie_path)
+    assert os.path.exists(bar_path)
+    with open(pie_path, "rb") as pie_file:
+        assert pie_file.read(8) == b"\x89PNG\r\n\x1a\n"
+    with open(bar_path, "rb") as bar_file:
+        assert bar_file.read(8) == b"\x89PNG\r\n\x1a\n"
+
+    os.remove(pie_path)
+    os.remove(bar_path)
     tab.close()
     parent.close()
 

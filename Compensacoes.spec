@@ -63,6 +63,7 @@ def safe_collect_submodules(modname: str):
 # No seu arquivo .spec, substitua a linha Tree(...) por:
 datas = [
     ('app/ui/map_leaflet.html', 'app/ui'),
+    ('app/ui/dashboard_echarts.html', 'app/ui'),
     ('app/ui/vendor', 'app/ui/vendor'),
     ('assets', 'assets'),
     ('data', 'data'), # âœ… Isso coloca a pasta 'data' na raiz do executÃ¡vel

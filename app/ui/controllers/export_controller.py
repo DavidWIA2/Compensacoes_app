@@ -150,6 +150,13 @@ class ExportController:
             return ""
         return display_corporate_email_local_part(user_email) or user_email
 
+    def _current_signature_user_name(self) -> str:
+        access_session = getattr(self.window, "access_session", None)
+        display_name = str(getattr(access_session, "display_name", "") or "").strip()
+        if display_name:
+            return display_name
+        return self._current_export_user_name()
+
     def build_filter_summary(self) -> str:
         return self.reporting_use_cases.build_filter_summary(self._current_filter_state())
 
@@ -242,7 +249,13 @@ class ExportController:
             busy_message="Gerando ficha em PDF...",
             success_message="Ficha PDF gerada com sucesso.",
             error_action="exportar a ficha em PDF",
-            operation=lambda: export_individual_pdf(path, self.window.selected, observacao.strip()),
+            operation=lambda: export_individual_pdf(
+                path,
+                self.window.selected,
+                observacao.strip(),
+                emitted_by=self._current_export_user_name(),
+                signature_name=self._current_signature_user_name(),
+            ),
         )
 
     def export_dashboard_pdf_clicked(self):

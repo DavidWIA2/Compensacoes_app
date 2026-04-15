@@ -96,6 +96,7 @@
             var shellGradient = isDark
                 ? "linear-gradient(180deg, rgba(53, 60, 72, 0.76), rgba(39, 44, 54, 0.72))"
                 : "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246,249,252,0.94))";
+            document.body.dataset.dashboardTheme = isDark ? "dark" : "light";
             document.querySelectorAll(".chart-shell").forEach(function (shell) {
                 shell.style.borderColor = shellBorder;
                 shell.style.background = shellGradient;
@@ -259,7 +260,7 @@
                     left: "7%",
                     right: "4%",
                     top: "21%",
-                    bottom: "18%",
+                    bottom: config.bottom || "18%",
                     containLabel: true
                 },
                 xAxis: [
@@ -275,7 +276,7 @@
                             fontSize: 11,
                             fontWeight: 600,
                             overflow: "truncate",
-                            width: 110
+                            width: config.labelWidth || 110
                         }
                     }
                 ],
@@ -464,7 +465,9 @@
                 categories: attentionRows.map(function (item) { return item.label; }),
                 values: attentionRows.map(function (item) { return Number(item.value || 0); }),
                 colors: attentionRows.map(function (item) { return item.color || "#3388ff"; }),
-                rotate: 14
+                rotate: 14,
+                bottom: "24%",
+                labelWidth: 132
             });
         }
 
@@ -480,6 +483,33 @@
             }
 
             resizeCharts();
+        };
+
+        window.exportDashboardCharts = function () {
+            var isDark = document.body.dataset.dashboardTheme === "dark";
+            var backgroundColor = isDark ? "#2b3340" : "#fbfcfe";
+            var pixelRatio = 3;
+
+            function exportChart(chart) {
+                if (!chart || (typeof chart.isDisposed === "function" && chart.isDisposed())) {
+                    return "";
+                }
+                try {
+                    return chart.getDataURL({
+                        type: "png",
+                        pixelRatio: pixelRatio,
+                        backgroundColor: backgroundColor,
+                        excludeComponents: ["toolbox"]
+                    });
+                } catch (_error) {
+                    return "";
+                }
+            }
+
+            return JSON.stringify({
+                pie: exportChart(pieChart),
+                bar: exportChart(barChart)
+            });
         };
     </script>
 </body>

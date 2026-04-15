@@ -895,6 +895,11 @@ class WindowShellController:
     def _apply_updated_access_session(self, access_session) -> None:
         self.window.access_session = access_session
         self._bind_runtime_persistence_service()
+        if hasattr(self.window, "_remote_snapshot_refresh_status"):
+            self.window._remote_snapshot_refresh_status = None
+        data_controller = getattr(self.window, "data_controller", None)
+        if data_controller is not None and hasattr(data_controller, "_last_remote_operational_refresh_monotonic"):
+            data_controller._last_remote_operational_refresh_monotonic = 0.0
         self.refresh_window_chrome()
 
     def change_password(self) -> bool:

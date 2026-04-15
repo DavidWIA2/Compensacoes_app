@@ -57,6 +57,7 @@ class AppAccessSession:
     auth_mode: str
     user_id: str = ""
     user_email: str = ""
+    display_name: str = ""
     is_anonymous: bool = False
     supabase_url: str = ""
     local_db_path: str = ""
@@ -269,6 +270,7 @@ class SupabaseAccessService:
             auth_mode=remote_session.auth_mode,
             user_id=remote_session.user_id,
             user_email=remote_session.user_email,
+            display_name=str(profile.get("display_name", "") or "").strip(),
             is_anonymous=remote_session.is_anonymous,
             supabase_url=remote_session.supabase_url,
             local_db_path=sync_result.local_db_path,
@@ -654,23 +656,8 @@ class SupabaseAccessService:
         update_response: Any,
         access_session: AppAccessSession | None = None,
     ) -> tuple[Any, str, str]:
-        response_session = getattr(update_response, "session", None)
-        updated_access_token = str(getattr(response_session, "access_token", "") or "").strip()
-        updated_refresh_token = str(getattr(response_session, "refresh_token", "") or "").strip()
-
-        if updated_access_token and updated_refresh_token:
-            if access_session is not None:
-                refreshed_session = replace(
-                    access_session,
-                    access_token=updated_access_token,
-                    refresh_token=updated_refresh_token,
-                )
-                return self.create_authenticated_client(refreshed_session), updated_access_token, updated_refresh_token
-
-            refreshed_client = self._create_client(self.production_profile)
-            refreshed_client.auth.set_session(updated_access_token, updated_refresh_token)
-            return refreshed_client, updated_access_token, updated_refresh_token
-
+        # Depois de trocar a senha, o Supabase pode invalidar a sessão corrente.
+        # Reautenticamos com a nova senha para garantir tokens estáveis para o runtime.
         refreshed_client = self._create_client(self.production_profile)
         auth_response = refreshed_client.auth.sign_in_with_password(
             {
@@ -738,7 +725,10 @@ class SupabaseAccessService:
         sign_out = getattr(auth, "sign_out", None)
         if callable(sign_out):
             try:
-                sign_out()
+                # Usamos logout local para descartar apenas a sessão temporária deste cliente.
+                # O escopo global invalida outras sessões ativas do mesmo usuário e quebra
+                # o runtime logo após trocas de senha e redefinições concluídas no app.
+                sign_out({"scope": "local"})
             except Exception:
                 logger.warning("Falha ao encerrar sessão Supabase após login bloqueado.", exc_info=True)
 

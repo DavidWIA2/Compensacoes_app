@@ -12,8 +12,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import HRFlowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMNS
@@ -33,13 +33,14 @@ from app.services.report_service_support import (
     SUMMARY_LABEL_VALUE,
     SUMMARY_SHEET_NAME,
     ReportMetadataRow,
-    build_dashboard_chart_rows,
     build_department_header_html_lines,
+    build_footer_right_text as shared_build_footer_right_text,
     build_grid_pdf_layout,
     build_individual_report_rows,
     build_records_to_dict_list,
     build_report_metadata_rows,
     build_selected_headers,
+    draw_pdf_page_frame as shared_draw_pdf_page_frame,
     format_individual_status,
     resolve_report_logo_path,
 )
@@ -341,31 +342,82 @@ def _build_dashboard_kpi_table(kpi_lines: List[str], styles):
     return table
 
 
+def _resolve_dashboard_chart_dimensions(
+    image_path: str,
+    *,
+    max_width: float,
+    max_height: float,
+) -> tuple[float, float]:
+    try:
+        image_width, image_height = ImageReader(image_path).getSize()
+    except Exception:
+        return max_width, max_height
+    if image_width <= 0 or image_height <= 0:
+        return max_width, max_height
+    scale = min(max_width / float(image_width), max_height / float(image_height))
+    if scale <= 0:
+        return max_width, max_height
+    return float(image_width) * scale, float(image_height) * scale
+
+
+def _build_dashboard_chart_sections(
+    chart_images: List[str],
+    *,
+    available_width: float,
+    available_height: float,
+    styles,
+):
+    valid_paths = [path for path in chart_images if os.path.exists(path)]
+    if not valid_paths:
+        return []
+    cards: list[Any] = []
+    max_chart_width = max(available_width - 12, 120)
+    max_chart_height = max(available_height - 0.42 * inch, 220)
+
+    for image_path in valid_paths:
+        cards.append(PageBreak())
+        chart_width, chart_height = _resolve_dashboard_chart_dimensions(
+            image_path,
+            max_width=max_chart_width,
+            max_height=max_chart_height,
+        )
+        chart = Image(image_path, width=chart_width, height=chart_height)
+        chart_card = Table([[chart]], colWidths=[available_width])
+        chart_card.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#C8D5E3")),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FBFCFE")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        cards.append(chart_card)
+
+    return cards
+
+
 def _build_footer_right_text(*, generated_label: str, page_number: int, emitted_by: str = "") -> str:
-    parts = [f"Emitido em {generated_label}"]
-    normalized_user = str(emitted_by or "").strip()
-    if normalized_user:
-        parts.append(f"por {normalized_user}")
-    parts.append(f"P\u00e1gina {page_number}")
-    return " | ".join(parts)
+    return shared_build_footer_right_text(
+        generated_label=generated_label,
+        page_number=page_number,
+        emitted_by=emitted_by,
+    )
 
 
 def _draw_pdf_page_frame(canvas, doc, *, title: str, generated_label: str, emitted_by: str = ""):
-    canvas.saveState()
-    canvas.setStrokeColor(colors.HexColor("#C8D5E3"))
-    canvas.line(doc.leftMargin, 18, doc.pagesize[0] - doc.rightMargin, 18)
-    canvas.setFont("Helvetica", 8)
-    canvas.setFillColor(colors.HexColor("#486581"))
-    canvas.drawString(doc.leftMargin, 8, f"{INSTITUTIONAL_APP_NAME} | {title}")
-    right_text = f"Emitido em {generated_label} | Página {canvas.getPageNumber()}"
-    right_text = _build_footer_right_text(
+    return shared_draw_pdf_page_frame(
+        canvas,
+        doc,
+        title=title,
         generated_label=generated_label,
-        page_number=canvas.getPageNumber(),
         emitted_by=emitted_by,
     )
-    text_width = stringWidth(right_text, "Helvetica", 8)
-    canvas.drawString(doc.pagesize[0] - doc.rightMargin - text_width, 8, right_text)
-    canvas.restoreState()
 
 
 def export_csv(path: str, records: List[Compensacao], selected_cols: List[str]):
@@ -583,31 +635,14 @@ def export_dashboard_pdf(
     elements.extend(_build_pdf_header(styles, title=titulo, metadata_rows=metadata_rows))
     elements.append(_build_dashboard_kpi_table(kpi_lines, styles))
     elements.append(Spacer(1, 0.18 * inch))
-
-    chart_objects = []
-    for img_path in chart_images:
-        if os.path.exists(img_path):
-            chart_objects.append(Image(img_path, width=350, height=250))
-
-    chart_rows = build_dashboard_chart_rows(chart_objects)
-    if chart_rows:
-        charts_table = Table(list(chart_rows))
-        charts_table.setStyle(
-            TableStyle(
-                [
-                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#C8D5E3")),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E1E8F0")),
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FBFCFE")),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                    ("TOPPADDING", (0, 0), (-1, -1), 10),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                ]
-            )
+    elements.extend(
+        _build_dashboard_chart_sections(
+            chart_images,
+            available_width=doc.width,
+            available_height=doc.height,
+            styles=styles,
         )
-        elements.append(charts_table)
+    )
 
     doc.build(
         elements,

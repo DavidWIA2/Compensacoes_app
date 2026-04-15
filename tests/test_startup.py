@@ -1,4 +1,5 @@
 import os
+import types
 
 from app import main as main_module
 from app.services.access_service import AccessEnvironment, AppAccessSession
@@ -57,6 +58,29 @@ def test_request_app_access_returns_none_when_dialog_is_cancelled(monkeypatch):
     monkeypatch.setattr(main_module, "AccessDialog", FakeDialog)
 
     assert main_module.request_app_access() is None
+
+
+def test_apply_windows_app_user_model_id_calls_shell32_on_windows(monkeypatch):
+    calls = []
+
+    class FakeShell32:
+        def SetCurrentProcessExplicitAppUserModelID(self, app_id):
+            calls.append(app_id)
+
+    fake_ctypes = types.SimpleNamespace(windll=types.SimpleNamespace(shell32=FakeShell32()))
+
+    monkeypatch.setattr(main_module.os, "name", "nt")
+    monkeypatch.setattr(main_module, "ctypes", fake_ctypes)
+
+    main_module.apply_windows_app_user_model_id("CompensacoesApp.CompensacoesDesktop")
+
+    assert calls == ["CompensacoesApp.CompensacoesDesktop"]
+
+
+def test_apply_windows_app_user_model_id_ignores_non_windows(monkeypatch):
+    monkeypatch.setattr(main_module.os, "name", "posix")
+
+    main_module.apply_windows_app_user_model_id("CompensacoesApp.CompensacoesDesktop")
 
 
 def test_main_stops_when_access_is_not_granted(monkeypatch):

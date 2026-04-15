@@ -36,6 +36,11 @@ def test_build_inno_setup_script_contains_core_sections(tmp_path):
     assert 'Name: "desktopicon"' in payload
     assert 'Filename: "{app}\\{#MyAppExeName}"' in payload
     assert 'AppPublisherURL={#MyAppPublisherURL}' in payload
+    assert 'Source: "{#MySetupIconFile}"; DestDir: "{app}"; DestName: "PlataformaGestaoAmbiental.ico"' in payload
+    assert 'Type: files; Name: "{app}\\_internal\\assets\\Logo_mono_512.png"' in payload
+    assert 'IconFilename: "{app}\\PlataformaGestaoAmbiental.ico"' in payload
+    assert 'Check: ShouldInstallDesktopShortcut' in payload
+    assert "function ShouldInstallDesktopShortcut(): Boolean;" in payload
 
 
 def test_build_inno_setup_script_marks_beta_in_display_version(tmp_path):

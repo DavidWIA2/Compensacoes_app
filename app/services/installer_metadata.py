@@ -45,8 +45,26 @@ def build_inno_setup_script(
     source_dir_text = _escape_inno(_win_path(source_dir))
     output_dir_text = _escape_inno(_win_path(output_dir))
     icon_path_text = _escape_inno(_win_path(setup_icon_file)) if setup_icon_file else ""
+    shortcut_icon_name = "PlataformaGestaoAmbiental.ico"
     output_base = _escape_inno(base_filename or build_installer_base_filename(version))
     version_label = _escape_inno(app_version_label or build_release_version_label(version))
+    setup_icon_line = f"SetupIconFile={{#MySetupIconFile}}\n" if icon_path_text else ""
+    uninstall_display_icon_line = (
+        f"UninstallDisplayIcon={{app}}\\{shortcut_icon_name}\n"
+        if icon_path_text
+        else "UninstallDisplayIcon={app}\\{#MyAppExeName}\n"
+    )
+    shortcut_icon_copy_line = (
+        'Source: "{#MySetupIconFile}"; DestDir: "{app}"; DestName: "%s"; Flags: ignoreversion\n'
+        % shortcut_icon_name
+        if icon_path_text
+        else ""
+    )
+    shortcut_icon_attribute = (
+        '; IconFilename: "{app}\\%s"' % shortcut_icon_name
+        if icon_path_text
+        else ""
+    )
 
     return r"""; Script gerado automaticamente. Ajuste somente por geracao controlada.
 #define MyAppName "%(app_name)s"
@@ -81,9 +99,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#MyAppOutputDir}
 OutputBaseFilename={#MyAppOutputBaseFilename}
-SetupIconFile={#MySetupIconFile}
-UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma
+%(setup_icon_line)s%(uninstall_display_icon_line)sCompression=lzma
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
@@ -97,13 +113,23 @@ Name: "desktopicon"; Description: "Criar atalho na area de trabalho"; GroupDescr
 
 [Files]
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+%(shortcut_icon_copy_line)s
+[InstallDelete]
+Type: files; Name: "{app}\_internal\assets\Logo_mono_512.png"
+Type: files; Name: "{app}\Logo_mono_512.png"
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"%(shortcut_icon_attribute)s
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: ShouldInstallDesktopShortcut%(shortcut_icon_attribute)s
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Executar {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function ShouldInstallDesktopShortcut(): Boolean;
+begin
+  Result := WizardIsTaskSelected('desktopicon') or FileExists(ExpandConstant('{autodesktop}\{#MyAppName}.lnk'));
+end;
 """ % {
         "app_name": _escape_inno(app_name),
         "version": _escape_inno(version),
@@ -119,4 +145,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Executar {#MyAppName}"; Flags: 
         "support_url": _escape_inno(support_url),
         "updates_url": _escape_inno(updates_url),
         "icon_path": icon_path_text,
+        "setup_icon_line": setup_icon_line,
+        "uninstall_display_icon_line": uninstall_display_icon_line,
+        "shortcut_icon_copy_line": shortcut_icon_copy_line,
+        "shortcut_icon_attribute": shortcut_icon_attribute,
     }

@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import ctypes
 
 # =====================================================================
 # BLINDAGEM DE CAMINHOS
@@ -17,7 +18,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QMovie, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSplashScreen, QWidget
 
-from app.config import APP_BRAND_TAGLINE, APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
+from app.config import APP_BRAND_TAGLINE, APP_INSTALLER_ID, APP_NAME, APP_SETTINGS_NAME, APP_SETTINGS_ORG
 from app.services.access_service import SupabaseAccessService
 from app.services.app_settings import AppSettings
 from app.services.tile_scheme_handler import install_tile_scheme, register_tile_scheme
@@ -115,10 +116,25 @@ def request_app_access() -> object | None:
     return dialog.access_session
 
 
+def apply_windows_app_user_model_id(app_id: str = APP_INSTALLER_ID) -> None:
+    if os.name != "nt":
+        return
+
+    normalized_app_id = str(app_id or "").strip()
+    if not normalized_app_id:
+        return
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(normalized_app_id)
+    except Exception as exc:
+        logger.warning(f"Falha ao definir AppUserModelID do Windows: {exc}")
+
+
 # =====================================================================
 # FUNCAO PRINCIPAL
 # =====================================================================
 def main() -> int:
+    apply_windows_app_user_model_id()
     app = QApplication(sys.argv)
     if hasattr(app, "setQuitOnLastWindowClosed"):
         app.setQuitOnLastWindowClosed(False)

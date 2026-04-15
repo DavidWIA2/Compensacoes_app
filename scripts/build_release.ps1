@@ -273,6 +273,17 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
+    Run-Step "Removendo residuos do icone legado no build" {
+        foreach ($legacyPath in @(
+            "dist\\Compensacoes\\_internal\\assets\\Logo_mono_512.png",
+            "dist\\Compensacoes\\Logo_mono_512.png"
+        )) {
+            if (Test-Path $legacyPath) {
+                Remove-Item -Force $legacyPath
+            }
+        }
+    }
+
     $version = & $PythonExe -c "from app import __version__; print(__version__)"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

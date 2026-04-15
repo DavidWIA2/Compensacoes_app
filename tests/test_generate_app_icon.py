@@ -2,7 +2,14 @@ from pathlib import Path
 
 from PIL import Image
 
-from scripts.generate_app_icon import build_padded_master, export_ico, export_pngs, reduce_white_halo
+from scripts.generate_app_icon import (
+    DEFAULT_SOURCE,
+    build_padded_master,
+    export_ico,
+    export_pngs,
+    reduce_white_halo,
+    strip_light_background,
+)
 
 
 def _make_base_icon() -> Image.Image:
@@ -23,6 +30,22 @@ def test_build_padded_master_keeps_transparent_corners() -> None:
     assert master.size == (256, 256)
     assert master.getpixel((0, 0))[3] == 0
     assert master.getchannel("A").getbbox() is not None
+
+
+def test_strip_light_background_removes_opaque_checkerboard_border() -> None:
+    image = Image.new("RGBA", (96, 96), (244, 244, 244, 255))
+    for x in range(18, 78):
+        for y in range(16, 80):
+            image.putpixel((x, y), (28, 76, 148, 255))
+
+    cleaned = strip_light_background(image)
+
+    assert cleaned.getpixel((0, 0))[3] == 0
+    assert cleaned.getchannel("A").getbbox() == (18, 16, 78, 80)
+
+
+def test_default_source_uses_colored_logo_asset() -> None:
+    assert DEFAULT_SOURCE.name == "Logo_512.png"
 
 
 def test_export_pngs_and_ico_create_expected_files(tmp_path: Path) -> None:

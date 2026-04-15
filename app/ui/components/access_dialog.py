@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -900,6 +900,8 @@ class AccessDialog(QDialog):
         self.access_session: AppAccessSession | None = None
         self._busy = False
         self._status_panel_error = False
+        self._saved_normal_geometry: QRect | None = None
+        self._restore_normal_geometry_pending = False
 
         self.setObjectName("AccessDialog")
         self.setWindowTitle(f"Acesso - {APP_NAME}")
@@ -1144,13 +1146,73 @@ class AccessDialog(QDialog):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
+        self._capture_normal_geometry()
         self._apply_responsive_layout()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        self._capture_normal_geometry()
         self._apply_responsive_layout()
 
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() != QEvent.WindowStateChange:
+            return
+
+        old_state = event.oldState() if hasattr(event, "oldState") else Qt.WindowState.WindowNoState
+        was_expanded = self._is_expanded_window_state(old_state)
+        is_expanded = self._is_expanded_window_state()
+
+        if not was_expanded and is_expanded:
+            self._capture_normal_geometry(force=True, prefer_normal_geometry=True)
+        elif was_expanded and not is_expanded:
+            self._schedule_restore_normal_geometry()
+
+        QTimer.singleShot(0, self._apply_responsive_layout)
+
+    def _is_expanded_window_state(self, state: Qt.WindowStates | None = None) -> bool:
+        window_state = state if state is not None else self.windowState()
+        expanded_states = Qt.WindowState.WindowMaximized | Qt.WindowState.WindowFullScreen
+        return bool(window_state & expanded_states)
+
+    def _capture_normal_geometry(
+        self,
+        *,
+        force: bool = False,
+        prefer_normal_geometry: bool = False,
+    ) -> None:
+        if not self.isVisible():
+            return
+        if not force and self._is_expanded_window_state():
+            return
+
+        geometry = QRect()
+        if prefer_normal_geometry:
+            geometry = QRect(self.normalGeometry())
+        if not geometry.isValid() or geometry.width() <= 0 or geometry.height() <= 0:
+            geometry = self.geometry()
+        if geometry.isValid() and geometry.width() > 0 and geometry.height() > 0:
+            self._saved_normal_geometry = QRect(geometry)
+
+    def _schedule_restore_normal_geometry(self) -> None:
+        if self._restore_normal_geometry_pending or self._saved_normal_geometry is None:
+            return
+        self._restore_normal_geometry_pending = True
+        QTimer.singleShot(0, self._restore_saved_normal_geometry)
+
+    def _restore_saved_normal_geometry(self) -> None:
+        self._restore_normal_geometry_pending = False
+        if self._saved_normal_geometry is None or self._is_expanded_window_state():
+            return
+
+        target_geometry = QRect(self._saved_normal_geometry)
+        target_geometry.setWidth(max(target_geometry.width(), self.minimumWidth()))
+        target_geometry.setHeight(max(target_geometry.height(), self.minimumHeight()))
+        self.setGeometry(target_geometry)
+
     def _is_compact_layout(self) -> bool:
+        if self._is_expanded_window_state():
+            return True
         current_width = self.width()
         current_height = self.height()
         if current_width < 820 and not self.isVisible():
@@ -1160,6 +1222,8 @@ class AccessDialog(QDialog):
         return current_width <= 1220 or current_height <= 760
 
     def _is_tight_layout(self) -> bool:
+        if self._is_expanded_window_state():
+            return True
         current_width = self.width()
         current_height = self.height()
         if current_width < 820 and not self.isVisible():

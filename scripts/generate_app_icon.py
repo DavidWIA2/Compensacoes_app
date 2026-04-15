@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 
-DEFAULT_SOURCE = Path("assets/Logo_mono_512.png")
+DEFAULT_SOURCE = Path("assets/Logo_512.png")
 DEFAULT_OUTPUT_DIR = Path("assets/icons")
 DEFAULT_ICO_PATH = Path("assets/app.ico")
 DEFAULT_SIZES = (1024, 512, 256, 128, 64, 48, 32, 16)
-DEFAULT_PADDING_RATIO = 0.08
+DEFAULT_PADDING_RATIO = 0.06
 ALPHA_THRESHOLD = 1
 NEIGHBOR_ALPHA_THRESHOLD = 40
 LIGHT_PIXEL_THRESHOLD = 225
+OPAQUE_CORNER_THRESHOLD = 250
+BACKGROUND_LIGHT_THRESHOLD = 216
+BACKGROUND_SPREAD_THRESHOLD = 28
 
 
 def _parse_args() -> argparse.Namespace:
@@ -58,6 +62,77 @@ def _parse_args() -> argparse.Namespace:
 def _load_rgba(path: Path) -> Image.Image:
     with Image.open(path) as image:
         return image.convert("RGBA")
+
+
+def _normalize_transparent_pixels(image: Image.Image) -> Image.Image:
+    cleaned = image.copy()
+    pixels = cleaned.load()
+    width, height = cleaned.size
+    for y in range(height):
+        for x in range(width):
+            red, green, blue, alpha = pixels[x, y]
+            if alpha <= 0:
+                pixels[x, y] = (0, 0, 0, 0)
+    return cleaned
+
+
+def _is_light_background_pixel(red: int, green: int, blue: int, alpha: int) -> bool:
+    if alpha <= ALPHA_THRESHOLD:
+        return True
+    spread = max(red, green, blue) - min(red, green, blue)
+    luminance = (red + green + blue) / 3.0
+    return luminance >= BACKGROUND_LIGHT_THRESHOLD and spread <= BACKGROUND_SPREAD_THRESHOLD
+
+
+def strip_light_background(image: Image.Image) -> Image.Image:
+    cleaned = image.copy()
+    width, height = cleaned.size
+    if width <= 0 or height <= 0:
+        return cleaned
+
+    pixels = cleaned.load()
+    corners = (
+        pixels[0, 0],
+        pixels[width - 1, 0],
+        pixels[0, height - 1],
+        pixels[width - 1, height - 1],
+    )
+    if any(alpha < OPAQUE_CORNER_THRESHOLD for _, _, _, alpha in corners):
+        return _normalize_transparent_pixels(cleaned)
+    if not all(_is_light_background_pixel(*corner) for corner in corners):
+        return _normalize_transparent_pixels(cleaned)
+
+    visited = [[False] * width for _ in range(height)]
+    queue: deque[tuple[int, int]] = deque()
+
+    def enqueue(x: int, y: int) -> None:
+        if visited[y][x]:
+            return
+        if not _is_light_background_pixel(*pixels[x, y]):
+            return
+        visited[y][x] = True
+        queue.append((x, y))
+
+    for x in range(width):
+        enqueue(x, 0)
+        enqueue(x, height - 1)
+    for y in range(height):
+        enqueue(0, y)
+        enqueue(width - 1, y)
+
+    while queue:
+        x, y = queue.popleft()
+        pixels[x, y] = (0, 0, 0, 0)
+        if x > 0:
+            enqueue(x - 1, y)
+        if x + 1 < width:
+            enqueue(x + 1, y)
+        if y > 0:
+            enqueue(x, y - 1)
+        if y + 1 < height:
+            enqueue(x, y + 1)
+
+    return _normalize_transparent_pixels(cleaned)
 
 
 def _content_bbox(image: Image.Image) -> tuple[int, int, int, int]:
@@ -146,6 +221,44 @@ def reduce_white_halo(image: Image.Image) -> Image.Image:
     return cleaned
 
 
+def _resize_rgba(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    normalized = _normalize_transparent_pixels(image)
+    if normalized.size == size:
+        return normalized.copy()
+    red, green, blue, alpha = normalized.split()
+    premultiplied = Image.merge(
+        "RGBA",
+        (
+            ImageChops.multiply(red, alpha),
+            ImageChops.multiply(green, alpha),
+            ImageChops.multiply(blue, alpha),
+            alpha,
+        ),
+    )
+    resized = premultiplied.resize(size, Image.Resampling.LANCZOS)
+    source_pixels = resized.load()
+    result = Image.new("RGBA", size, (0, 0, 0, 0))
+    target_pixels = result.load()
+    width, height = size
+    for y in range(height):
+        for x in range(width):
+            red_value, green_value, blue_value, alpha_value = source_pixels[x, y]
+            if alpha_value <= 0:
+                target_pixels[x, y] = (0, 0, 0, 0)
+                continue
+            if alpha_value >= 255:
+                target_pixels[x, y] = (red_value, green_value, blue_value, alpha_value)
+                continue
+            scale = 255.0 / float(alpha_value)
+            target_pixels[x, y] = (
+                min(255, int(round(red_value * scale))),
+                min(255, int(round(green_value * scale))),
+                min(255, int(round(blue_value * scale))),
+                alpha_value,
+            )
+    return result
+
+
 def build_padded_master(image: Image.Image, *, master_size: int, padding_ratio: float) -> Image.Image:
     bbox = _content_bbox(image)
     cropped = image.crop(bbox)
@@ -158,7 +271,7 @@ def build_padded_master(image: Image.Image, *, master_size: int, padding_ratio: 
     scale = min(usable_size / float(crop_width), usable_size / float(crop_height))
     resized_width = max(1, int(round(crop_width * scale)))
     resized_height = max(1, int(round(crop_height * scale)))
-    resized = cropped.resize((resized_width, resized_height), Image.Resampling.LANCZOS)
+    resized = reduce_white_halo(_resize_rgba(cropped, (resized_width, resized_height)))
 
     canvas = Image.new("RGBA", (master_size, master_size), (0, 0, 0, 0))
     offset_x = (master_size - resized_width) // 2
@@ -171,7 +284,7 @@ def export_pngs(master_image: Image.Image, *, output_dir: Path, sizes: Iterable[
     output_dir.mkdir(parents=True, exist_ok=True)
     exported_paths: list[Path] = []
     for size in sorted({int(size) for size in sizes if int(size) > 0}, reverse=True):
-        resized = master_image.resize((size, size), Image.Resampling.LANCZOS)
+        resized = reduce_white_halo(_resize_rgba(master_image, (size, size)))
         output_path = output_dir / f"pga_icon_clean_{size}.png"
         resized.save(output_path, format="PNG")
         exported_paths.append(output_path)
@@ -196,7 +309,8 @@ def main() -> int:
         raise FileNotFoundError(f"PNG base nao encontrado: {source_path}")
 
     rgba_image = _load_rgba(source_path)
-    cleaned_image = reduce_white_halo(rgba_image)
+    prepared_image = strip_light_background(rgba_image)
+    cleaned_image = reduce_white_halo(prepared_image)
     master_size = max(int(size) for size in args.sizes)
     master_image = build_padded_master(
         cleaned_image,

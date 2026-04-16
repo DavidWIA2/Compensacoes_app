@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
             audit_service_cls=AuditService,
             monitoring_use_cases_cls=PersistenceMonitoringUseCases,
             authoritative_persistence_cls=AuthoritativePersistenceUseCases,
+            access_service=self.access_service,
             logger=logger,
         )
         self.settings = runtime_bundle.settings

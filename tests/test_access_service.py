@@ -754,7 +754,7 @@ def test_sign_in_production_blocks_inactive_profile_and_signs_out():
     assert fake_client.auth.sign_out_calls == [{"scope": "local"}]
 
 
-def test_create_authenticated_client_restores_session_tokens():
+def test_create_authenticated_client_reuses_cached_session_client():
     service = SupabaseAccessService(
         production_profile=SupabaseAccessProfile(
             environment=AccessEnvironment.PRODUCTION,
@@ -764,10 +764,10 @@ def test_create_authenticated_client_restores_session_tokens():
             allow_password=True,
         )
     )
-    restored = {}
+    restored_calls = []
     fake_client = SimpleNamespace(
         auth=SimpleNamespace(
-            set_session=lambda access_token, refresh_token: restored.update(
+            set_session=lambda access_token, refresh_token: restored_calls.append(
                 {
                     "access_token": access_token,
                     "refresh_token": refresh_token,
@@ -777,18 +777,25 @@ def test_create_authenticated_client_restores_session_tokens():
     )
     service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
 
-    client = service.create_authenticated_client(
-        service._build_remote_session(
-            service.production_profile,
-            SimpleNamespace(
-                user=SimpleNamespace(id="user-123", email="analista@prefeitura.sp.gov.br", is_anonymous=False),
-                session=SimpleNamespace(access_token="token", refresh_token="refresh-token"),
-            ),
-            auth_mode="password",
-        )
+    access_session = service._build_remote_session(
+        service.production_profile,
+        SimpleNamespace(
+            user=SimpleNamespace(id="user-123", email="analista@prefeitura.sp.gov.br", is_anonymous=False),
+            session=SimpleNamespace(access_token="token", refresh_token="refresh-token"),
+        ),
+        auth_mode="password",
     )
+    first_client = service.create_authenticated_client(access_session)
+    second_client = service.create_authenticated_client(access_session)
 
-    assert client is fake_client
+    assert first_client is fake_client
+    assert second_client is fake_client
+    assert restored_calls == [
+        {
+            "access_token": "token",
+            "refresh_token": "refresh-token",
+        }
+    ]
 
 
 def test_refresh_production_cache_reuses_authenticated_session_tokens():
@@ -845,13 +852,22 @@ def test_refresh_production_cache_reuses_authenticated_session_tokens():
     }
 
 
-def test_sign_out_session_reuses_authenticated_client_and_signs_out():
+def test_sign_out_session_restores_session_when_no_cached_client_exists():
     service = SupabaseAccessService()
+    restored = []
     signed_out = []
     fake_client = SimpleNamespace(
-        auth=SimpleNamespace(sign_out=lambda options=None: signed_out.append(options))
+        auth=SimpleNamespace(
+            set_session=lambda access_token, refresh_token: restored.append(
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                }
+            ),
+            sign_out=lambda options=None: signed_out.append(options),
+        )
     )
-    service.create_authenticated_client = lambda access_session: fake_client  # type: ignore[method-assign]
+    service._create_client = lambda profile: fake_client  # type: ignore[method-assign]
     access_session = AppAccessSession(
         environment=AccessEnvironment.PRODUCTION,
         label="Produção",
@@ -862,7 +878,78 @@ def test_sign_out_session_reuses_authenticated_client_and_signs_out():
 
     service.sign_out_session(access_session)
 
+    assert restored == [{"access_token": "token", "refresh_token": "refresh"}]
     assert signed_out == [{"scope": "local"}]
+
+
+def test_sign_out_session_discards_cached_authenticated_client():
+    service = SupabaseAccessService(
+        production_profile=SupabaseAccessProfile(
+            environment=AccessEnvironment.PRODUCTION,
+            label="ProduÃ§Ã£o",
+            url="https://yonvcnnkewzoqwnnmcdx.supabase.co",
+            publishable_key="sb_publishable_key",
+            allow_password=True,
+        )
+    )
+    restored_calls = []
+    signed_out = []
+    first_client = SimpleNamespace(
+        auth=SimpleNamespace(
+            set_session=lambda access_token, refresh_token: restored_calls.append(
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "client": "first",
+                }
+            ),
+            sign_out=lambda options=None: signed_out.append(("first", options)),
+        )
+    )
+    second_client = SimpleNamespace(
+        auth=SimpleNamespace(
+            set_session=lambda access_token, refresh_token: restored_calls.append(
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "client": "second",
+                }
+            ),
+            sign_out=lambda options=None: signed_out.append(("second", options)),
+        )
+    )
+    created_clients = [first_client, second_client]
+    service._create_client = lambda profile: created_clients.pop(0)  # type: ignore[method-assign]
+    access_session = AppAccessSession(
+        environment=AccessEnvironment.PRODUCTION,
+        label="ProduÃ§Ã£o",
+        auth_mode="password",
+        user_id="user-123",
+        user_email="analista@prefeitura.sp.gov.br",
+        access_token="token",
+        refresh_token="refresh",
+    )
+
+    assert service.create_authenticated_client(access_session) is first_client
+
+    service.sign_out_session(access_session)
+
+    restored_client = service.create_authenticated_client(access_session)
+
+    assert restored_client is second_client
+    assert signed_out == [("first", {"scope": "local"})]
+    assert restored_calls == [
+        {
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "client": "first",
+        },
+        {
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "client": "second",
+        },
+    ]
 
 
 def test_sign_out_session_ignores_local_sessions():

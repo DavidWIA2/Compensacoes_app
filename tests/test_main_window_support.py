@@ -83,12 +83,14 @@ class FakeAuthoritativePersistence:
         *,
         loader_factory,
         monitoring_use_cases,
+        access_service=None,
     ):
         self.session_runtime = session_runtime
         self.audit_service = audit_service
         self.persistence_service = persistence_service
         self.loader_factory = loader_factory
         self.persistence_monitoring_use_cases = monitoring_use_cases
+        self.access_service = access_service
 
 
 def test_calculate_scale_factor_respects_floor():
@@ -154,6 +156,7 @@ def test_build_runtime_bundle_wires_services():
     backend = object()
     loader_factory = object()
     persistence_service = object()
+    access_service = object()
 
     bundle = build_runtime_bundle(
         settings_factory=FakeSettings,
@@ -166,6 +169,7 @@ def test_build_runtime_bundle_wires_services():
         audit_service_cls=FakeAuditService,
         monitoring_use_cases_cls=FakeMonitoringUseCases,
         authoritative_persistence_cls=FakeAuthoritativePersistence,
+        access_service=access_service,
         logger=SimpleNamespace(warning=lambda *args, **kwargs: logger_calls.append(args)),
     )
 
@@ -174,6 +178,7 @@ def test_build_runtime_bundle_wires_services():
     assert bundle.persistence_service is persistence_service
     assert bundle.audit_service.persistence_service is persistence_service
     assert bundle.authoritative_persistence.loader_factory is loader_factory
+    assert bundle.authoritative_persistence.access_service is access_service
     assert bundle.persistence_monitoring_use_cases.persistence_service is persistence_service
     assert logger_calls == []
 

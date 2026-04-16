@@ -192,6 +192,7 @@ class SupabaseAccessService:
         self.production_sync_service = production_sync_service or SupabaseWorkspaceSyncService()
         self._supabase_dependency_checked = False
         self._supabase_dependency_error = ""
+        self._authenticated_clients: dict[tuple[str, str, str, str], Any] = {}
 
     def can_sign_in_production(self) -> bool:
         return self.production_profile.is_configured and self.production_profile.allow_password
@@ -264,7 +265,7 @@ class SupabaseAccessService:
             raise AccessAuthError(
                 f"Autenticação concluída, mas a base oficial não pode ser sincronizada: {exc}"
             ) from exc
-        return AppAccessSession(
+        access_session = AppAccessSession(
             environment=remote_session.environment,
             label=remote_session.label,
             auth_mode=remote_session.auth_mode,
@@ -280,6 +281,8 @@ class SupabaseAccessService:
             refresh_token=remote_session.refresh_token,
             must_change_password=bool(profile.get("must_change_password", False)),
         )
+        self._cache_authenticated_client(access_session, client)
+        return access_session
 
     def can_request_password_reset(self) -> bool:
         return self.production_sign_in_available()
@@ -433,13 +436,16 @@ class SupabaseAccessService:
         finally:
             self._best_effort_sign_out(verification_client)
             if session_client is not None and session_client is not rotation_client:
+                self._authenticated_clients.pop(self._authenticated_client_key(access_session), None)
                 self._best_effort_sign_out(session_client)
-        return replace(
+        updated_session = replace(
             access_session,
             access_token=updated_access_token,
             refresh_token=updated_refresh_token,
             must_change_password=False,
         )
+        self._cache_authenticated_client(updated_session, rotation_client)
+        return updated_session
 
     def enter_demo(self) -> AppAccessSession:
         if self.demo_profile.is_configured and self.demo_profile.allow_anonymous:
@@ -452,7 +458,7 @@ class SupabaseAccessService:
                     auth_mode="anonymous",
                 )
                 demo_db_path = self._reset_demo_database()
-                return AppAccessSession(
+                access_session = AppAccessSession(
                     environment=AccessEnvironment.DEMO,
                     label="Demonstração",
                     auth_mode=remote_session.auth_mode,
@@ -466,6 +472,8 @@ class SupabaseAccessService:
                     access_token=remote_session.access_token,
                     refresh_token=remote_session.refresh_token,
                 )
+                self._cache_authenticated_client(access_session, client)
+                return access_session
             except Exception as exc:
                 logger.warning(
                     "Falha ao autenticar demonstração online. Voltando para a base local fictícia: %s",
@@ -541,26 +549,13 @@ class SupabaseAccessService:
         )
 
     def create_authenticated_client(self, access_session: AppAccessSession):
-        if access_session.environment == AccessEnvironment.PRODUCTION:
-            profile = self.production_profile
-        elif access_session.environment == AccessEnvironment.DEMO:
-            profile = self.demo_profile
-        else:
-            raise AccessAuthError("O ambiente atual não usa autenticação remota do Supabase.")
+        key = self._authenticated_client_key(access_session)
+        cached_client = self._authenticated_clients.get(key)
+        if cached_client is not None:
+            return cached_client
 
-        if not profile.is_configured:
-            raise AccessAuthError("O projeto Supabase deste ambiente ainda não está configurado.")
-
-        access_token = str(getattr(access_session, "access_token", "") or "").strip()
-        refresh_token = str(getattr(access_session, "refresh_token", "") or "").strip()
-        if not access_token or not refresh_token:
-            raise AccessAuthError("A sessão autenticada não possui tokens reutilizáveis do Supabase.")
-
-        try:
-            client = self._create_client(profile)
-            client.auth.set_session(access_token, refresh_token)
-        except Exception as exc:
-            raise AccessAuthError(f"Não foi possível restaurar a sessão autenticada do Supabase: {exc}") from exc
+        client = self._restore_authenticated_client(access_session)
+        self._authenticated_clients[key] = client
         return client
 
     def refresh_production_cache(
@@ -603,11 +598,13 @@ class SupabaseAccessService:
         if not access_token or not refresh_token:
             return
 
-        try:
-            client = self.create_authenticated_client(access_session)
-        except Exception:
-            logger.warning("Falha ao recriar a sessão Supabase durante o logout.", exc_info=True)
-            return
+        client = self._authenticated_clients.pop(self._authenticated_client_key(access_session), None)
+        if client is None:
+            try:
+                client = self._restore_authenticated_client(access_session)
+            except Exception:
+                logger.warning("Falha ao recriar a sessão Supabase durante o logout.", exc_info=True)
+                return
         self._best_effort_sign_out(client)
 
     def _reset_demo_database(self) -> Path:
@@ -675,6 +672,52 @@ class SupabaseAccessService:
             refreshed_remote_session.access_token,
             refreshed_remote_session.refresh_token,
         )
+
+    def _authenticated_client_key(self, access_session: AppAccessSession) -> tuple[str, str, str, str]:
+        resolved_url = str(
+            access_session.supabase_url
+            or (
+                self.production_profile.url
+                if access_session.environment == AccessEnvironment.PRODUCTION
+                else self.demo_profile.url
+            )
+            or ""
+        ).strip().lower()
+        return (
+            str(access_session.environment).strip().lower(),
+            resolved_url,
+            str(access_session.user_id or "").strip().lower(),
+            str(access_session.user_email or "").strip().lower(),
+        )
+
+    def _cache_authenticated_client(self, access_session: AppAccessSession, client: Any) -> None:
+        self._authenticated_clients[self._authenticated_client_key(access_session)] = client
+
+    def _resolve_remote_profile(self, access_session: AppAccessSession) -> SupabaseAccessProfile:
+        if access_session.environment == AccessEnvironment.PRODUCTION:
+            profile = self.production_profile
+        elif access_session.environment == AccessEnvironment.DEMO:
+            profile = self.demo_profile
+        else:
+            raise AccessAuthError("O ambiente atual não usa autenticação remota do Supabase.")
+
+        if not profile.is_configured:
+            raise AccessAuthError("O projeto Supabase deste ambiente ainda não está configurado.")
+        return profile
+
+    def _restore_authenticated_client(self, access_session: AppAccessSession):
+        profile = self._resolve_remote_profile(access_session)
+        access_token = str(getattr(access_session, "access_token", "") or "").strip()
+        refresh_token = str(getattr(access_session, "refresh_token", "") or "").strip()
+        if not access_token or not refresh_token:
+            raise AccessAuthError("A sessão autenticada não possui tokens reutilizáveis do Supabase.")
+
+        try:
+            client = self._create_client(profile)
+            client.auth.set_session(access_token, refresh_token)
+        except Exception as exc:
+            raise AccessAuthError(f"Não foi possível restaurar a sessão autenticada do Supabase: {exc}") from exc
+        return client
 
     def _fetch_production_profile_from_session(self, client: Any) -> dict[str, Any]:
         try:

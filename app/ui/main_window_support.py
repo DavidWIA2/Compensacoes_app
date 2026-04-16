@@ -140,6 +140,7 @@ def build_runtime_bundle(
     audit_service_cls,
     monitoring_use_cases_cls,
     authoritative_persistence_cls,
+    access_service=None,
     logger=None,
 ) -> MainWindowRuntimeBundle:
     settings = settings_factory(qsettings_factory(qsettings_org, qsettings_name))
@@ -160,6 +161,7 @@ def build_runtime_bundle(
         persistence_service,
         loader_factory=loader_factory,
         monitoring_use_cases=monitoring_use_cases,
+        access_service=access_service,
     )
     resolved_monitoring_use_cases = getattr(
         authoritative_persistence,

@@ -38,6 +38,10 @@ class SupabaseCompensacoesRpcService:
     DELETE_FUNCTION = "rpc_delete_compensacao_record"
     IMPORT_FUNCTION = "rpc_replace_compensacoes_snapshot"
 
+    def __init__(self) -> None:
+        self._legacy_save_signature_required: bool = False
+        self._legacy_delete_signature_required: bool = False
+
     def save_record(
         self,
         client: Any,
@@ -52,20 +56,22 @@ class SupabaseCompensacoesRpcService:
         before: Mapping[str, object] | None = None,
         after: Mapping[str, object] | None = None,
     ) -> SupabaseCompensacoesRpcResult:
-        payload = self._execute_rpc(
+        params = {
+            "p_workbook_path": str(workbook_path or "").strip(),
+            "p_record": serialize_record(record),
+            "p_action": str(action or "").strip(),
+            "p_summary": str(summary or "").strip(),
+            "p_backup_path": str(backup_path or "").strip(),
+            "p_expected_updated_at": str(expected_updated_at or "").strip(),
+            "p_metadata": self._json_object(metadata),
+            "p_before": self._json_object(before) if before is not None else None,
+            "p_after": self._json_object(after) if after is not None else serialize_record(record),
+        }
+        payload = self._execute_rpc_with_conflict_guard_compatibility(
             client,
             self.SAVE_FUNCTION,
-            {
-                "p_workbook_path": str(workbook_path or "").strip(),
-                "p_record": serialize_record(record),
-                "p_action": str(action or "").strip(),
-                "p_summary": str(summary or "").strip(),
-                "p_backup_path": str(backup_path or "").strip(),
-                "p_expected_updated_at": str(expected_updated_at or "").strip(),
-                "p_metadata": self._json_object(metadata),
-                "p_before": self._json_object(before) if before is not None else None,
-                "p_after": self._json_object(after) if after is not None else serialize_record(record),
-            },
+            params,
+            compatibility_attr="_legacy_save_signature_required",
         )
         return self._build_result("save", payload)
 
@@ -82,19 +88,21 @@ class SupabaseCompensacoesRpcService:
         metadata: Mapping[str, object] | None = None,
         before: Mapping[str, object] | None = None,
     ) -> SupabaseCompensacoesRpcResult:
-        payload = self._execute_rpc(
+        params = {
+            "p_workbook_path": str(workbook_path or "").strip(),
+            "p_uid": str(uid or "").strip(),
+            "p_action": str(action or "").strip(),
+            "p_summary": str(summary or "").strip(),
+            "p_backup_path": str(backup_path or "").strip(),
+            "p_expected_updated_at": str(expected_updated_at or "").strip(),
+            "p_metadata": self._json_object(metadata),
+            "p_before": self._json_object(before) if before is not None else None,
+        }
+        payload = self._execute_rpc_with_conflict_guard_compatibility(
             client,
             self.DELETE_FUNCTION,
-            {
-                "p_workbook_path": str(workbook_path or "").strip(),
-                "p_uid": str(uid or "").strip(),
-                "p_action": str(action or "").strip(),
-                "p_summary": str(summary or "").strip(),
-                "p_backup_path": str(backup_path or "").strip(),
-                "p_expected_updated_at": str(expected_updated_at or "").strip(),
-                "p_metadata": self._json_object(metadata),
-                "p_before": self._json_object(before) if before is not None else None,
-            },
+            params,
+            compatibility_attr="_legacy_delete_signature_required",
         )
         return self._build_result("delete", payload)
 
@@ -156,6 +164,57 @@ class SupabaseCompensacoesRpcService:
                 f"A funcao remota '{function_name}' retornou um payload invalido."
             )
         return dict(payload)
+
+    def _execute_rpc_with_conflict_guard_compatibility(
+        self,
+        client: Any,
+        function_name: str,
+        params: Mapping[str, object],
+        *,
+        compatibility_attr: str,
+    ) -> dict[str, object]:
+        normalized_params = dict(params)
+        if getattr(self, compatibility_attr, False):
+            normalized_params = self._legacy_conflict_guard_params(normalized_params)
+            return self._execute_rpc(client, function_name, normalized_params)
+
+        try:
+            return self._execute_rpc(client, function_name, normalized_params)
+        except SupabaseCompensacoesConflictError:
+            raise
+        except SupabaseCompensacoesRpcError as exc:
+            if not self._is_conflict_guard_signature_mismatch(function_name, normalized_params, exc):
+                raise
+
+            setattr(self, compatibility_attr, True)
+            legacy_params = self._legacy_conflict_guard_params(normalized_params)
+            logger.warning(
+                "Funcao remota '%s' sem assinatura com controle de conflito; usando compatibilidade legada.",
+                function_name,
+            )
+            return self._execute_rpc(client, function_name, legacy_params)
+
+    @staticmethod
+    def _legacy_conflict_guard_params(params: Mapping[str, object]) -> dict[str, object]:
+        legacy_params = dict(params)
+        legacy_params.pop("p_expected_updated_at", None)
+        return legacy_params
+
+    @staticmethod
+    def _is_conflict_guard_signature_mismatch(
+        function_name: str,
+        params: Mapping[str, object],
+        exc: SupabaseCompensacoesRpcError,
+    ) -> bool:
+        if "p_expected_updated_at" not in params:
+            return False
+        message = str(exc or "")
+        normalized_message = message.lower()
+        return (
+            "pgrst202" in normalized_message
+            and function_name.lower() in normalized_message
+            and "p_expected_updated_at" in message
+        )
 
     @staticmethod
     def _map_rpc_exception(function_name: str, exc: Exception) -> SupabaseCompensacoesRpcError:

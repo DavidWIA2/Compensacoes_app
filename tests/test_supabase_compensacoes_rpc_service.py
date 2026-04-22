@@ -17,6 +17,14 @@ class _FakeRpcQuery:
         return SimpleNamespace(data=self.payload)
 
 
+class _FailingRpcQuery:
+    def __init__(self, error):
+        self.error = error
+
+    def execute(self):
+        raise self.error
+
+
 class _FakeRpcClient:
     def __init__(self, payloads):
         self.payloads = dict(payloads)
@@ -25,6 +33,19 @@ class _FakeRpcClient:
     def rpc(self, function_name, params=None):
         self.calls.append((function_name, dict(params or {})))
         return _FakeRpcQuery(self.payloads[function_name])
+
+
+class _SequenceRpcClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def rpc(self, function_name, params=None):
+        self.calls.append((function_name, dict(params or {})))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            return _FailingRpcQuery(response)
+        return _FakeRpcQuery(response)
 
 
 def _make_record() -> Compensacao:
@@ -213,3 +234,127 @@ def test_rpc_service_maps_conflict_errors_to_specific_exception():
         assert "outra sessao" in str(exc).lower()
     else:
         raise AssertionError("Era esperado conflito especifico para versao remota divergente.")
+
+
+def test_save_record_retries_with_legacy_signature_when_supabase_has_old_rpc():
+    service = SupabaseCompensacoesRpcService()
+    client = _SequenceRpcClient(
+        [
+            RuntimeError(
+                "{'message': 'Could not find the function public.rpc_save_compensacao_record("
+                "p_action, p_after, p_backup_path, p_before, p_expected_updated_at, p_metadata, "
+                "p_record, p_summary, p_workbook_path)', 'code': 'PGRST202'}"
+            ),
+            {
+                "workbook_path": "session://banco-local",
+                "uid": "uid-123",
+                "record_id": 10,
+                "excel_row": 12,
+                "record_count": 329,
+                "plantio_count": 1,
+                "audit_event_id": "evt-legacy-save",
+            },
+        ]
+    )
+
+    result = service.save_record(
+        client,
+        workbook_path="session://banco-local",
+        record=_make_record(),
+        action="SAVE",
+        summary="Atualizacao remota",
+        expected_updated_at="2026-04-09T12:00:00+00:00",
+    )
+
+    assert len(client.calls) == 2
+    assert client.calls[0][1]["p_expected_updated_at"] == "2026-04-09T12:00:00+00:00"
+    assert "p_expected_updated_at" not in client.calls[1][1]
+    assert result.audit_event_id == "evt-legacy-save"
+    assert result.updated_at == ""
+
+
+def test_delete_record_retries_with_legacy_signature_when_supabase_has_old_rpc():
+    service = SupabaseCompensacoesRpcService()
+    client = _SequenceRpcClient(
+        [
+            RuntimeError(
+                "{'message': 'Could not find the function public.rpc_delete_compensacao_record("
+                "p_action, p_backup_path, p_before, p_expected_updated_at, p_metadata, p_summary, "
+                "p_uid, p_workbook_path)', 'code': 'PGRST202'}"
+            ),
+            {
+                "workbook_path": "session://banco-local",
+                "uid": "uid-123",
+                "record_count": 328,
+                "plantio_count": 0,
+                "audit_event_id": "evt-legacy-delete",
+            },
+        ]
+    )
+
+    result = service.delete_record(
+        client,
+        workbook_path="session://banco-local",
+        uid="uid-123",
+        action="DELETE",
+        summary="Exclusao remota",
+        expected_updated_at="2026-04-09T12:00:00+00:00",
+    )
+
+    assert len(client.calls) == 2
+    assert client.calls[0][1]["p_expected_updated_at"] == "2026-04-09T12:00:00+00:00"
+    assert "p_expected_updated_at" not in client.calls[1][1]
+    assert result.audit_event_id == "evt-legacy-delete"
+
+
+def test_legacy_signature_is_cached_after_first_schema_cache_mismatch():
+    service = SupabaseCompensacoesRpcService()
+    client = _SequenceRpcClient(
+        [
+            RuntimeError(
+                "{'message': 'Could not find the function public.rpc_save_compensacao_record("
+                "p_action, p_after, p_backup_path, p_before, p_expected_updated_at, p_metadata, "
+                "p_record, p_summary, p_workbook_path)', 'code': 'PGRST202'}"
+            ),
+            {
+                "workbook_path": "session://banco-local",
+                "uid": "uid-123",
+                "record_id": 10,
+                "excel_row": 12,
+                "record_count": 329,
+                "plantio_count": 1,
+                "audit_event_id": "evt-legacy-save-1",
+            },
+            {
+                "workbook_path": "session://banco-local",
+                "uid": "uid-123",
+                "record_id": 10,
+                "excel_row": 12,
+                "record_count": 329,
+                "plantio_count": 1,
+                "audit_event_id": "evt-legacy-save-2",
+            },
+        ]
+    )
+
+    service.save_record(
+        client,
+        workbook_path="session://banco-local",
+        record=_make_record(),
+        action="SAVE",
+        summary="Atualizacao remota",
+        expected_updated_at="2026-04-09T12:00:00+00:00",
+    )
+    service.save_record(
+        client,
+        workbook_path="session://banco-local",
+        record=_make_record(),
+        action="SAVE",
+        summary="Atualizacao remota 2",
+        expected_updated_at="2026-04-09T12:05:00+00:00",
+    )
+
+    assert len(client.calls) == 3
+    assert client.calls[0][1]["p_expected_updated_at"] == "2026-04-09T12:00:00+00:00"
+    assert "p_expected_updated_at" not in client.calls[1][1]
+    assert "p_expected_updated_at" not in client.calls[2][1]

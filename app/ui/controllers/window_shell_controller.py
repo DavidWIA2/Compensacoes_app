@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -938,7 +939,42 @@ class WindowShellController:
             return True
         if not self.window.data_tab.filter_caixa.is_all_selected():
             return True
+        if str(getattr(self.window.data_tab, "quick_filter_mode", "all") or "all") != "all":
+            return True
         return False
+
+    def refresh_compensacoes_selection_state(self) -> None:
+        data_tab = getattr(self.window, "data_tab", None)
+        if data_tab is None or not hasattr(data_tab, "lbl_selection_summary"):
+            return
+        selected_records = (
+            self.window.form_controller.selected_table_records()
+            if hasattr(self.window, "form_controller")
+            else []
+        )
+        selected_count = len(selected_records)
+        distinct_processes = self._count_distinct_process_identifiers(selected_records)
+
+        if selected_count <= 0:
+            summary = "Nenhum registro selecionado"
+        elif selected_count == 1:
+            summary = "1 registro selecionado"
+        else:
+            summary = (
+                f"{selected_count} registros selecionados | "
+                f"{distinct_processes} processo(s)/ofício(s) no lote"
+            )
+
+        data_tab.lbl_selection_summary.setText(summary)
+        if hasattr(data_tab, "btn_bulk_action"):
+            data_tab.btn_bulk_action.setEnabled(selected_count > 0)
+            data_tab.btn_bulk_action.setText(
+                f"Ações em lote ({selected_count})" if selected_count > 0 else "Ações em lote"
+            )
+        if hasattr(data_tab, "btn_process_history"):
+            data_tab.btn_process_history.setEnabled(selected_count > 0)
+        if hasattr(data_tab, "action_selected_process_history"):
+            data_tab.action_selected_process_history.setEnabled(selected_count > 0)
 
     def current_selection_label_text(self) -> str:
         return self._build_window_chrome_snapshot().selection_label
@@ -1140,6 +1176,26 @@ class WindowShellController:
         self.window.data_tab.btn_columns.clicked.connect(build_command("open_columns_dialog"))
         self.window.data_tab.btn_table_full.clicked.connect(build_command("open_table_fullscreen"))
         self.window.data_tab.table.clicked.connect(self.window._on_table_clicked)
+        selection_model = self.window.data_tab.table.selectionModel()
+        if selection_model is not None:
+            selection_model.selectionChanged.connect(lambda *_args: self.refresh_compensacoes_selection_state())
+        for mode, button in dict(getattr(self.window.data_tab, "quick_filter_buttons", {}) or {}).items():
+            button.clicked.connect(
+                lambda checked=False, quick_mode=mode: (
+                    self.window.data_controller.set_quick_filter_mode(quick_mode),
+                    self.window.schedule_apply_filter(),
+                )
+                if checked
+                else None
+            )
+        self.window.data_tab.btn_process_history.clicked.connect(self.window.data_controller.show_selected_process_history)
+        self.window.data_tab.btn_bulk_action.clicked.connect(self.window.form_controller.apply_bulk_action)
+        self.window.data_tab.action_selected_process_history.triggered.connect(
+            self.window.data_controller.show_selected_process_history
+        )
+        self.window.data_tab.action_save_view.triggered.connect(self.window.data_controller.save_current_view)
+        self.window.data_tab.action_clear_saved_draft.triggered.connect(self.window.form_controller.clear_saved_form_draft)
+        self.window.data_tab.action_open_command_palette.triggered.connect(self.open_command_palette)
 
         self.window.data_tab.btn_clear.clicked.connect(build_command("clear_form"))
         self.window.data_tab.btn_add.clicked.connect(build_command("add_new"))
@@ -1184,6 +1240,7 @@ class WindowShellController:
         self.window.operations_tab.btn_history.clicked.connect(build_command("show_operation_history"))
         self.window.operations_tab.btn_rollback.clicked.connect(build_command("show_rollback_dialog"))
         self.window.operations_tab.btn_open_backup.clicked.connect(build_command("open_selected_operation_backup"))
+        self.refresh_compensacoes_selection_state()
 
     def sync_global_search_context(self):
         is_admin_tab_active = getattr(self.window, "tabs", None) is not None and (
@@ -1252,9 +1309,57 @@ class WindowShellController:
         act_delete.triggered.connect(build_command("delete_selected_from_table_shortcut"))
         self.window.data_tab.table.addAction(act_delete)
 
+        act_command_palette = QAction(self.window)
+        act_command_palette.setShortcut("Ctrl+K")
+        act_command_palette.triggered.connect(self.open_command_palette)
+        self.window.addAction(act_command_palette)
+
+        act_focus_search = QAction(self.window)
+        act_focus_search.setShortcut("Ctrl+L")
+        act_focus_search.triggered.connect(lambda: self.window.search.setFocus())
+        self.window.addAction(act_focus_search)
+
+        for shortcut, tab_index in [("Ctrl+1", 0), ("Ctrl+2", 1), ("Ctrl+3", 2), ("Ctrl+4", 3)]:
+            action = QAction(self.window)
+            action.setShortcut(shortcut)
+            action.triggered.connect(lambda _checked=False, index=tab_index: self.window.tabs.setCurrentIndex(index))
+            self.window.addAction(action)
+
+    def open_command_palette(self):
+        command_items = [
+            ("Focar busca global", lambda: self.window.search.setFocus()),
+            ("Novo cadastro", self.window.clear_form),
+            ("Salvar edição atual", self.window.save_edit),
+            ("Limpar filtros", self.window.clear_filters),
+            ("Salvar visão atual", self.window.data_controller.save_current_view),
+            ("Histórico do processo selecionado", self.window.data_controller.show_selected_process_history),
+            ("Ações em lote na seleção", self.window.form_controller.apply_bulk_action),
+            ("Ir para Compensações", lambda: self.window.tabs.setCurrentIndex(0)),
+            ("Ir para TCRAs", lambda: self.window.tabs.setCurrentIndex(1)),
+            ("Ir para Painel", lambda: self.window.tabs.setCurrentIndex(2)),
+            ("Ir para Operações", lambda: self.window.tabs.setCurrentIndex(3)),
+        ]
+        labels = [label for label, _handler in command_items]
+        selected_label, ok = QInputDialog.getItem(
+            self.window,
+            "Paleta de comandos",
+            "Escolha uma ação:",
+            labels,
+            0,
+            False,
+        )
+        if not ok or not str(selected_label or "").strip():
+            return False
+        for label, handler in command_items:
+            if label == selected_label:
+                handler()
+                return True
+        return False
+
     def on_form_field_changed(self):
         self.refresh_tipo_controls()
         self.window.form_controller.remember_current_state()
+        self.window.form_controller.queue_form_autosave()
         self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
         self.window._update_address_search_enabled()

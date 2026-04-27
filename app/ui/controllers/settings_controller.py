@@ -271,6 +271,24 @@ class SettingsController:
         else:
             self._remove("last_session_path")
 
+    def compensacoes_form_draft(self) -> dict:
+        if hasattr(self.window.settings, "compensacoes_form_draft"):
+            return dict(self.window.settings.compensacoes_form_draft() or {})
+        state = self._value("compensacoes_form_draft", {})
+        return dict(state) if isinstance(state, dict) else {}
+
+    def set_compensacoes_form_draft(self, state: dict):
+        if hasattr(self.window.settings, "set_compensacoes_form_draft"):
+            self.window.settings.set_compensacoes_form_draft(dict(state or {}))
+        else:
+            self._set_value("compensacoes_form_draft", dict(state or {}))
+
+    def clear_compensacoes_form_draft(self):
+        if hasattr(self.window.settings, "clear_compensacoes_form_draft"):
+            self.window.settings.clear_compensacoes_form_draft()
+        else:
+            self._remove("compensacoes_form_draft")
+
     def tcra_form_draft(self) -> dict:
         if hasattr(self.window.settings, "tcra_form_draft"):
             return dict(self.window.settings.tcra_form_draft() or {})
@@ -335,6 +353,36 @@ class SettingsController:
             self.window.settings.set_last_export_dir(export_dir)
         else:
             self._set_value("last_export_dir", export_dir)
+
+    def compensacoes_filter_state(self) -> dict:
+        if hasattr(self.window.settings, "compensacoes_filter_state"):
+            state = self.window.settings.compensacoes_filter_state()
+        else:
+            raw_state = self._value("compensacoes_filter_state", {})
+            state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        return dict(state or {})
+
+    def set_compensacoes_filter_state(self, state: dict):
+        clean_state = dict(state or {})
+        if hasattr(self.window.settings, "set_compensacoes_filter_state"):
+            self.window.settings.set_compensacoes_filter_state(clean_state)
+        else:
+            self._set_value("compensacoes_filter_state", clean_state)
+
+    def compensacoes_saved_views(self) -> dict:
+        if hasattr(self.window.settings, "compensacoes_saved_views"):
+            state = self.window.settings.compensacoes_saved_views()
+        else:
+            raw_state = self._value("compensacoes_saved_views", {})
+            state = dict(raw_state) if isinstance(raw_state, dict) else {}
+        return dict(state or {})
+
+    def set_compensacoes_saved_views(self, views: dict):
+        clean_views = dict(views or {})
+        if hasattr(self.window.settings, "set_compensacoes_saved_views"):
+            self.window.settings.set_compensacoes_saved_views(clean_views)
+        else:
+            self._set_value("compensacoes_saved_views", clean_views)
 
     def tcra_filter_state(self) -> dict:
         if hasattr(self.window.settings, "tcra_filter_state"):

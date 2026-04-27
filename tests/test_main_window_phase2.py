@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6 import QtWidgets
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QItemSelectionModel, QThread, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
@@ -426,6 +426,157 @@ def test_startup_layout_does_not_lock_table_or_splitter_heights():
 
     assert window.data_tab._locked_table_height is None
     assert window.data_tab._locked_splitter_height is None
+    window.close()
+
+
+def test_compensacoes_quick_filters_update_counts_and_persist_state():
+    window = MainWindow()
+    saved_states = []
+    window.settings_controller.set_compensacoes_filter_state = lambda state: saved_states.append(dict(state))
+    session_path = window.persistence_service.ensure_singleton_session().session_path
+    records = [
+        make_record(uid="u-1", eletronico="Ofício", microbacia="", latitude="", longitude="", av_tec="AT-1"),
+        make_record(
+            excel_row=3,
+            uid="u-2",
+            eletronico="SIM",
+            compensado="SIM",
+            endereco_plantio="Área 1",
+            microbacia="Gregório",
+            latitude="-22.01",
+            longitude="-47.89",
+            av_tec="AT-2",
+        ),
+        make_record(
+            excel_row=4,
+            uid="u-3",
+            eletronico="Físico",
+            microbacia="Medeiros",
+            latitude="-22.02",
+            longitude="-47.88",
+            av_tec="AT-3",
+        ),
+    ]
+    window.session_runtime.path = session_path
+    window.persistence_service.sync_workbook_snapshot(session_path, records)
+    window.records = list(records)
+
+    window.data_controller.update_ui_after_load()
+    get_app().processEvents()
+
+    assert "Ofícios (1)" in window.data_tab.quick_filter_buttons["oficios"].text()
+    assert "Revisão (1)" in window.data_tab.quick_filter_buttons["qualidade"].text()
+
+    window.data_tab.quick_filter_buttons["oficios"].click()
+    window.data_controller.apply_filter()
+    get_app().processEvents()
+
+    assert [record.uid for record in window.filtered_records] == ["u-1"]
+    assert saved_states
+    assert saved_states[-1]["quick_filter_mode"] == "oficios"
+    window.close()
+
+
+def test_compensacoes_saved_views_store_current_filter_state(monkeypatch):
+    window = MainWindow()
+    persisted_views = {}
+    window.settings_controller.compensacoes_saved_views = lambda: dict(persisted_views)
+    window.settings_controller.set_compensacoes_saved_views = lambda views: persisted_views.update(dict(views))
+    monkeypatch.setattr(
+        "app.ui.controllers.data_controller.QInputDialog.getText",
+        lambda *args, **kwargs: ("Equipe Ofícios", True),
+    )
+
+    window.data_controller.set_quick_filter_mode("oficios")
+    window.search.setText("SMMADS")
+    window.data_controller.apply_filter()
+
+    assert window.data_controller.save_current_view() is True
+    assert "Equipe Ofícios" in persisted_views
+    assert persisted_views["Equipe Ofícios"]["quick_filter_mode"] == "oficios"
+    assert persisted_views["Equipe Ofícios"]["search_text"] == "SMMADS"
+    window.close()
+
+
+def test_compensacoes_form_restores_saved_new_record_draft():
+    window = MainWindow()
+    window.form_controller._pending_new_form_draft = {
+        "uid": "",
+        "oficio_processo": "163/23 - SMMADS",
+        "caixa": "Ofícios",
+        "av_tec": "073/2023",
+        "compensacao": "1",
+        "endereco": "Rua Vicente de Carvalho - Vila Marcelino",
+        "endereco_plantio": "",
+        "plantios": (),
+        "microbacia": "Gregório",
+        "compensado": False,
+        "sn": False,
+        "arquivado": False,
+        "eletronico": "Ofício",
+    }
+
+    window.clear_form(force=True)
+    restored = window.form_controller.restore_saved_new_record_draft()
+    get_app().processEvents()
+
+    assert restored is True
+    assert window.data_tab.in_oficio.text() == "163/23 - SMMADS"
+    assert window.data_tab.in_caixa.text() == "Ofícios"
+    assert window.data_tab.in_end.text().startswith("Rua Vicente")
+    assert window.data_tab.in_micro.currentText() == "Gregório"
+    assert window.form_controller.has_pending_changes() is True
+    window.close()
+
+
+def test_compensacoes_bulk_action_updates_selected_records(monkeypatch):
+    window = MainWindow()
+    session_path = window.persistence_service.ensure_singleton_session().session_path
+    records = [
+        make_record(uid="u-1", eletronico="SIM", caixa="", microbacia="", av_tec="AT-1"),
+        make_record(excel_row=3, uid="u-2", eletronico="SIM", caixa="CX-2", microbacia="", av_tec="AT-2"),
+    ]
+    window.session_runtime.path = session_path
+    window.persistence_service.sync_workbook_snapshot(session_path, records)
+    window.records = list(records)
+
+    window.data_controller.update_ui_after_load()
+    get_app().processEvents()
+
+    class BulkDialog:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exec(self):
+            return True
+
+        def values(self):
+            return {"action": "tipo", "tipo": "Ofício", "microbacia": "", "caixa": ""}
+
+    monkeypatch.setattr("app.ui.controllers.form_controller.CompensacaoBulkActionDialog", BulkDialog)
+
+    selection_model = window.data_tab.table.selectionModel()
+    assert selection_model is not None
+    selection_model.select(
+        window.data_tab.proxy.index(0, 0),
+        QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows,
+    )
+    selection_model.select(
+        window.data_tab.proxy.index(1, 0),
+        QItemSelectionModel.Select | QItemSelectionModel.Rows,
+    )
+    get_app().processEvents()
+    window.shell_controller.refresh_compensacoes_selection_state()
+
+    assert window.data_tab.btn_bulk_action.isEnabled() is True
+    assert window.data_tab.btn_bulk_action.text() == "Ações em lote (2)"
+    assert "2 registros selecionados" in window.data_tab.lbl_selection_summary.text()
+
+    assert window.form_controller.apply_bulk_action() is True
+    get_app().processEvents()
+
+    assert [record.eletronico for record in window.records] == ["Ofício", "Ofício"]
+    assert [record.caixa for record in window.records] == ["OFÍCIOS", "OFÍCIOS"]
     window.close()
 
 

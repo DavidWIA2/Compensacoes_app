@@ -52,9 +52,11 @@ class WindowNavigationController:
         payload = metrics if metrics is not None else self.window._pending_dashboard_metrics
         if payload is None:
             return
+        shell_controller = getattr(self.window, "shell_controller", None)
+        resolve_record_overview = getattr(shell_controller, "resolved_dashboard_record_overview", None)
         record_overview = (
-            self.window.shell_controller.resolved_dashboard_record_overview()
-            if hasattr(self.window, "shell_controller")
+            resolve_record_overview()
+            if callable(resolve_record_overview)
             else self.window._dashboard_record_overview
         )
         self.window.dash_tab.update_dashboard(
@@ -70,8 +72,10 @@ class WindowNavigationController:
             self.window.dash_tab.update_tcra_overview(tcra_overview, tcra_agenda)
 
     def on_tab_changed(self, _index: int):
-        if hasattr(self.window, "shell_controller"):
-            self.window.shell_controller.sync_global_search_context()
+        shell_controller = getattr(self.window, "shell_controller", None)
+        sync_global_search_context = getattr(shell_controller, "sync_global_search_context", None)
+        if callable(sync_global_search_context):
+            sync_global_search_context()
         apply_window_responsive_layout(
             self.window,
             include_active_tab=False,
@@ -105,5 +109,6 @@ class WindowNavigationController:
             include_active_tab=True,
             finalize_active_tab=True,
         )
-        if hasattr(self.window, "shell_controller"):
-            self.window.shell_controller.refresh_window_chrome()
+        refresh_window_chrome = getattr(shell_controller, "refresh_window_chrome", None)
+        if callable(refresh_window_chrome):
+            refresh_window_chrome()

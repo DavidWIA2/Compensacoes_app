@@ -134,6 +134,27 @@ class AppSettings:
     def set_operation_history_filter_state(self, state: dict):
         self.setValue("operation_history_filter_state", dict(state or {}))
 
+    def compensacoes_filter_state(self) -> dict:
+        return self._read_mapping("compensacoes_filter_state")
+
+    def set_compensacoes_filter_state(self, state: dict):
+        self.setValue("compensacoes_filter_state", dict(state or {}))
+
+    def compensacoes_saved_views(self) -> dict:
+        return self._read_mapping("compensacoes_saved_views")
+
+    def set_compensacoes_saved_views(self, views: dict):
+        self.setValue("compensacoes_saved_views", dict(views or {}))
+
+    def compensacoes_form_draft(self) -> dict:
+        return self._read_mapping("compensacoes_form_draft")
+
+    def set_compensacoes_form_draft(self, state: dict):
+        self.setValue("compensacoes_form_draft", dict(state or {}))
+
+    def clear_compensacoes_form_draft(self):
+        self.remove("compensacoes_form_draft")
+
     def tcra_filter_state(self) -> dict:
         return self._read_mapping("tcra_filter_state")
 

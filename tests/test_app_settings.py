@@ -29,6 +29,9 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.sort_state() == (-1, 0)
     assert settings.window_geometry() is None
     assert settings.operation_history_filter_state() == {}
+    assert settings.compensacoes_filter_state() == {}
+    assert settings.compensacoes_saved_views() == {}
+    assert settings.compensacoes_form_draft() == {}
     assert settings.tcra_filter_state() == {}
     assert settings.tcra_form_draft() == {}
 
@@ -43,6 +46,9 @@ def test_app_settings_round_trip_and_defaults():
     settings.set_sort_state(4, 1)
     settings.set_window_geometry(b"geom")
     settings.set_operation_history_filter_state({"action": "EDIT", "search": "uid-1"})
+    settings.set_compensacoes_filter_state({"search_text": "gregorio", "quick_filter_mode": "oficios"})
+    settings.set_compensacoes_saved_views({"Ofícios": {"quick_filter_mode": "oficios"}})
+    settings.set_compensacoes_form_draft({"oficio_processo": "163/23", "caixa": "Ofícios"})
     settings.set_tcra_filter_state({"search_text": "varjao", "quick_filter_mode": "alertas"})
     settings.set_tcra_form_draft({"numero_processo": "26207/2019", "local": "Itamarati"})
 
@@ -57,6 +63,9 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.sort_state() == (4, 1)
     assert settings.window_geometry() == b"geom"
     assert settings.operation_history_filter_state() == {"action": "EDIT", "search": "uid-1"}
+    assert settings.compensacoes_filter_state() == {"search_text": "gregorio", "quick_filter_mode": "oficios"}
+    assert settings.compensacoes_saved_views() == {"Ofícios": {"quick_filter_mode": "oficios"}}
+    assert settings.compensacoes_form_draft() == {"oficio_processo": "163/23", "caixa": "Ofícios"}
     assert settings.tcra_filter_state() == {"search_text": "varjao", "quick_filter_mode": "alertas"}
     assert settings.tcra_form_draft() == {"numero_processo": "26207/2019", "local": "Itamarati"}
 
@@ -64,12 +73,14 @@ def test_app_settings_round_trip_and_defaults():
     settings.clear_legacy_workbook_path()
     settings.clear_database_bootstrap_source_path()
     settings.clear_sort_state()
+    settings.clear_compensacoes_form_draft()
     settings.clear_tcra_form_draft()
 
     assert settings.last_session_path() == ""
     assert settings.legacy_workbook_path() == ""
     assert settings.database_bootstrap_source_path() == ""
     assert settings.sort_state() == (-1, 0)
+    assert settings.compensacoes_form_draft() == {}
     assert settings.tcra_form_draft() == {}
 
 
@@ -77,6 +88,9 @@ def test_app_settings_recovers_from_invalid_json_payloads():
     raw = MemorySettings()
     raw.setValue("recent_files", "{invalido")
     raw.setValue("operation_history_filter_state", "{invalido")
+    raw.setValue("compensacoes_filter_state", "[1,2,3]")
+    raw.setValue("compensacoes_saved_views", "[]")
+    raw.setValue("compensacoes_form_draft", "[]")
     raw.setValue("tcra_filter_state", "[1,2,3]")
     raw.setValue("tcra_form_draft", "[]")
 
@@ -84,6 +98,9 @@ def test_app_settings_recovers_from_invalid_json_payloads():
 
     assert settings.recent_files() == []
     assert settings.operation_history_filter_state() == {}
+    assert settings.compensacoes_filter_state() == {}
+    assert settings.compensacoes_saved_views() == {}
+    assert settings.compensacoes_form_draft() == {}
     assert settings.tcra_filter_state() == {}
     assert settings.tcra_form_draft() == {}
 

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QHeaderView,
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
     QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton, QFrame,
+    QMenu, QToolButton,
 )
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
@@ -22,6 +23,17 @@ from app.ui.components.widgets import (
 from app.ui.components.model import CompensacoesTableModel
 from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.ui_utils import resource_path
+from app.ui.controllers.data_controller_support import (
+    COMPENSACOES_QUICK_FILTER_ALL,
+    COMPENSACOES_QUICK_FILTER_COM_PLANTIO,
+    COMPENSACOES_QUICK_FILTER_COMPENSADOS,
+    COMPENSACOES_QUICK_FILTER_DUPLICIDADE_AV_TEC,
+    COMPENSACOES_QUICK_FILTER_OFICIOS,
+    COMPENSACOES_QUICK_FILTER_PENDENTES,
+    COMPENSACOES_QUICK_FILTER_QUALIDADE,
+    COMPENSACOES_QUICK_FILTER_SEM_GPS,
+    COMPENSACOES_QUICK_FILTER_SEM_MICRO,
+)
 from app.ui.tabs.data_tab_support import (
     build_column_texts_for_records,
     build_micro_rows,
@@ -211,6 +223,127 @@ class DataTab(QWidget):
         filters.addLayout(btns)
         filters.addStretch(1)
         filters_host_layout.addLayout(filters)
+
+        self.quick_filter_mode = COMPENSACOES_QUICK_FILTER_ALL
+        self.quick_filter_buttons: Dict[str, QPushButton] = {}
+        self.quick_filter_group = QButtonGroup(self)
+        self.quick_filter_group.setExclusive(True)
+        quick_filters_layout = QHBoxLayout()
+        self.quick_filters_layout = quick_filters_layout
+        quick_filters_layout.setSpacing(int(6 * self.sf))
+        quick_filters_layout.addWidget(QLabel("Filtros rápidos:"))
+        for mode, label, tooltip in [
+            (
+                COMPENSACOES_QUICK_FILTER_ALL,
+                "Todos (0)",
+                "Mostra o recorte completo após busca e filtros avançados.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_PENDENTES,
+                "Pendentes (0)",
+                "Lista apenas compensações ainda não marcadas como compensadas.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_COMPENSADOS,
+                "Compensados (0)",
+                "Lista apenas registros compensados.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_COM_PLANTIO,
+                "Com plantio (0)",
+                "Lista registros com endereço de plantio ou plantios vinculados.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_OFICIOS,
+                "Ofícios (0)",
+                "Lista registros marcados como tipo Ofício.",
+            ),
+        ]:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("kind", "chip-quiet")
+            button.setToolTip(tooltip)
+            self.quick_filter_group.addButton(button)
+            self.quick_filter_buttons[mode] = button
+            quick_filters_layout.addWidget(button)
+        self.quick_filter_buttons[COMPENSACOES_QUICK_FILTER_ALL].setChecked(True)
+
+        self.quality_filter_buttons: Dict[str, QPushButton] = {}
+        quality_filters_layout = quick_filters_layout
+        self.quality_filters_layout = quality_filters_layout
+        quality_filters_layout.addSpacing(int(8 * self.sf))
+        quality_filters_layout.addWidget(QLabel("Qualidade:"))
+        for mode, label, tooltip in [
+            (
+                COMPENSACOES_QUICK_FILTER_QUALIDADE,
+                "Revisão (0)",
+                "Mostra registros com inconsistências ou campos operacionais faltando.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_SEM_MICRO,
+                "Sem micro (0)",
+                "Lista registros ainda sem microbacia preenchida.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_SEM_GPS,
+                "Sem GPS (0)",
+                "Lista registros sem latitude/longitude válidas no endereço principal.",
+            ),
+            (
+                COMPENSACOES_QUICK_FILTER_DUPLICIDADE_AV_TEC,
+                "Dup. Av. Tec. (0)",
+                "Lista registros cuja Av. Tec. se repete na base.",
+            ),
+        ]:
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty("kind", "chip-quiet")
+            button.setToolTip(tooltip)
+            self.quick_filter_group.addButton(button)
+            self.quick_filter_buttons[mode] = button
+            self.quality_filter_buttons[mode] = button
+            quality_filters_layout.addWidget(button)
+        self.lbl_quality_summary = QLabel("Qualidade: aguardando leitura da base.")
+        self.lbl_quality_summary.setObjectName("FormStateLabel")
+        self.lbl_quality_summary.setWordWrap(False)
+        self.lbl_quality_summary.setVisible(False)
+
+        actions_row = quick_filters_layout
+        self.actions_row = actions_row
+        actions_row.addStretch(1)
+        self.lbl_selection_summary = QLabel("Nenhum registro selecionado")
+        self.lbl_selection_summary.setObjectName("FormStateLabel")
+        self.lbl_selection_summary.setWordWrap(False)
+        self.lbl_selection_summary.setMinimumWidth(0)
+        self.lbl_selection_summary.setMaximumWidth(int(260 * self.sf))
+        actions_row.addWidget(self.lbl_selection_summary, 0)
+        self.btn_process_history = QPushButton("Histórico")
+        self.btn_process_history.setProperty("kind", "chip-quiet")
+        self.btn_process_history.setToolTip("Abre o histórico filtrado pelo processo/ofício do registro atual.")
+        self.btn_process_history.setEnabled(False)
+        self.btn_bulk_action = QPushButton("Ações em lote")
+        self.btn_bulk_action.setProperty("kind", "chip-quiet")
+        self.btn_bulk_action.setToolTip("Aplica tipo, microbacia, caixa ou situação a vários registros selecionados.")
+        self.btn_bulk_action.setEnabled(False)
+        self.btn_more_actions = QToolButton(self)
+        self.btn_more_actions.setText("Mais ações")
+        self.btn_more_actions.setProperty("kind", "chip-quiet")
+        self.btn_more_actions.setPopupMode(QToolButton.InstantPopup)
+        self.btn_more_actions.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.more_actions_menu = QMenu(self.btn_more_actions)
+        self.action_save_view = self.more_actions_menu.addAction("Salvar visão atual")
+        self.saved_views_menu = self.more_actions_menu.addMenu("Aplicar visão salva")
+        self.more_actions_menu.addSeparator()
+        self.action_selected_process_history = self.more_actions_menu.addAction("Histórico do processo selecionado")
+        self.action_clear_saved_draft = self.more_actions_menu.addAction("Limpar rascunho local")
+        self.action_open_command_palette = self.more_actions_menu.addAction("Paleta de comandos")
+        self.btn_more_actions.setMenu(self.more_actions_menu)
+        for button in [self.btn_process_history, self.btn_bulk_action]:
+            button.setMinimumHeight(int(28 * self.sf))
+        actions_row.addWidget(self.btn_process_history)
+        actions_row.addWidget(self.btn_bulk_action)
+        actions_row.addWidget(self.btn_more_actions)
+        filters_host_layout.addLayout(actions_row)
         layout.addWidget(filters_frame)
 
         self.splitter = LockedSplitter(Qt.Horizontal)
@@ -232,7 +365,7 @@ class DataTab(QWidget):
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
-        self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.setSelectionMode(QTableView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(True)
         self.table.verticalHeader().setDefaultSectionSize(int(28 * self.sf))
@@ -438,6 +571,7 @@ class DataTab(QWidget):
             layout = self.left_panel.layout()
             if layout is None:
                 return
+            layout.activate()
 
             margins = layout.contentsMargins()
             available = self.left_panel.height() - margins.top() - margins.bottom()

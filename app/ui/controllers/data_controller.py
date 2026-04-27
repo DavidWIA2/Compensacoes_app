@@ -4,7 +4,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
 
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.local_record_queries import LocalRecordReadResult
@@ -30,8 +30,13 @@ from app.ui.components.dialogs import OperationHistoryDialog
 from app.ui.components.job_specs import BlockingJobSpec
 from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.controllers.data_controller_support import (
+    COMPENSACOES_QUICK_FILTER_ALL,
+    COMPENSACOES_QUICK_FILTER_MODES,
     FilterStateSnapshot,
     PreviousDataState,
+    apply_compensacoes_quick_filter,
+    build_compensacoes_quick_filter_counts,
+    build_quality_record_key_sets,
     capture_previous_data_state,
     clear_loaded_data_view,
     reset_authoritative_runtime_state,
@@ -72,13 +77,19 @@ class DataController:
         self.filter_timer = QTimer(window)
         self.filter_timer.setSingleShot(True)
         self.filter_timer.timeout.connect(self.apply_filter)
+        settings_controller = getattr(window, "settings_controller", None)
+        filter_state_loader = getattr(settings_controller, "compensacoes_filter_state", None)
+        self._pending_filter_restore = dict(filter_state_loader() or {}) if callable(filter_state_loader) else {}
+        self.rebuild_saved_views_menu()
 
     def _runtime_workbook(self):
         return getattr(self.window, "session_runtime", None)
 
     def _current_session_path(self) -> str:
-        if hasattr(self.window, "shell_controller"):
-            return self.window.shell_controller.current_session_path()
+        shell_controller = getattr(self.window, "shell_controller", None)
+        current_session_path = getattr(shell_controller, "current_session_path", None)
+        if callable(current_session_path):
+            return current_session_path()
         runtime = self._runtime_workbook()
         if runtime is None:
             return ""
@@ -117,6 +128,112 @@ class DataController:
 
     def clear_loaded_data_state(self):
         clear_loaded_data_view(self.window, compute_metrics([]))
+
+    def _current_quick_filter_mode(self) -> str:
+        mode = str(getattr(self.window.data_tab, "quick_filter_mode", COMPENSACOES_QUICK_FILTER_ALL) or "")
+        if mode in COMPENSACOES_QUICK_FILTER_MODES:
+            return mode
+        return COMPENSACOES_QUICK_FILTER_ALL
+
+    def set_quick_filter_mode(self, mode: str) -> None:
+        normalized_mode = str(mode or COMPENSACOES_QUICK_FILTER_ALL).strip() or COMPENSACOES_QUICK_FILTER_ALL
+        if normalized_mode not in COMPENSACOES_QUICK_FILTER_MODES:
+            normalized_mode = COMPENSACOES_QUICK_FILTER_ALL
+        self.window.data_tab.quick_filter_mode = normalized_mode
+        for button_mode, button in dict(getattr(self.window.data_tab, "quick_filter_buttons", {}) or {}).items():
+            button.blockSignals(True)
+            button.setChecked(button_mode == normalized_mode)
+            button.blockSignals(False)
+
+    def _restore_filter_state_if_pending(self) -> bool:
+        if not self._pending_filter_restore:
+            return False
+        state = dict(self._pending_filter_restore)
+        self._pending_filter_restore = {}
+        self.restore_filter_state(state)
+        return True
+
+    def _saved_views(self) -> dict[str, object]:
+        settings_controller = getattr(self.window, "settings_controller", None)
+        saved_views_loader = getattr(settings_controller, "compensacoes_saved_views", None)
+        if not callable(saved_views_loader):
+            return {}
+        return dict(saved_views_loader() or {})
+
+    def _can_set_saved_views(self) -> bool:
+        settings_controller = getattr(self.window, "settings_controller", None)
+        return callable(getattr(settings_controller, "set_compensacoes_saved_views", None))
+
+    def _set_saved_views(self, views: dict[str, object]) -> bool:
+        settings_controller = getattr(self.window, "settings_controller", None)
+        saved_views_setter = getattr(settings_controller, "set_compensacoes_saved_views", None)
+        if not callable(saved_views_setter):
+            return False
+        saved_views_setter(views)
+        return True
+
+    def rebuild_saved_views_menu(self) -> None:
+        data_tab = getattr(self.window, "data_tab", None)
+        saved_views_menu = getattr(data_tab, "saved_views_menu", None)
+        if saved_views_menu is None:
+            return
+        saved_views_menu.clear()
+        views = self._saved_views()
+        if not views:
+            action = saved_views_menu.addAction("Nenhuma visão salva")
+            action.setEnabled(False)
+            return
+        for name in sorted(views):
+            action = saved_views_menu.addAction(name)
+            action.triggered.connect(lambda _checked=False, view_name=name: self.apply_saved_view(view_name))
+        saved_views_menu.addSeparator()
+        for name in sorted(views):
+            action = saved_views_menu.addAction(f"Excluir: {name}")
+            action.triggered.connect(lambda _checked=False, view_name=name: self.delete_saved_view(view_name))
+
+    def save_current_view(self) -> bool:
+        if not self._can_set_saved_views():
+            QMessageBox.warning(self.window, "Aviso", "Não foi possível acessar as configurações locais.")
+            return False
+        name, ok = QInputDialog.getText(self.window, "Salvar visão", "Nome da visão:")
+        clean_name = str(name or "").strip()
+        if not ok or not clean_name:
+            return False
+        views = self._saved_views()
+        views[clean_name] = self.snapshot_filter_state()
+        self._set_saved_views(views)
+        self.rebuild_saved_views_menu()
+        self.window.statusBar().showMessage(f"Visão salva: {clean_name}")
+        return True
+
+    def apply_saved_view(self, name: str) -> bool:
+        state = self._saved_views().get(name)
+        if not isinstance(state, dict):
+            return False
+        self._pending_filter_restore = dict(state)
+        self._restore_filter_state_if_pending()
+        self.apply_filter()
+        self.window.statusBar().showMessage(f"Visão aplicada: {name}")
+        return True
+
+    def delete_saved_view(self, name: str) -> bool:
+        if not self._can_set_saved_views():
+            QMessageBox.warning(self.window, "Aviso", "Não foi possível acessar as configurações locais.")
+            return False
+        views = self._saved_views()
+        if name not in views:
+            return False
+        if not msg_confirm(
+            self.window,
+            "Excluir visão salva",
+            f'Deseja excluir a visão salva "{name}"?',
+        ):
+            return False
+        del views[name]
+        self._set_saved_views(views)
+        self.rebuild_saved_views_menu()
+        self.window.statusBar().showMessage(f"Visão removida: {name}")
+        return True
 
     def restore_previous_state(
         self,
@@ -301,6 +418,94 @@ class DataController:
     def _refresh_record_integrity_report(self) -> None:
         self.window._record_integrity_report = build_record_integrity_report(self.window.records)
 
+    def _resolved_quality_key_sets(self) -> dict[str, set[tuple[str, int, str]]]:
+        return build_quality_record_key_sets(
+            all_records=self.window.records,
+            record_integrity_report=getattr(self.window, "_record_integrity_report", None),
+        )
+
+    def _refresh_compensacoes_operational_chips(
+        self,
+        base_filtered_records: List[Compensacao],
+        *,
+        quality_key_sets: dict[str, set[tuple[str, int, str]]],
+    ) -> None:
+        counts = build_compensacoes_quick_filter_counts(
+            base_filtered_records,
+            quality_key_sets=quality_key_sets,
+        )
+        label_map = {
+            COMPENSACOES_QUICK_FILTER_ALL: "Todos",
+            "pendentes": "Pendentes",
+            "compensados": "Compensados",
+            "com_plantio": "Com plantio",
+            "oficios": "Ofícios",
+            "qualidade": "Revisão",
+            "sem_micro": "Sem micro",
+            "sem_gps": "Sem GPS",
+            "duplicidade_av_tec": "Dup. Av. Tec.",
+        }
+        for mode, button in dict(getattr(self.window.data_tab, "quick_filter_buttons", {}) or {}).items():
+            button.setText(f"{label_map.get(mode, mode)} ({int(counts.get(mode, 0) or 0)})")
+            button.setChecked(mode == self._current_quick_filter_mode())
+
+        quality_summary = (
+            f"Qualidade no recorte: {counts.get('qualidade', 0)} para revisão | "
+            f"sem micro {counts.get('sem_micro', 0)} | "
+            f"sem GPS {counts.get('sem_gps', 0)} | "
+            f"dup. Av. Tec. {counts.get('duplicidade_av_tec', 0)}"
+        )
+        if not base_filtered_records:
+            quality_summary = "Qualidade: nenhum registro disponível no recorte atual."
+        self.window.data_tab.lbl_quality_summary.setText(quality_summary)
+
+    def show_selected_process_history(self) -> bool:
+        target_record = self.window.selected
+        if target_record is None and hasattr(self.window, "form_controller"):
+            selected_records = self.window.form_controller.selected_table_records()
+            if selected_records:
+                target_record = selected_records[0]
+        if target_record is None:
+            QMessageBox.information(
+                self.window,
+                "Histórico do processo",
+                "Selecione um registro na tabela para abrir o histórico filtrado.",
+            )
+            return False
+
+        workbook_path = (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else self._current_session_path()
+        )
+        if not workbook_path:
+            QMessageBox.warning(self.window, "Aviso", "O banco local ainda não está pronto para consultar o histórico.")
+            return False
+
+        history_plan = self.persistence.build_operation_history_plan(workbook_path, limit=300)
+        if not history_plan.events:
+            QMessageBox.information(
+                self.window,
+                history_plan.empty_title,
+                history_plan.empty_message,
+            )
+            return False
+
+        dialog = OperationHistoryDialog(self.window, history_plan.events)
+        target_label = str(getattr(target_record, "oficio_processo", "") or "").strip()
+        if not target_label:
+            target_label = str(getattr(target_record, "av_tec", "") or "").strip()
+        dialog.setWindowTitle("Histórico do processo")
+        dialog.lbl_hint.setText(
+            "Revise as operações registradas para o processo/ofício selecionado. "
+            "O filtro de busca já foi preenchido para reduzir o recorte."
+        )
+        if target_label:
+            dialog.search_input.setText(target_label)
+            dialog._apply_filters()
+        dialog.exec()
+        return True
+
     def update_ui_after_load(self):
         self._apply_loaded_runtime_state(self.window.records, sync_snapshot=True)
 
@@ -318,12 +523,27 @@ class DataController:
         if sync_snapshot:
             self._sync_workbook_snapshot()
         self.load_gis()
+        restored_filter_state = self._restore_filter_state_if_pending()
         self.apply_filter()
         self.window.data_tab.align_splitter_to_table_width()
         schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab.align_splitter_to_table_width)
         schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab._sync_left_panel_heights)
         self.window.data_tab.table.clearSelection()
         self.window.clear_form(force=True)
+        if hasattr(self.window, "form_controller"):
+            self.window.form_controller.restore_saved_new_record_draft()
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        self.window.data_tab._sync_left_panel_heights()
+        schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab._sync_left_panel_heights)
+        schedule_owned_single_shot(self.window.data_tab, 30, self.window.data_tab._sync_left_panel_heights)
+        if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
+            self.window.data_tab._finalize_responsive_layout()
+            schedule_owned_single_shot(self.window.data_tab, 0, self.window.data_tab._finalize_responsive_layout)
+        self.rebuild_saved_views_menu()
+        if restored_filter_state:
+            self.window.statusBar().showMessage("Filtros restaurados da última sessão.")
         navigation = getattr(self.window, "navigation_controller", None)
         if navigation is not None and hasattr(navigation, "update_operations_overview"):
             navigation.update_operations_overview()
@@ -474,8 +694,14 @@ class DataController:
             selected_year=self.window.data_tab.filter_year.currentText(),
             fallback_search_index=self.window._record_search_index,
         )
-        self.window.filtered_records = list(record_source.records)
-        self.window._filtered_metrics = dict(record_source.metrics or compute_metrics(self.window.filtered_records))
+        base_filtered_records = list(record_source.records)
+        quality_key_sets = self._resolved_quality_key_sets()
+        self.window.filtered_records = apply_compensacoes_quick_filter(
+            base_filtered_records,
+            mode=self._current_quick_filter_mode(),
+            quality_key_sets=quality_key_sets,
+        )
+        self.window._filtered_metrics = dict(compute_metrics(self.window.filtered_records))
         self.window._local_record_read_status = self.local_record_queries.build_read_status(
             record_source,
             filtered_records=len(self.window.filtered_records),
@@ -496,7 +722,21 @@ class DataController:
         else:
             self.window.data_tab.lbl_results.setText(f"{len(self.window.filtered_records)} registros")
             self.window.statusBar().showMessage(f"Filtro aplicado: {len(self.window.filtered_records)} registros")
-        self.window._refresh_window_chrome()
+        self._refresh_compensacoes_operational_chips(
+            base_filtered_records,
+            quality_key_sets=quality_key_sets,
+        )
+        settings_controller = getattr(self.window, "settings_controller", None)
+        filter_state_setter = getattr(settings_controller, "set_compensacoes_filter_state", None)
+        if callable(filter_state_setter):
+            filter_state_setter(self.snapshot_filter_state())
+        refresh_window_chrome = getattr(self.window, "_refresh_window_chrome", None)
+        if callable(refresh_window_chrome):
+            refresh_window_chrome()
+        shell_controller = getattr(self.window, "shell_controller", None)
+        refresh_selection_state = getattr(shell_controller, "refresh_compensacoes_selection_state", None)
+        if callable(refresh_selection_state):
+            refresh_selection_state()
         self.window.toggle_heatmap()
         self.window.data_tab._sync_left_panel_heights()
         if hasattr(self.window.data_tab, "_finalize_responsive_layout"):
@@ -510,6 +750,7 @@ class DataController:
         self.window.data_tab.filter_micro.select_all()
         self.window.data_tab.filter_eletronico.select_all()
         self.window.data_tab.filter_caixa.select_all()
+        self.set_quick_filter_mode(COMPENSACOES_QUICK_FILTER_ALL)
         self.apply_filter()
         self.window.statusBar().showMessage("Filtros limpos")
 

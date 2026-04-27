@@ -34,6 +34,7 @@ from app.application.use_cases.table_fullscreen_layout import (
 from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.display_columns import display_column_index
 from app.services.tcra_excel_service import TcraWorkbookAnalysis
+from app.services.records_service import STANDARD_TIPO_OPTIONS
 from app.services.tcra_report_service import TcraPdfExportOptions
 from app.services.tcra_records_service import (
     STATUS_ARQUIVADO,
@@ -1050,6 +1051,119 @@ class TcraBulkActionDialog(QDialog):
             "event_deadline": self.in_event_deadline.text().strip(),
             "event_protocol": self.in_event_protocol.text().strip(),
             "event_document": self.in_event_document.text().strip(),
+        }
+
+
+class CompensacaoBulkActionDialog(QDialog):
+    def __init__(self, parent, *, selected_count: int, microbacia_options: list[str] | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Ação em lote para Compensações")
+        self.resize(540, 260)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.lbl_hint = QLabel(
+            f"Aplicar a mesma ação em {int(selected_count)} registro(s) selecionado(s)."
+        )
+        self.lbl_hint.setWordWrap(True)
+        layout.addWidget(self.lbl_hint)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+
+        self.combo_action = QComboBox(self)
+        self.combo_action.addItem("Definir tipo", "tipo")
+        self.combo_action.addItem("Definir microbacia", "microbacia")
+        self.combo_action.addItem("Definir caixa", "caixa")
+        self.combo_action.addItem("Marcar compensado", "compensado_true")
+        self.combo_action.addItem("Desmarcar compensado", "compensado_false")
+        self.combo_action.addItem("Marcar arquivado", "arquivado_true")
+        self.combo_action.addItem("Desmarcar arquivado", "arquivado_false")
+
+        self.combo_tipo = QComboBox(self)
+        self.combo_tipo.addItems(list(STANDARD_TIPO_OPTIONS))
+
+        self.combo_microbacia = QComboBox(self)
+        self.combo_microbacia.setEditable(True)
+        self.combo_microbacia.addItem("")
+        for option in microbacia_options or []:
+            text = str(option or "").strip()
+            if text and self.combo_microbacia.findText(text) < 0:
+                self.combo_microbacia.addItem(text)
+
+        self.in_caixa = QLineEdit(self)
+        self.in_caixa.setClearButtonEnabled(True)
+        self.in_caixa.setPlaceholderText("Informe a caixa desejada")
+
+        self.action_label = QLabel("Ação:")
+        self.tipo_label = QLabel("Tipo:")
+        self.microbacia_label = QLabel("Microbacia:")
+        self.caixa_label = QLabel("Caixa:")
+        form.addRow(self.action_label, self.combo_action)
+        form.addRow(self.tipo_label, self.combo_tipo)
+        form.addRow(self.microbacia_label, self.combo_microbacia)
+        form.addRow(self.caixa_label, self.in_caixa)
+        layout.addLayout(form)
+
+        self.lbl_mode_hint = QLabel(self)
+        self.lbl_mode_hint.setWordWrap(True)
+        self.lbl_mode_hint.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_mode_hint)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.combo_action.currentIndexChanged.connect(self._refresh_mode)
+        self._refresh_mode()
+
+    def _refresh_mode(self):
+        action = str(self.combo_action.currentData() or "")
+        show_tipo = action == "tipo"
+        show_microbacia = action == "microbacia"
+        show_caixa = action == "caixa"
+        self.tipo_label.setVisible(show_tipo)
+        self.combo_tipo.setVisible(show_tipo)
+        self.microbacia_label.setVisible(show_microbacia)
+        self.combo_microbacia.setVisible(show_microbacia)
+        self.caixa_label.setVisible(show_caixa)
+        self.in_caixa.setVisible(show_caixa)
+
+        if action == "tipo":
+            self.lbl_mode_hint.setText("Atualiza o tipo do grupo selecionado e aplica a regra automática de caixa para Ofício.")
+        elif action == "microbacia":
+            self.lbl_mode_hint.setText("Preenche a mesma microbacia para todos os registros selecionados.")
+        elif action == "caixa":
+            self.lbl_mode_hint.setText("Substitui a caixa atual do recorte selecionado pelo valor informado.")
+        elif action == "compensado_true":
+            self.lbl_mode_hint.setText("Marca todos os registros selecionados como compensados.")
+        elif action == "compensado_false":
+            self.lbl_mode_hint.setText("Remove a marcação de compensado do grupo selecionado.")
+        elif action == "arquivado_true":
+            self.lbl_mode_hint.setText("Marca todos os registros selecionados como arquivados.")
+        else:
+            self.lbl_mode_hint.setText("Remove o status Arquivado do grupo selecionado quando a caixa atual estiver nesse estado.")
+
+    def values(self) -> dict[str, object]:
+        action = str(self.combo_action.currentData() or "")
+        if action == "compensado_true":
+            return {"action": "compensado", "checked": True}
+        if action == "compensado_false":
+            return {"action": "compensado", "checked": False}
+        if action == "arquivado_true":
+            return {"action": "arquivado", "checked": True}
+        if action == "arquivado_false":
+            return {"action": "arquivado", "checked": False}
+        return {
+            "action": action,
+            "tipo": self.combo_tipo.currentText().strip(),
+            "microbacia": self.combo_microbacia.currentText().strip(),
+            "caixa": self.in_caixa.text().strip(),
         }
 
 

@@ -2,6 +2,7 @@ from copy import deepcopy
 from contextlib import contextmanager
 from typing import Dict, Iterable, Optional, cast
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QMessageBox, QLineEdit
 
@@ -20,8 +21,13 @@ from app.services.plantio_service import (
     summarize_plantios,
     validate_record_plantios,
 )
-from app.services.records_service import display_tipo_value
-from app.ui.components.dialogs import PlantiosDialog
+from app.services.records_service import (
+    TIPO_NULO,
+    TIPO_OFICIO,
+    display_tipo_value,
+    storage_tipo_value,
+)
+from app.ui.components.dialogs import CompensacaoBulkActionDialog, PlantiosDialog
 from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.controllers.form_controller_support import (
@@ -35,6 +41,8 @@ from app.ui.controllers.form_controller_support import (
     build_form_state_snapshot,
     build_form_validation_presentation,
     build_prefill_form_state,
+    normalize_caixa_value,
+    normalize_microbacia_value,
     resolve_before_record_for_audit,
     same_record_identity,
 )
@@ -45,6 +53,7 @@ logger = get_logger("UI.Form")
 
 
 class FormController:
+    FORM_DRAFT_AUTOSAVE_MS = 700
     _MISSING_PLANTIO_ERROR = "Preencha Endereço Plantio para salvar um registro compensado."
     _LOCKED_COMPENSADO_ERROR = "Limpe Endereço Plantio antes de desmarcar Compensado."
     _STALE_SELECTION_ERROR = "Não foi possível localizar o registro atual. Recarregue a planilha e tente novamente."
@@ -68,6 +77,11 @@ class FormController:
         self._history_index = -1
         self._tracking_suspended = 0
         self._clean_state: Optional[Dict[str, object]] = None
+        self._pending_new_form_draft = self._load_saved_form_draft()
+        self._last_draft_saved_payload: Optional[Dict[str, object]] = None
+        self._autosave_timer = QTimer(window)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.timeout.connect(self._save_form_draft)
 
     def _current_session_path(self) -> str:
         if hasattr(self.window, "shell_controller"):
@@ -160,6 +174,108 @@ class FormController:
         self._reset_line_edit_display_position(self.window.data_tab.in_end)
         self._reset_line_edit_display_position(self.window.data_tab.in_end_plantio)
         self._reset_line_edit_display_position(self.window.data_tab.in_micro.lineEdit())
+
+    def _load_saved_form_draft(self) -> Optional[Dict[str, object]]:
+        settings_controller = getattr(self.window, "settings_controller", None)
+        draft_loader = getattr(settings_controller, "compensacoes_form_draft", None)
+        if not callable(draft_loader):
+            return None
+        draft = draft_loader()
+        return dict(draft) if draft else None
+
+    def _clear_saved_form_draft(self) -> None:
+        self._last_draft_saved_payload = None
+        self._pending_new_form_draft = None
+        self._autosave_timer.stop()
+        settings_controller = getattr(self.window, "settings_controller", None)
+        draft_clearer = getattr(settings_controller, "clear_compensacoes_form_draft", None)
+        if callable(draft_clearer):
+            draft_clearer()
+
+    def clear_saved_form_draft(self) -> None:
+        self._clear_saved_form_draft()
+        self.window.statusBar().showMessage("Rascunho local removido")
+
+    def _queue_form_autosave(self) -> None:
+        self._autosave_timer.start(self.FORM_DRAFT_AUTOSAVE_MS)
+
+    def queue_form_autosave(self) -> None:
+        self._queue_form_autosave()
+
+    def persist_form_draft_now(self) -> None:
+        if self._autosave_timer.isActive():
+            self._autosave_timer.stop()
+        self._save_form_draft()
+
+    def _save_form_draft(self) -> None:
+        if self.window.selected is not None:
+            return
+        payload = self.capture_form_state()
+        payload["uid"] = ""
+        has_content = any(
+            [
+                str(payload.get("oficio_processo") or "").strip(),
+                str(payload.get("caixa") or "").strip(),
+                str(payload.get("av_tec") or "").strip(),
+                str(payload.get("compensacao") or "").strip(),
+                str(payload.get("endereco") or "").strip(),
+                str(payload.get("endereco_plantio") or "").strip(),
+                str(payload.get("microbacia") or "").strip(),
+                payload.get("plantios"),
+                bool(payload.get("compensado")),
+                bool(payload.get("sn")),
+                bool(payload.get("arquivado")),
+                str(payload.get("eletronico") or "").strip() not in {"", TIPO_NULO},
+            ]
+        )
+        if not has_content or not self.has_pending_changes():
+            self._clear_saved_form_draft()
+            return
+        if payload == self._last_draft_saved_payload:
+            return
+        settings_controller = getattr(self.window, "settings_controller", None)
+        draft_setter = getattr(settings_controller, "set_compensacoes_form_draft", None)
+        if not callable(draft_setter):
+            return
+        draft_setter(payload)
+        self._pending_new_form_draft = dict(payload)
+        self._last_draft_saved_payload = dict(payload)
+        self.window.form_state_label.setText("Rascunho automático salvo")
+
+    def _restore_new_form_draft_if_available(self) -> bool:
+        draft = dict(self._pending_new_form_draft or {})
+        if draft.get("uid"):
+            return False
+        has_content = any(
+            [
+                str(draft.get("oficio_processo") or "").strip(),
+                str(draft.get("caixa") or "").strip(),
+                str(draft.get("av_tec") or "").strip(),
+                str(draft.get("compensacao") or "").strip(),
+                str(draft.get("endereco") or "").strip(),
+                str(draft.get("endereco_plantio") or "").strip(),
+                str(draft.get("microbacia") or "").strip(),
+                draft.get("plantios"),
+                bool(draft.get("compensado")),
+                bool(draft.get("sn")),
+                bool(draft.get("arquivado")),
+                str(draft.get("eletronico") or "").strip() not in {"", TIPO_NULO},
+            ]
+        )
+        if not has_content:
+            return False
+        self._apply_state_to_form(draft)
+        self.update_form_action_buttons()
+        self.validate_as_you_type()
+        return True
+
+    def restore_saved_new_record_draft(self) -> bool:
+        if self.window.selected is not None:
+            return False
+        restored = self._restore_new_form_draft_if_available()
+        if restored:
+            self.window.statusBar().showMessage("Rascunho local restaurado")
+        return restored
 
     def capture_form_state(self) -> Dict[str, object]:
         return build_form_state_snapshot(
@@ -268,6 +384,152 @@ class FormController:
             self._history = self._history[overflow:]
             self._history_index = len(self._history) - 1
         self._refresh_dirty_state()
+        self._queue_form_autosave()
+
+    def _selected_table_rows(self) -> list[int]:
+        selection_model = self.window.data_tab.table.selectionModel()
+        if selection_model is None:
+            return []
+        selected_rows: set[int] = set()
+        for index in selection_model.selectedRows():
+            source_index = self.window.data_tab.proxy.mapToSource(index)
+            if source_index.isValid():
+                selected_rows.add(source_index.row())
+        return sorted(selected_rows)
+
+    def selected_table_records(self) -> list[Compensacao]:
+        rows = self._selected_table_rows()
+        return [self.window.filtered_records[row] for row in rows if 0 <= row < len(self.window.filtered_records)]
+
+    def _bulk_action_target_summary(self, record: Compensacao) -> str:
+        return str(record.oficio_processo or record.av_tec or record.uid or f"linha {record.excel_row}").strip()
+
+    def _build_bulk_updated_record(self, record: Compensacao, values: Dict[str, object]) -> Compensacao:
+        action = str(values.get("action", "") or "").strip()
+        updated = deepcopy(record)
+        if action == "tipo":
+            target_tipo = display_tipo_value(values.get("tipo", ""))
+            updated.eletronico = storage_tipo_value(target_tipo)
+            if str(updated.caixa or "").strip().upper() != "ARQUIVADO":
+                if target_tipo == TIPO_OFICIO:
+                    updated.caixa = normalize_caixa_value("Ofícios")
+                elif str(updated.caixa or "").strip().upper() == normalize_caixa_value("Ofícios"):
+                    updated.caixa = ""
+        elif action == "microbacia":
+            resolver = getattr(self.window.shell_controller, "resolve_microbacia_display_name", None)
+            updated.microbacia = normalize_microbacia_value(values.get("microbacia", ""), resolver=resolver)
+        elif action == "caixa":
+            updated.caixa = normalize_caixa_value(values.get("caixa", ""))
+        elif action == "compensado":
+            updated.compensado = "SIM" if bool(values.get("checked")) else ""
+        elif action == "arquivado":
+            updated.caixa = normalize_caixa_value(updated.caixa, arquivado_checked=bool(values.get("checked")))
+        return updated
+
+    def apply_bulk_action(self) -> bool:
+        selected_records = self.selected_table_records()
+        if not selected_records:
+            QMessageBox.warning(
+                self.window,
+                "Aviso",
+                "Selecione ao menos um registro na tabela para aplicar uma ação em lote.",
+            )
+            return False
+        if self.has_pending_changes() and not self.confirm_discard_changes("aplicar ações em lote"):
+            return False
+
+        microbacia_options = [
+            self.window.data_tab.in_micro.itemText(index)
+            for index in range(self.window.data_tab.in_micro.count())
+            if self.window.data_tab.in_micro.itemText(index).strip()
+        ]
+        dialog = CompensacaoBulkActionDialog(
+            self.window,
+            selected_count=len(selected_records),
+            microbacia_options=microbacia_options,
+        )
+        if not dialog.exec():
+            return False
+
+        values = dialog.values()
+        action = str(values.get("action", "") or "").strip()
+        if action in {"microbacia", "caixa"} and not str(values.get(action, "") or "").strip():
+            QMessageBox.warning(self.window, "Aviso", "Preencha o valor da ação em lote antes de continuar.")
+            return False
+
+        workbook_path = (
+            self.window.shell_controller.current_session_path()
+            if hasattr(self.window, "shell_controller")
+            else self._current_session_path()
+        )
+        if not workbook_path:
+            return False
+
+        updated_records = list(self.window.records)
+        last_write_result = None
+        try:
+            self._bind_runtime_persistence_service()
+            for selected_record in selected_records:
+                draft_record = self._build_bulk_updated_record(selected_record, values)
+                preparation = self.persistence.prepare_update(
+                    workbook_path,
+                    fallback_records=updated_records,
+                    fallback_selected=selected_record,
+                    draft_record=draft_record,
+                )
+                self._log_authoritative_write_issues("lote_edicao", preparation.issues)
+                authoritative_selected = preparation.selected_record
+                if authoritative_selected is None:
+                    QMessageBox.warning(
+                        self.window,
+                        "Erro",
+                        f"Não foi possível localizar {self._bulk_action_target_summary(selected_record)} para atualização em lote.",
+                    )
+                    return False
+                before_record = resolve_before_record_for_audit(authoritative_selected, selected_record)
+                effective_record = preparation.effective_record or draft_record
+                plantio_error = validate_record_plantios(effective_record)
+                if plantio_error:
+                    QMessageBox.warning(
+                        self.window,
+                        "Aviso",
+                        f"{self._bulk_action_target_summary(selected_record)}: {plantio_error}",
+                    )
+                    return False
+                validation = self.record_use_cases.validate_for_update(
+                    effective_record,
+                    list(preparation.base_records),
+                )
+                if validation.error_message:
+                    QMessageBox.warning(
+                        self.window,
+                        "Aviso",
+                        f"{self._bulk_action_target_summary(selected_record)}: {validation.error_message}",
+                    )
+                    return False
+                last_write_result = self.persistence.execute_edit(
+                    effective_record,
+                    authoritative_records=list(preparation.base_records),
+                    before_record=before_record,
+                )
+                updated_records = list(last_write_result.records)
+        except Exception as exc:
+            root_exc = self.persistence.unwrap_write_exception(self.window, exc)
+            title, message = friendly_error_message(root_exc, "aplicar a ação em lote")
+            QMessageBox.critical(self.window, title, message)
+            return False
+
+        if last_write_result is None:
+            return False
+        self.persistence.publish_write_result(self.window, last_write_result)
+        self._clear_saved_form_draft()
+        self.window.data_controller.refresh_runtime_after_mutation(updated_records)
+        QMessageBox.information(
+            self.window,
+            "Sucesso",
+            f"Ação em lote aplicada em {len(selected_records)} registro(s).",
+        )
+        return True
 
     def can_undo(self) -> bool:
         return self._history_index > 0
@@ -684,6 +946,7 @@ class FormController:
                 authoritative_records=authoritative_records,
             )
             self.persistence.publish_write_result(self.window, write_result)
+            self._clear_saved_form_draft()
             self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
             QMessageBox.information(self.window, "Sucesso", "Adicionado com sucesso.")
         except Exception as exc:

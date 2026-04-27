@@ -117,6 +117,8 @@ class WindowLifecycleController:
             event.ignore()
             return False
 
+        if form_controller is not None and hasattr(form_controller, "persist_form_draft_now"):
+            form_controller.persist_form_draft_now()
         self.stop_owned_timers()
         settings_controller = getattr(self.window, "settings_controller", None)
         if settings_controller is not None:

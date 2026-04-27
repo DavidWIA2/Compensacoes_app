@@ -51,6 +51,7 @@ from app.ui.components.widgets import ColumnsDialog
 from app.ui.controllers.window_shell_support import (
     COMPENSACOES_SEARCH_PLACEHOLDER as SUPPORT_COMPENSACOES_SEARCH_PLACEHOLDER,
     TCRA_SEARCH_PLACEHOLDER as SUPPORT_TCRA_SEARCH_PLACEHOLDER,
+    build_count_label_text,
     build_user_identity_label_text,
     build_user_identity_tooltip_text,
     build_window_chrome_snapshot,
@@ -84,6 +85,7 @@ class WindowShellController:
         self._last_selected_tipo = ""
         self._secondary_status_widgets: list[QWidget] = []
         self._tertiary_status_widgets: list[QWidget] = []
+        self._process_status_requested_visible = False
 
     def _bind_runtime_persistence_service(self) -> None:
         if isinstance(self.persistence, AuthoritativePersistenceUseCases):
@@ -329,6 +331,10 @@ class WindowShellController:
         self.window.session_records_label = QLabel("Registros: 0")
         self.window.session_records_label.setObjectName("StatusChip")
 
+        self.window.session_processes_label = QLabel("Processos/oficios: 0")
+        self.window.session_processes_label.setObjectName("StatusChip")
+        self.window.session_processes_label.setVisible(False)
+
         self.window.session_sync_label = QLabel("Sincronia: aguardando")
         self.window.session_sync_label.setObjectName("StatusChip")
 
@@ -351,6 +357,7 @@ class WindowShellController:
         self.window.statusBar().addPermanentWidget(self.window.session_environment_label)
         self.window.statusBar().addPermanentWidget(self.window.session_file_label)
         self.window.statusBar().addPermanentWidget(self.window.session_records_label)
+        self.window.statusBar().addPermanentWidget(self.window.session_processes_label)
         self.window.statusBar().addPermanentWidget(self.window.session_sync_label)
         self.window.statusBar().addPermanentWidget(self.window.session_write_label)
         self.window.statusBar().addPermanentWidget(self.window.session_selection_label)
@@ -575,6 +582,7 @@ class WindowShellController:
                 widget.setVisible(not compact_mode)
             for widget in getattr(self, "_tertiary_status_widgets", []):
                 widget.setVisible(not tight_mode)
+            self._apply_process_status_visibility(compact_mode=compact_mode)
         except RuntimeError:
             return
 
@@ -772,6 +780,26 @@ class WindowShellController:
         return report
 
     def resolved_total_records(self) -> int:
+        return self._resolved_compensacoes_total_records()
+
+    def _apply_process_status_visibility(self, *, compact_mode: bool | None = None) -> None:
+        if not hasattr(self.window, "session_processes_label"):
+            return
+        if compact_mode is None:
+            compact_mode = self._is_compact_layout()
+        self.window.session_processes_label.setVisible(
+            bool(self._process_status_requested_visible) and not compact_mode
+        )
+
+    def _is_tcra_tab_active(self) -> bool:
+        tabs = getattr(self.window, "tabs", None)
+        return tabs is not None and tabs.currentWidget() is getattr(self.window, "tcra_tab", None)
+
+    def _is_compensacoes_tab_active(self) -> bool:
+        tabs = getattr(self.window, "tabs", None)
+        return tabs is not None and tabs.currentWidget() is getattr(self.window, "data_tab", None)
+
+    def _resolved_compensacoes_total_records(self) -> int:
         session_status = getattr(self.window, "_local_session_source_status", None)
         total = int(getattr(session_status, "filtered_records", 0) or 0) if session_status is not None else 0
         if total > 0:
@@ -785,6 +813,9 @@ class WindowShellController:
         return len(self.window.records)
 
     def resolved_filtered_records(self) -> int:
+        return self._resolved_compensacoes_filtered_records()
+
+    def _resolved_compensacoes_filtered_records(self) -> int:
         read_status = getattr(self.window, "_local_record_read_status", None)
         filtered = int(getattr(read_status, "filtered_records", 0) or 0) if read_status is not None else 0
         if filtered > 0:
@@ -792,10 +823,86 @@ class WindowShellController:
         if self.window.filtered_records:
             return len(self.window.filtered_records)
 
-        total = self.resolved_total_records()
+        total = self._resolved_compensacoes_total_records()
         if total > 0 and not self.has_active_record_filters():
             return total
         return 0
+
+    def _visible_compensacao_records(self) -> list:
+        if self.window.filtered_records:
+            return list(self.window.filtered_records)
+        if not self.has_active_record_filters():
+            return list(self.window.records)
+        return []
+
+    @staticmethod
+    def _count_distinct_process_identifiers(records: Sequence[object]) -> int:
+        normalized_values: list[str] = []
+        blank_count = 0
+        for record in records:
+            value = str(getattr(record, "oficio_processo", "") or "").strip()
+            if value:
+                normalized_values.append(value)
+            else:
+                blank_count += 1
+        return len(unique_non_empty(normalized_values)) + blank_count
+
+    def _build_compensacao_processes_tooltip(self, *, filtered_count: int, total_count: int) -> str:
+        lines = [
+            "Contagem distinta por numero de processo/oficio no recorte de Compensacoes.",
+            "Linhas repetidas com o mesmo numero contam uma vez; linhas sem numero contam individualmente.",
+        ]
+        if total_count <= 0:
+            lines.append("Nenhum processo/oficio disponivel no recorte atual.")
+        elif filtered_count == total_count:
+            lines.append(f"Processos/oficios distintos no recorte atual: {total_count}.")
+        else:
+            lines.append(f"Processos/oficios distintos exibidos: {filtered_count} de {total_count}.")
+        return "\n".join(lines)
+
+    def _active_records_scope(self) -> dict[str, object]:
+        if self._is_tcra_tab_active():
+            tcra_tab = getattr(self.window, "tcra_tab", None)
+            search_input = getattr(tcra_tab, "search_input", None)
+            return {
+                "total_records": len(getattr(tcra_tab, "all_tcras", ()) or ()),
+                "filtered_records": len(getattr(tcra_tab, "filtered_tcras", ()) or ()),
+                "search_text": search_input.text() if search_input is not None else "",
+                "record_integrity_report": None,
+                "empty_summary": "Resumo do recorte atualmente visível na tela de TCRAs.",
+                "detail_label": "",
+                "detail_tooltip": "",
+                "detail_visible": False,
+            }
+
+        total_records = self._resolved_compensacoes_total_records()
+        filtered_records = self._resolved_compensacoes_filtered_records()
+        detail_label = ""
+        detail_tooltip = ""
+        detail_visible = self._is_compensacoes_tab_active()
+        if detail_visible:
+            visible_records = self._visible_compensacao_records()
+            total_processes = self._count_distinct_process_identifiers(self.window.records)
+            filtered_processes = self._count_distinct_process_identifiers(visible_records)
+            detail_label = build_count_label_text(
+                "Processos/oficios",
+                total_processes,
+                filtered_processes,
+            )
+            detail_tooltip = self._build_compensacao_processes_tooltip(
+                filtered_count=filtered_processes,
+                total_count=total_processes,
+            )
+        return {
+            "total_records": total_records,
+            "filtered_records": filtered_records,
+            "search_text": self.window.search.text(),
+            "record_integrity_report": getattr(self.window, "_record_integrity_report", None),
+            "empty_summary": "Resumo do recorte atualmente visível na tela.",
+            "detail_label": detail_label,
+            "detail_tooltip": detail_tooltip,
+            "detail_visible": detail_visible,
+        }
 
     def current_records_label_text(self) -> str:
         return self._build_window_chrome_snapshot().records_label
@@ -848,7 +955,8 @@ class WindowShellController:
     def current_sync_tooltip_text(self) -> str:
         return self._build_window_chrome_snapshot().sync_tooltip
 
-    def _build_window_chrome_snapshot(self):
+    def _build_window_chrome_snapshot(self, scope: dict[str, object] | None = None):
+        resolved_scope = scope or self._active_records_scope()
         return build_window_chrome_snapshot(
             APP_WINDOW_TITLE,
             session_path=self.current_session_path(),
@@ -856,16 +964,18 @@ class WindowShellController:
             access_session=getattr(self.window, "access_session", None),
             remote_sync_status=getattr(self.window, "_remote_snapshot_refresh_status", None),
             persistence_report=getattr(self.window, "_persistence_status_report", None),
-            record_integrity_report=getattr(self.window, "_record_integrity_report", None),
-            total_records=self.resolved_total_records(),
-            filtered_records=self.resolved_filtered_records(),
-            search_text=self.window.search.text(),
+            record_integrity_report=resolved_scope.get("record_integrity_report"),
+            total_records=int(resolved_scope.get("total_records", 0) or 0),
+            filtered_records=int(resolved_scope.get("filtered_records", 0) or 0),
+            search_text=str(resolved_scope.get("search_text", "") or ""),
             selected=self.window.selected,
             write_status=getattr(self.window, "_authoritative_write_status", None),
+            empty_records_summary=str(resolved_scope.get("empty_summary", "") or ""),
         )
 
     def refresh_window_chrome(self):
-        snapshot = self._build_window_chrome_snapshot()
+        scope = self._active_records_scope()
+        snapshot = self._build_window_chrome_snapshot(scope)
         window_title = snapshot.window_title
         access_session = getattr(self.window, "access_session", None)
         self.window.setWindowTitle(window_title)
@@ -888,6 +998,13 @@ class WindowShellController:
         self.window.session_file_label.setToolTip(snapshot.file_tooltip)
         self.window.session_records_label.setText(snapshot.records_label)
         self.window.session_records_label.setToolTip(snapshot.records_tooltip)
+        if hasattr(self.window, "session_processes_label"):
+            self.window.session_processes_label.setText(str(scope.get("detail_label", "") or ""))
+            self.window.session_processes_label.setToolTip(str(scope.get("detail_tooltip", "") or ""))
+            self._process_status_requested_visible = bool(scope.get("detail_visible", False)) and bool(
+                str(scope.get("detail_label", "") or "").strip()
+            )
+            self._apply_process_status_visibility()
         self.window.session_sync_label.setText(snapshot.sync_label)
         self.window.session_sync_label.setToolTip(snapshot.sync_tooltip)
         self.window.session_write_label.setText(snapshot.write_label)

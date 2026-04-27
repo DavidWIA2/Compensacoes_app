@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Dict, Iterable, Optional, cast
 
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QLineEdit
 
 from app.application.use_cases.authoritative_persistence import AuthoritativePersistenceUseCases
 from app.application.use_cases.authoritative_persistence_write_support import (
@@ -22,6 +22,7 @@ from app.services.plantio_service import (
 )
 from app.services.records_service import display_tipo_value
 from app.ui.components.dialogs import PlantiosDialog
+from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.components.ui_utils import msg_confirm
 from app.ui.controllers.form_controller_support import (
     FormStateSnapshot,
@@ -145,6 +146,21 @@ class FormController:
         if block_signals:
             self.window.data_tab.in_end_plantio.blockSignals(False)
 
+    def _reset_line_edit_display_position(self, line_edit: Optional[QLineEdit]) -> None:
+        if line_edit is None:
+            return
+        line_edit.deselect()
+        line_edit.setCursorPosition(0)
+
+    def _reset_form_display_positions(self) -> None:
+        self._reset_line_edit_display_position(self.window.data_tab.in_oficio)
+        self._reset_line_edit_display_position(self.window.data_tab.in_caixa)
+        self._reset_line_edit_display_position(self.window.data_tab.in_avtec)
+        self._reset_line_edit_display_position(self.window.data_tab.in_comp)
+        self._reset_line_edit_display_position(self.window.data_tab.in_end)
+        self._reset_line_edit_display_position(self.window.data_tab.in_end_plantio)
+        self._reset_line_edit_display_position(self.window.data_tab.in_micro.lineEdit())
+
     def capture_form_state(self) -> Dict[str, object]:
         return build_form_state_snapshot(
             oficio_processo=self.window.data_tab.in_oficio.text(),
@@ -223,6 +239,8 @@ class FormController:
         self.window._update_address_search_enabled()
         self.window.shell_controller.refresh_tipo_controls()
         self.window._update_form_action_buttons()
+        self._reset_form_display_positions()
+        schedule_owned_single_shot(self.window.data_tab, 0, self._reset_form_display_positions)
         self._refresh_dirty_state()
 
     def reset_history(self):

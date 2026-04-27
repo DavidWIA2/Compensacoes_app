@@ -3720,6 +3720,13 @@ class TcraTab(QWidget):
         self._update_operational_agenda(snapshot)
         self._update_quality_queue(snapshot)
         self._populate_table(preferred_uid=preferred_uid)
+        if (
+            self.main_window is not None
+            and hasattr(self.main_window, "tabs")
+            and self.main_window.tabs.currentWidget() is self
+            and hasattr(self.main_window, "_refresh_window_chrome")
+        ):
+            self.main_window._refresh_window_chrome()
 
     def _build_executive_details(self, snapshot: TcraWorkspaceSnapshot) -> str:
         records = list(snapshot.base_filtered_records)

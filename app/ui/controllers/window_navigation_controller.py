@@ -105,3 +105,5 @@ class WindowNavigationController:
             include_active_tab=True,
             finalize_active_tab=True,
         )
+        if hasattr(self.window, "shell_controller"):
+            self.window.shell_controller.refresh_window_chrome()

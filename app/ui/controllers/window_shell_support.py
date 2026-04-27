@@ -211,11 +211,15 @@ def build_sync_tooltip_text(
 
 
 def build_records_label_text(total_records: int, filtered_records: int) -> str:
+    return build_count_label_text("Registros", total_records, filtered_records)
+
+
+def build_count_label_text(prefix: str, total_records: int, filtered_records: int) -> str:
     if total_records <= 0:
-        return "Registros: 0"
+        return f"{prefix}: 0"
     if filtered_records == total_records:
-        return f"Registros: {total_records}"
-    return f"Registros: {filtered_records} de {total_records}"
+        return f"{prefix}: {total_records}"
+    return f"{prefix}: {filtered_records} de {total_records}"
 
 
 def _payload_value(payload: object | None, key: str, default: object) -> object:
@@ -242,12 +246,13 @@ def build_integrity_tooltip_text(record_integrity_report: object | None) -> str:
 def build_records_tooltip_text(
     search_text: str,
     record_integrity_report: object | None = None,
+    empty_summary: str = "Resumo do recorte atualmente visível na tela.",
 ) -> str:
     normalized_search = str(search_text or "").strip()
     lines = [
         f"Busca atual: {normalized_search}"
         if normalized_search
-        else "Resumo do recorte atualmente visível na tela."
+        else empty_summary
     ]
     integrity_text = build_integrity_tooltip_text(record_integrity_report)
     if integrity_text:
@@ -378,6 +383,7 @@ def build_window_chrome_snapshot(
     search_text: str,
     selected: object | None,
     write_status: object | None,
+    empty_records_summary: str = "Resumo do recorte atualmente visível na tela.",
 ) -> WindowChromeSnapshot:
     has_active_session = _has_active_session(session_path)
     display_label = _availability_label(availability)
@@ -423,6 +429,7 @@ def build_window_chrome_snapshot(
         records_tooltip=build_records_tooltip_text(
             search_text,
             record_integrity_report=record_integrity_report,
+            empty_summary=empty_records_summary,
         ),
         write_label=build_write_label_text(write_status, has_active_session=has_active_session),
         write_tooltip=build_write_tooltip_text(write_status, has_active_session=has_active_session),

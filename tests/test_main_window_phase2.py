@@ -158,6 +158,52 @@ def test_window_chrome_summarizes_loaded_session():
     window.close()
 
 
+def test_window_chrome_shows_distinct_process_counts_for_compensacoes():
+    window = MainWindow()
+    window.resize(1920, 1080)
+    window.show()
+    QApplication.processEvents()
+    records = [
+        make_record(oficio_processo="PROC-1", uid="u-1"),
+        make_record(excel_row=3, oficio_processo="PROC-1", uid="u-2", av_tec="AT-2"),
+        make_record(excel_row=4, oficio_processo="PROC-2", uid="u-3", av_tec="AT-3"),
+        make_record(excel_row=5, oficio_processo="PROC-3", uid="u-4", av_tec="AT-4"),
+    ]
+    window.records = list(records)
+    window.filtered_records = [records[0], records[2]]
+
+    window._refresh_window_chrome()
+
+    assert window.session_records_label.text() == "Registros: 2 de 4"
+    assert window.session_processes_label.text() == "Processos/oficios: 2 de 3"
+    assert window.shell_controller._process_status_requested_visible is True
+    assert "Linhas repetidas" in window.session_processes_label.toolTip()
+    window.close()
+
+
+def test_window_chrome_uses_tcra_counts_when_tcra_tab_is_active():
+    window = MainWindow()
+    window.resize(1920, 1080)
+    window.show()
+    QApplication.processEvents()
+    window.tcra_tab.handle_tab_activated = lambda schedule_fit=False: None
+    window.tcra_tab.search_input.blockSignals(True)
+    window.tcra_tab.search_input.setText("Aracy")
+    window.tcra_tab.search_input.blockSignals(False)
+    window.tcra_tab.all_tcras = [object(), object(), object()]
+    window.tcra_tab.filtered_tcras = [object(), object()]
+
+    window.tabs.setCurrentIndex(1)
+    window._on_tab_changed(1)
+    QApplication.processEvents()
+
+    assert "(2/3)" in window.windowTitle()
+    assert window.session_records_label.text() == "Registros: 2 de 3"
+    assert window.session_records_label.toolTip() == "Busca atual: Aracy"
+    assert window.shell_controller._process_status_requested_visible is False
+    window.close()
+
+
 def test_window_chrome_marks_snapshot_only_sessions(monkeypatch):
     window = MainWindow()
     window.session_runtime.path = "session://banco-local"

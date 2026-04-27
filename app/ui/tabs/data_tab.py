@@ -921,6 +921,8 @@ class DataTab(QWidget):
             le.setMinimumWidth(min_width)
             le.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             le.setClearButtonEnabled(True)
+            le.setLayoutDirection(Qt.LeftToRight)
+            le.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             return le
 
         self.in_oficio = mk_in(primary_field_w)
@@ -973,6 +975,8 @@ class DataTab(QWidget):
         if self.in_micro.lineEdit() is not None:
             self.in_micro.lineEdit().setClearButtonEnabled(True)
             self.in_micro.lineEdit().setPlaceholderText("Selecione ou digite uma microbacia")
+            self.in_micro.lineEdit().setLayoutDirection(Qt.LeftToRight)
+            self.in_micro.lineEdit().setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.in_caixa = mk_in(secondary_field_w)
         self.in_caixa.setValidator(QIntValidator(0, 999999))
         self.in_caixa.setPlaceholderText("Ex.: 125")

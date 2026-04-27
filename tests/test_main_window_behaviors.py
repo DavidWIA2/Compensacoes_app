@@ -258,10 +258,36 @@ def test_main_window_compensacoes_form_exposes_placeholders_clear_buttons_and_to
     assert "206/2021" in window.data_tab.in_oficio.placeholderText()
     assert window.data_tab.in_end.isClearButtonEnabled() is True
     assert window.data_tab.in_micro.lineEdit().isClearButtonEnabled() is True
+    assert window.data_tab.in_oficio.layoutDirection() == Qt.LeftToRight
+    assert window.data_tab.in_end.layoutDirection() == Qt.LeftToRight
+    assert window.data_tab.in_end.alignment() == (Qt.AlignLeft | Qt.AlignVCenter)
+    assert window.data_tab.in_end_plantio.layoutDirection() == Qt.LeftToRight
+    assert window.data_tab.in_micro.lineEdit().layoutDirection() == Qt.LeftToRight
     assert window.data_tab.btn_manage_plantios.toolTip() != ""
     assert window.data_tab.btn_clear_filters.toolTip() != ""
     assert window.data_tab.btn_maps.toolTip() != ""
     assert window.data_tab.combo_heatmap_type.toolTip() != ""
+    window.close()
+
+
+def test_fill_form_resets_long_text_fields_to_the_beginning():
+    window = MainWindow()
+    record = make_record(
+        oficio_processo="163/23 - SMMADS",
+        eletronico="Ofício",
+        endereco="Avenida Comendador Alfredo Maffei com a Rua Vicente de Carvalho - Vila Marcelino",
+        endereco_plantio="Estrada do Quilombo, gleba 4, setor norte, faixa de recomposição ciliar",
+        microbacia="Gregório",
+    )
+
+    window._fill_form(record)
+    settle_window(window)
+
+    assert window.data_tab.in_oficio.cursorPosition() == 0
+    assert window.data_tab.in_caixa.cursorPosition() == 0
+    assert window.data_tab.in_end.cursorPosition() == 0
+    assert window.data_tab.in_end_plantio.cursorPosition() == 0
+    assert window.data_tab.in_micro.lineEdit().cursorPosition() == 0
     window.close()
 
 

@@ -27,11 +27,16 @@ def test_export_reporting_builds_filter_summary():
             micro_all_selected=False,
             selected_eletronicos=("SIM",),
             eletronico_all_selected=False,
+            selected_caixas=("Arquivado",),
+            caixa_all_selected=False,
             year="2026",
         )
     )
 
-    assert summary == "Busca: Gregorio | Status: Pendentes | Microbacias: Gregorio | Tipo: Eletrônico | Ano: 2026"
+    assert summary == (
+        "Busca: Gregorio | Status: Pendentes | Microbacias: Gregorio | "
+        "Tipo: Eletrônico | Caixa: Arquivado | Ano: 2026"
+    )
 
 
 def test_export_reporting_builds_grid_payload():
@@ -46,7 +51,7 @@ def test_export_reporting_builds_grid_payload():
             "total_pendente": 30.0,
             "total_compensado": 20.0,
             "pend_micro_sorted": [("Gregorio", 30.0)],
-            "pend_ele_sorted": [("Eletrônico", 30.0)],
+            "pend_ele_sorted": [("EletrÃ´nico", 30.0)],
         },
         filter_state=ExportFilterState(search_text="Gregorio"),
     )
@@ -56,7 +61,7 @@ def test_export_reporting_builds_grid_payload():
     assert payload.filter_summary == "Busca: Gregorio"
     assert payload.metrics_kpi_rows[0] == ("Total de Registros", "8")
     assert payload.pend_micro_sorted == (("Gregorio", 30.0),)
-    assert payload.pend_ele_sorted == (("Eletrônico", 30.0),)
+    assert payload.pend_ele_sorted == (("EletrÃ´nico", 30.0),)
 
 
 def test_export_reporting_builds_dashboard_payload_with_persistence_summary():

@@ -32,6 +32,10 @@ def normalize_microbacia_key(value: object) -> str:
     return remove_accents(str(value or "").strip()).upper()
 
 
+def normalize_caixa_key(value: object) -> str:
+    return remove_accents(str(value or "").strip()).upper()
+
+
 def display_tipo_value(value: object) -> str:
     normalized = normalize_tipo_key(value)
     if normalized in {"", "NULO"}:
@@ -169,6 +173,8 @@ def filter_records(
     selected_eletronicos: Sequence[str],
     micro_all_selected: bool,
     eletronico_all_selected: bool,
+    selected_caixas: Sequence[str] = (),
+    caixa_all_selected: bool = True,
     selected_year: str = "Todos",
     search_index: Optional[Dict[str, str]] = None,
 ) -> List[Compensacao]:
@@ -177,6 +183,7 @@ def filter_records(
     
     selected_micros_set = {normalize_microbacia_key(m) for m in (selected_micros or [])}
     selected_ele_set = {normalize_tipo_key(e) for e in (selected_eletronicos or [])}
+    selected_caixas_set = {normalize_caixa_key(caixa) for caixa in (selected_caixas or [])}
 
     filtered = []
     for r in records:
@@ -208,6 +215,11 @@ def filter_records(
         if not eletronico_all_selected:
             row_ele = normalize_tipo_key(display_tipo_value(r.eletronico))
             if row_ele not in selected_ele_set:
+                continue
+
+        if not caixa_all_selected:
+            row_caixa = normalize_caixa_key(r.caixa)
+            if row_caixa not in selected_caixas_set:
                 continue
 
         filtered.append(r)

@@ -171,6 +171,8 @@ class DataTab(QWidget):
         self.filter_micro.setMinimumWidth(int(220 * self.sf))
         self.filter_eletronico = CheckableComboBox("Todos os Tipos")
         self.filter_eletronico.setMinimumWidth(int(140 * self.sf))
+        self.filter_caixa = CheckableComboBox("Todas as Caixas")
+        self.filter_caixa.setMinimumWidth(int(150 * self.sf))
         self.filter_status = ClickableComboBox()
         self.filter_status.addItems(["Todos", "Compensados", "Pendentes"])
         self.filter_status.setMinimumWidth(int(130 * self.sf))
@@ -194,6 +196,7 @@ class DataTab(QWidget):
 
         mk_f("Microbacias", self.filter_micro)
         mk_f("Tipo", self.filter_eletronico)
+        mk_f("Caixa", self.filter_caixa)
         mk_f("Situa\u00e7\u00e3o", self.filter_status)
         mk_f("Ano", self.filter_year)
 

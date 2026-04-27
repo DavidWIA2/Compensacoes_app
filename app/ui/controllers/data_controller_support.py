@@ -15,6 +15,8 @@ class FilterStateSnapshot:
     selected_micros: tuple[str, ...] = ()
     eletronico_all_selected: bool = True
     selected_eletronicos: tuple[str, ...] = ()
+    caixa_all_selected: bool = True
+    selected_caixas: tuple[str, ...] = ()
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -25,6 +27,8 @@ class FilterStateSnapshot:
             "selected_micros": list(self.selected_micros),
             "eletronico_all_selected": self.eletronico_all_selected,
             "selected_eletronicos": list(self.selected_eletronicos),
+            "caixa_all_selected": self.caixa_all_selected,
+            "selected_caixas": list(self.selected_caixas),
         }
 
     @classmethod
@@ -38,6 +42,8 @@ class FilterStateSnapshot:
             selected_micros=tuple(cast(List[str], state.get("selected_micros", []))),
             eletronico_all_selected=bool(state.get("eletronico_all_selected", True)),
             selected_eletronicos=tuple(cast(List[str], state.get("selected_eletronicos", []))),
+            caixa_all_selected=bool(state.get("caixa_all_selected", True)),
+            selected_caixas=tuple(cast(List[str], state.get("selected_caixas", []))),
         )
 
 
@@ -62,6 +68,8 @@ def build_filter_state_snapshot(window) -> FilterStateSnapshot:
         selected_micros=tuple(window.data_tab.filter_micro.checked_items()),
         eletronico_all_selected=window.data_tab.filter_eletronico.is_all_selected(),
         selected_eletronicos=tuple(window.data_tab.filter_eletronico.checked_items()),
+        caixa_all_selected=window.data_tab.filter_caixa.is_all_selected(),
+        selected_caixas=tuple(window.data_tab.filter_caixa.checked_items()),
     )
 
 
@@ -71,6 +79,7 @@ def restore_filter_state_snapshot(window, state: FilterStateSnapshot, tipo_forma
     window.data_tab.filter_year.blockSignals(True)
     window.data_tab.filter_micro.blockSignals(True)
     window.data_tab.filter_eletronico.blockSignals(True)
+    window.data_tab.filter_caixa.blockSignals(True)
     try:
         window.search.setText(state.search_text)
 
@@ -88,12 +97,17 @@ def restore_filter_state_snapshot(window, state: FilterStateSnapshot, tipo_forma
             [tipo_formatter(value) for value in state.selected_eletronicos],
             all_selected=state.eletronico_all_selected,
         )
+        window.data_tab.filter_caixa.set_checked_items(
+            list(state.selected_caixas),
+            all_selected=state.caixa_all_selected,
+        )
     finally:
         window.search.blockSignals(False)
         window.data_tab.filter_status.blockSignals(False)
         window.data_tab.filter_year.blockSignals(False)
         window.data_tab.filter_micro.blockSignals(False)
         window.data_tab.filter_eletronico.blockSignals(False)
+        window.data_tab.filter_caixa.blockSignals(False)
 
 
 def capture_previous_data_state(window, *, runtime_state: object) -> PreviousDataState:

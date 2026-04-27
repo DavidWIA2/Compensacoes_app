@@ -40,6 +40,7 @@ def _make_window_and_dialog():
         filter_year=QComboBox(),
         filter_micro=CheckableComboBox("Todas"),
         filter_eletronico=CheckableComboBox("Todos"),
+        filter_caixa=CheckableComboBox("Todas"),
     )
     window.data_tab.filter_status.addItems(["Todos", "Pendentes"])
     window.data_tab.filter_status.setCurrentText("Pendentes")
@@ -49,6 +50,8 @@ def _make_window_and_dialog():
     window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
     window.data_tab.filter_eletronico.set_items(["Eletrônico", "Físico"])
     window.data_tab.filter_eletronico.set_checked_items(["Eletrônico"], all_selected=False)
+    window.data_tab.filter_caixa.set_items(["Arquivado", "CX-3"])
+    window.data_tab.filter_caixa.set_checked_items(["Arquivado"], all_selected=False)
 
     dialog = SimpleNamespace(
         search_fs=SimpleNamespace(text=lambda: "Medeiros", setText=lambda value: setattr(dialog, "_search", value)),
@@ -56,6 +59,7 @@ def _make_window_and_dialog():
         filter_year_fs=QComboBox(),
         filter_micro_fs=CheckableComboBox("Todas"),
         filter_eletronico_fs=CheckableComboBox("Todos"),
+        filter_caixa_fs=CheckableComboBox("Todas"),
     )
     dialog.filter_status_fs.addItems(["Todos", "Pendentes"])
     dialog.filter_status_fs.setCurrentText("Todos")
@@ -65,6 +69,8 @@ def _make_window_and_dialog():
     dialog.filter_micro_fs.set_checked_items(["Medeiros"], all_selected=False)
     dialog.filter_eletronico_fs.set_items(["Eletrônico", "Físico"])
     dialog.filter_eletronico_fs.set_checked_items(["Físico"], all_selected=False)
+    dialog.filter_caixa_fs.set_items(["Arquivado", "CX-3"])
+    dialog.filter_caixa_fs.set_checked_items(["CX-3"], all_selected=False)
 
     return window, dialog, filter_use_cases
 
@@ -80,9 +86,11 @@ def test_table_fullscreen_dialog_support_roundtrips_filter_state():
     assert combo_items(dialog.filter_status_fs) == ["Todos", "Pendentes"]
     assert dialog.filter_status_fs.currentText() == "Pendentes"
     assert dialog.filter_micro_fs.checked_items() == ["Gregorio"]
+    assert dialog.filter_caixa_fs.checked_items() == ["Arquivado"]
     assert getattr(window, "_search", "") == "Medeiros"
     assert window.data_tab.filter_year.currentText() == "Todos"
     assert window.data_tab.filter_eletronico.checked_items() == ["Físico"]
+    assert window.data_tab.filter_caixa.checked_items() == ["CX-3"]
 
 
 def test_table_fullscreen_dialog_support_handles_table_layout():

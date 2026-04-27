@@ -58,6 +58,8 @@ class LocalRecordSnapshotReader(Protocol):
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> list[Compensacao]: ...
 
@@ -71,6 +73,8 @@ class LocalRecordSnapshotReader(Protocol):
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> dict[str, object]: ...
 
@@ -150,6 +154,8 @@ class LocalRecordQueriesUseCases:
         selected_eletronicos: Sequence[str],
         micro_all_selected: bool,
         eletronico_all_selected: bool,
+        selected_caixas: Sequence[str],
+        caixa_all_selected: bool,
         selected_year: str,
     ) -> list[Compensacao]:
         reader = self.snapshot_reader
@@ -162,6 +168,8 @@ class LocalRecordQueriesUseCases:
             "selected_eletronicos": selected_eletronicos,
             "micro_all_selected": micro_all_selected,
             "eletronico_all_selected": eletronico_all_selected,
+            "selected_caixas": selected_caixas,
+            "caixa_all_selected": caixa_all_selected,
             "selected_year": selected_year,
         }
         if hasattr(reader, "query_records_for_session"):
@@ -178,6 +186,8 @@ class LocalRecordQueriesUseCases:
         selected_eletronicos: Sequence[str],
         micro_all_selected: bool,
         eletronico_all_selected: bool,
+        selected_caixas: Sequence[str],
+        caixa_all_selected: bool,
         selected_year: str,
     ) -> dict[str, object]:
         reader = self.snapshot_reader
@@ -190,6 +200,8 @@ class LocalRecordQueriesUseCases:
             "selected_eletronicos": selected_eletronicos,
             "micro_all_selected": micro_all_selected,
             "eletronico_all_selected": eletronico_all_selected,
+            "selected_caixas": selected_caixas,
+            "caixa_all_selected": caixa_all_selected,
             "selected_year": selected_year,
         }
         if hasattr(reader, "query_metrics_for_session"):
@@ -437,6 +449,8 @@ class LocalRecordQueriesUseCases:
         selected_eletronicos: Sequence[str],
         micro_all_selected: bool,
         eletronico_all_selected: bool,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
         fallback_search_index: Mapping[str, str] | None = None,
     ) -> LocalRecordReadResult:
@@ -454,6 +468,8 @@ class LocalRecordQueriesUseCases:
                 selected_eletronicos=selected_eletronicos,
                 micro_all_selected=micro_all_selected,
                 eletronico_all_selected=eletronico_all_selected,
+                selected_caixas=selected_caixas,
+                caixa_all_selected=caixa_all_selected,
                 selected_year=selected_year,
                 search_index=dict(fallback_search_index or {}),
             )
@@ -485,6 +501,8 @@ class LocalRecordQueriesUseCases:
                     selected_eletronicos=selected_eletronicos,
                     micro_all_selected=micro_all_selected,
                     eletronico_all_selected=eletronico_all_selected,
+                    selected_caixas=selected_caixas,
+                    caixa_all_selected=caixa_all_selected,
                     selected_year=selected_year,
                 )
             )
@@ -510,6 +528,8 @@ class LocalRecordQueriesUseCases:
                 selected_eletronicos=selected_eletronicos,
                 micro_all_selected=micro_all_selected,
                 eletronico_all_selected=eletronico_all_selected,
+                selected_caixas=selected_caixas,
+                caixa_all_selected=caixa_all_selected,
                 selected_year=selected_year,
             )
         except Exception:

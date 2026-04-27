@@ -1554,6 +1554,7 @@ class TableFullScreenDialog(QDialog):
         self.filter_year_fs = None
         self.filter_micro_fs = None
         self.filter_eletronico_fs = None
+        self.filter_caixa_fs = None
         self.btn_clear_filters_fs = None
 
         if self._has_filter_source:
@@ -1561,11 +1562,13 @@ class TableFullScreenDialog(QDialog):
             self.filter_year_fs = ClickableComboBox()
             self.filter_micro_fs = CheckableComboBox(parent.data_tab.filter_micro._all_label)
             self.filter_eletronico_fs = CheckableComboBox(parent.data_tab.filter_eletronico._all_label)
+            self.filter_caixa_fs = CheckableComboBox(parent.data_tab.filter_caixa._all_label)
             self.btn_clear_filters_fs = QPushButton("Limpar Filtros")
             self.btn_clear_filters_fs.setProperty("kind", "secondary")
 
             self.filter_micro_fs.setMinimumWidth(int(220 * sf))
             self.filter_eletronico_fs.setMinimumWidth(int(140 * sf))
+            self.filter_caixa_fs.setMinimumWidth(int(150 * sf))
             self.filter_status_fs.setMinimumWidth(int(130 * sf))
             self.filter_year_fs.setMinimumWidth(int(110 * sf))
 
@@ -1573,6 +1576,8 @@ class TableFullScreenDialog(QDialog):
             row2.addWidget(self.filter_micro_fs)
             row2.addWidget(QLabel("Tipo:"))
             row2.addWidget(self.filter_eletronico_fs)
+            row2.addWidget(QLabel("Caixa:"))
+            row2.addWidget(self.filter_caixa_fs)
             row2.addWidget(QLabel("Status:"))
             row2.addWidget(self.filter_status_fs)
             row2.addWidget(QLabel("Ano:"))
@@ -1674,6 +1679,7 @@ class TableFullScreenDialog(QDialog):
         self.filter_year_fs.currentTextChanged.connect(self._apply_filters_to_main)
         self.filter_micro_fs.currentTextChanged.connect(self._apply_filters_to_main)
         self.filter_eletronico_fs.currentTextChanged.connect(self._apply_filters_to_main)
+        self.filter_caixa_fs.currentTextChanged.connect(self._apply_filters_to_main)
         self.btn_clear_filters_fs.clicked.connect(self._clear_filters)
 
     def _clear_filters(self):
@@ -1698,6 +1704,7 @@ class TableFullScreenDialog(QDialog):
             self._mw.data_tab.filter_year,
             self._mw.data_tab.filter_micro,
             self._mw.data_tab.filter_eletronico,
+            self._mw.data_tab.filter_caixa,
         ):
             self._apply_filter_state_to_main(self._build_filter_state_from_dialog())
         self._mw.apply_filter()

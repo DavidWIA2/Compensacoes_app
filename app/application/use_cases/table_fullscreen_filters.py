@@ -26,6 +26,7 @@ class TableFullscreenFilterState:
     year: ComboFilterState
     micro: CheckableFilterState
     eletronico: CheckableFilterState
+    caixa: CheckableFilterState
 
 
 class TableFullscreenFiltersUseCases:
@@ -90,6 +91,9 @@ class TableFullscreenFiltersUseCases:
         eletronico_items: Sequence[str],
         eletronico_checked_items: Sequence[str],
         eletronico_all_selected: bool,
+        caixa_items: Sequence[str],
+        caixa_checked_items: Sequence[str],
+        caixa_all_selected: bool,
     ) -> TableFullscreenFilterState:
         return TableFullscreenFilterState(
             search_text=str(search_text or ""),
@@ -105,6 +109,11 @@ class TableFullscreenFiltersUseCases:
                 eletronico_checked_items,
                 all_selected=eletronico_all_selected,
                 item_normalizer=display_tipo_value,
+            ),
+            caixa=self.build_checkable_state(
+                caixa_items,
+                caixa_checked_items,
+                all_selected=caixa_all_selected,
             ),
         )
 
@@ -127,6 +136,11 @@ class TableFullscreenFiltersUseCases:
             ),
             eletronico=CheckableFilterState(
                 items=state.eletronico.items,
+                checked_items=(),
+                all_selected=True,
+            ),
+            caixa=CheckableFilterState(
+                items=state.caixa.items,
                 checked_items=(),
                 all_selected=True,
             ),

@@ -837,6 +837,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> list[Compensacao]:
         normalized_path = _normalize_path(workbook_path)
@@ -856,6 +858,8 @@ class SqliteMirrorService:
                 selected_eletronicos=selected_eletronicos,
                 micro_all_selected=micro_all_selected,
                 eletronico_all_selected=eletronico_all_selected,
+                selected_caixas=selected_caixas,
+                caixa_all_selected=caixa_all_selected,
                 selected_year=selected_year,
             )
             if where_clause is None:
@@ -878,6 +882,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> dict[str, object]:
         normalized_path = _normalize_path(workbook_path)
@@ -897,6 +903,8 @@ class SqliteMirrorService:
                 selected_eletronicos=selected_eletronicos,
                 micro_all_selected=micro_all_selected,
                 eletronico_all_selected=eletronico_all_selected,
+                selected_caixas=selected_caixas,
+                caixa_all_selected=caixa_all_selected,
                 selected_year=selected_year,
             )
             if where_clause is None:
@@ -1365,6 +1373,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> list[Compensacao]:
         return self.query_records_for_workbook(
@@ -1375,6 +1385,8 @@ class SqliteMirrorService:
             selected_eletronicos=selected_eletronicos,
             micro_all_selected=micro_all_selected,
             eletronico_all_selected=eletronico_all_selected,
+            selected_caixas=selected_caixas,
+            caixa_all_selected=caixa_all_selected,
             selected_year=selected_year,
         )
 
@@ -1388,6 +1400,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> list[Compensacao]:
         return self.query_records_for_workbook(
@@ -1398,6 +1412,8 @@ class SqliteMirrorService:
             selected_eletronicos=selected_eletronicos,
             micro_all_selected=micro_all_selected,
             eletronico_all_selected=eletronico_all_selected,
+            selected_caixas=selected_caixas,
+            caixa_all_selected=caixa_all_selected,
             selected_year=selected_year,
         )
 
@@ -1411,6 +1427,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> dict[str, object]:
         return self.query_metrics_for_workbook(
@@ -1421,6 +1439,8 @@ class SqliteMirrorService:
             selected_eletronicos=selected_eletronicos,
             micro_all_selected=micro_all_selected,
             eletronico_all_selected=eletronico_all_selected,
+            selected_caixas=selected_caixas,
+            caixa_all_selected=caixa_all_selected,
             selected_year=selected_year,
         )
 
@@ -1434,6 +1454,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> dict[str, object]:
         return self.query_metrics_for_workbook(
@@ -1444,6 +1466,8 @@ class SqliteMirrorService:
             selected_eletronicos=selected_eletronicos,
             micro_all_selected=micro_all_selected,
             eletronico_all_selected=eletronico_all_selected,
+            selected_caixas=selected_caixas,
+            caixa_all_selected=caixa_all_selected,
             selected_year=selected_year,
         )
 
@@ -1509,6 +1533,8 @@ class SqliteMirrorService:
         selected_eletronicos: Sequence[str] = (),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas: Sequence[str] = (),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> tuple[str | None, tuple[object, ...]]:
         clauses = ["workbook_id = ?"]
@@ -1545,6 +1571,14 @@ class SqliteMirrorService:
             placeholders = ",".join("?" for _ in tipo_keys)
             clauses.append(f"tipo_key IN ({placeholders})")
             params.extend(tipo_keys)
+
+        if not caixa_all_selected:
+            caixa_keys = sorted({str(item or "").strip().upper() for item in selected_caixas if _stringify(item)})
+            if not caixa_keys:
+                return None, ()
+            placeholders = ",".join("?" for _ in caixa_keys)
+            clauses.append(f"UPPER(TRIM(COALESCE(caixa, ''))) IN ({placeholders})")
+            params.extend(caixa_keys)
 
         return " AND ".join(clauses), tuple(params)
 

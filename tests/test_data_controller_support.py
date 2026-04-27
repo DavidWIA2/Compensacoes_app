@@ -82,6 +82,7 @@ def build_window():
     year.items = ["Todos", "2026"]
     micro = FakeMultiSelect(["Gregorio"], all_selected=False)
     ele = FakeMultiSelect(["SIM"], all_selected=False)
+    caixa = FakeMultiSelect(["Arquivado"], all_selected=False)
 
     window = SimpleNamespace(
         search=search,
@@ -90,6 +91,7 @@ def build_window():
             filter_year=year,
             filter_micro=micro,
             filter_eletronico=ele,
+            filter_caixa=caixa,
             table=SimpleNamespace(clearSelection=lambda: None),
             table_model=SimpleNamespace(update_data=lambda data: setattr(window, "_table_data", data)),
             update_totals_tables=lambda metrics: setattr(window, "_totals_metrics", metrics),
@@ -144,6 +146,8 @@ def test_data_controller_support_builds_and_restores_filter_snapshot():
                 "selected_micros": [],
                 "eletronico_all_selected": False,
                 "selected_eletronicos": ["SIM"],
+                "caixa_all_selected": False,
+                "selected_caixas": ["Arquivado"],
             }
         ),
         lambda value: "Eletrônico" if value == "SIM" else str(value),
@@ -152,6 +156,9 @@ def test_data_controller_support_builds_and_restores_filter_snapshot():
     assert window.search.text() == "Medeiros"
     assert window.data_tab.filter_status.currentText() == "Todos"
     assert window.data_tab.filter_eletronico.checked_items() == ["Eletrônico"]
+
+
+    assert window.data_tab.filter_caixa.checked_items() == ["Arquivado"]
 
 
 def test_data_controller_support_captures_previous_data_state():

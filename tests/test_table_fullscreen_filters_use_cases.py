@@ -16,6 +16,9 @@ def test_build_state_preserves_options_and_normalizes_selected_items():
         eletronico_items=["SIM", "NAO"],
         eletronico_checked_items=["SIM"],
         eletronico_all_selected=False,
+        caixa_items=["Arquivado", "CX-3"],
+        caixa_checked_items=["cx-3"],
+        caixa_all_selected=False,
     )
 
     assert state.search_text == "Gregorio"
@@ -24,6 +27,7 @@ def test_build_state_preserves_options_and_normalizes_selected_items():
     assert state.micro.checked_items == ("Gregorio",)
     assert state.eletronico.items == ("Eletrônico", "Físico")
     assert state.eletronico.checked_items == ("Eletrônico",)
+    assert state.caixa.checked_items == ("CX-3",)
 
 
 def test_build_cleared_state_resets_search_and_selects_all():
@@ -40,6 +44,9 @@ def test_build_cleared_state_resets_search_and_selects_all():
         eletronico_items=["SIM", "NAO"],
         eletronico_checked_items=["NAO"],
         eletronico_all_selected=False,
+        caixa_items=["Arquivado", "CX-3"],
+        caixa_checked_items=["Arquivado"],
+        caixa_all_selected=False,
     )
 
     cleared = use_cases.build_cleared_state(state)
@@ -51,3 +58,5 @@ def test_build_cleared_state_resets_search_and_selects_all():
     assert cleared.micro.checked_items == ()
     assert cleared.eletronico.all_selected is True
     assert cleared.eletronico.checked_items == ()
+    assert cleared.caixa.all_selected is True
+    assert cleared.caixa.checked_items == ()

@@ -20,6 +20,8 @@ class ExportFilterState:
     micro_all_selected: bool = True
     selected_eletronicos: tuple[str, ...] = ()
     eletronico_all_selected: bool = True
+    selected_caixas: tuple[str, ...] = ()
+    caixa_all_selected: bool = True
     year: str = "Todos"
 
 
@@ -75,6 +77,10 @@ class ExportReportingUseCases:
                 if str(item).strip()
             )
             parts.append(f"Tipo: {eletronicos or 'Nenhum'}")
+
+        if not filter_state.caixa_all_selected:
+            caixas = ", ".join(item for item in filter_state.selected_caixas if str(item).strip())
+            parts.append(f"Caixa: {caixas or 'Nenhuma'}")
 
         year = str(filter_state.year or "").strip()
         if year and year != "Todos":

@@ -36,11 +36,14 @@ from app.services.access_service import AccessAuthError
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
 from app.services.records_service import (
     STANDARD_TIPO_OPTIONS,
+    TIPO_OFICIO,
     TIPO_NULO,
     compute_metrics,
     display_tipo_value,
     normalize_microbacia_key,
+    remove_accents,
     tipo_is_eletronico,
+    unique_non_empty,
 )
 from app.ui.components.access_dialog import ChangePasswordDialog
 from app.ui.components.themes import THEME_DARK, THEME_LIGHT, get_app_qss
@@ -78,6 +81,7 @@ class WindowShellController:
         self._search_context = "compensacoes"
         self._compensacoes_search_text = ""
         self._syncing_global_search = False
+        self._last_selected_tipo = ""
         self._secondary_status_widgets: list[QWidget] = []
         self._tertiary_status_widgets: list[QWidget] = []
 
@@ -825,6 +829,8 @@ class WindowShellController:
             return True
         if not self.window.data_tab.filter_eletronico.is_all_selected():
             return True
+        if not self.window.data_tab.filter_caixa.is_all_selected():
+            return True
         return False
 
     def current_selection_label_text(self) -> str:
@@ -1009,6 +1015,7 @@ class WindowShellController:
 
         self.window.data_tab.filter_micro.selectionChanged.connect(self.window.schedule_apply_filter)
         self.window.data_tab.filter_eletronico.selectionChanged.connect(self.window.schedule_apply_filter)
+        self.window.data_tab.filter_caixa.selectionChanged.connect(self.window.schedule_apply_filter)
         self.window.data_tab.filter_status.currentTextChanged.connect(self.window.schedule_apply_filter)
         self.window.data_tab.filter_year.currentTextChanged.connect(self.window.schedule_apply_filter)
         self.window.data_tab.btn_clear_filters.clicked.connect(build_command("clear_filters"))
@@ -1258,7 +1265,10 @@ class WindowShellController:
         facets = self.resolved_filter_facets(refresh=True)
         current_micros = self.window.data_tab.filter_micro.checked_items()
         current_micro_all = self.window.data_tab.filter_micro.is_all_selected()
+        current_caixas = self.window.data_tab.filter_caixa.checked_items()
+        current_caixa_all = self.window.data_tab.filter_caixa.is_all_selected()
         micro_options = self._resolved_microbacia_options(facets.microbacias)
+        caixa_options = unique_non_empty(record.caixa for record in self.window.records)
         self.window.data_tab.filter_micro.set_items(micro_options)
         self.window.data_tab.filter_micro.set_checked_items(
             current_micros,
@@ -1266,6 +1276,12 @@ class WindowShellController:
             emit_selection_changed=False,
         )
         self.window.data_tab.filter_eletronico.set_items(list(STANDARD_TIPO_OPTIONS))
+        self.window.data_tab.filter_caixa.set_items(caixa_options)
+        self.window.data_tab.filter_caixa.set_checked_items(
+            current_caixas,
+            all_selected=current_caixa_all,
+            emit_selection_changed=False,
+        )
         self.window.data_tab.filter_year.blockSignals(True)
         self.window.data_tab.filter_year.clear()
         self.window.data_tab.filter_year.addItems(["Todos"] + list(facets.years))
@@ -1324,16 +1340,34 @@ class WindowShellController:
         selected_tipo = display_tipo_value(checked_button.text() if checked_button else "")
         is_arquivado = self.window.data_tab.chk_arquivado.isChecked()
         caixa = self.window.data_tab.in_caixa
+        previous_tipo = str(getattr(self, "_last_selected_tipo", "") or "")
+        tipo_changed = selected_tipo != previous_tipo
+        normalized_caixa = remove_accents(caixa.text()).strip().upper()
         caixa.setValidator(None if is_arquivado else QIntValidator(0, 999999))
-        if is_arquivado:
-            caixa.setText("Arquivado")
-        elif clear_archived_text and caixa.text().strip().upper() == "ARQUIVADO":
-            caixa.clear()
+        caixa.blockSignals(True)
+        try:
+            if is_arquivado:
+                if caixa.text() != "Arquivado":
+                    caixa.setText("Arquivado")
+            else:
+                if clear_archived_text and normalized_caixa == "ARQUIVADO":
+                    caixa.clear()
+                    normalized_caixa = ""
+
+                if selected_tipo == TIPO_OFICIO:
+                    if tipo_changed or not normalized_caixa:
+                        if caixa.text() != "Ofícios":
+                            caixa.setText("Ofícios")
+                elif tipo_changed and normalized_caixa == "OFICIOS":
+                    caixa.clear()
+        finally:
+            caixa.blockSignals(False)
 
         is_editable = not is_arquivado and not tipo_is_eletronico(selected_tipo)
         caixa.setEnabled(is_editable)
         if is_editable and focus_if_enabled:
             caixa.setFocus()
+        self._last_selected_tipo = selected_tipo
 
     def open_columns_dialog(self):
         visible_map = {

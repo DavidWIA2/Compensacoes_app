@@ -1031,6 +1031,28 @@ def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
     window.close()
 
 
+def test_oficio_prefills_caixa_with_oficios():
+    window = MainWindow()
+    get_app().processEvents()
+
+    for button in window.data_tab.eletronico_group.buttons():
+        if button.text() == "Ofício":
+            button.click()
+            break
+
+    assert window.data_tab.in_caixa.text() == "Ofícios"
+    assert window.data_tab.in_caixa.isEnabled() is True
+
+    for button in window.data_tab.eletronico_group.buttons():
+        if button.text() == "Físico":
+            button.click()
+            break
+
+    assert window.data_tab.in_caixa.text() == ""
+    assert window.data_tab.in_caixa.isEnabled() is True
+    window.close()
+
+
 def test_finalize_startup_layout_aligns_splitter_and_left_panel(monkeypatch):
     import app.ui.controllers.window_shell_controller as shell_module
 
@@ -2274,8 +2296,8 @@ def test_table_fullscreen_dialog_reserves_footer_space(monkeypatch):
 def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     window = MainWindow()
     window.records = [
-        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM"),
-        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2"),
+        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM", caixa="Arquivado"),
+        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2", caixa="CX-3"),
     ]
     window.filtered_records = list(window.records)
     window._update_filters_from_records()
@@ -2285,6 +2307,7 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     window.data_tab.filter_year.setCurrentIndex(year_index)
     window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
     window.data_tab.filter_eletronico.set_checked_items(["Eletrônico"], all_selected=False)
+    window.data_tab.filter_caixa.set_checked_items(["Arquivado"], all_selected=False)
     window.apply_filter()
 
     monkeypatch.setattr(TableFullScreenDialog, "showMaximized", lambda self: None)
@@ -2300,6 +2323,7 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     assert dialog.filter_year_fs.currentText() == "2026"
     assert dialog.filter_micro_fs.checked_items() == ["Gregório"]
     assert dialog.filter_eletronico_fs.checked_items() == ["Eletrônico"]
+    assert dialog.filter_caixa_fs.checked_items() == ["Arquivado"]
 
     dialog.search_fs.setText("Medeiros")
     dialog.filter_status_fs.setCurrentText("Todos")
@@ -2307,6 +2331,7 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     dialog.filter_year_fs.setCurrentIndex(year_index)
     dialog.filter_micro_fs.set_checked_items(["Medeiros"], all_selected=False)
     dialog.filter_eletronico_fs.set_checked_items(["Físico"], all_selected=False)
+    dialog.filter_caixa_fs.set_checked_items(["CX-3"], all_selected=False)
     dialog._apply_filters_to_main()
 
     assert window.search.text() == "Medeiros"
@@ -2314,6 +2339,7 @@ def test_table_fullscreen_dialog_exposes_and_syncs_filters(monkeypatch):
     assert window.data_tab.filter_year.currentText() == "2025"
     assert window.data_tab.filter_micro.checked_items() == ["Medeiros"]
     assert window.data_tab.filter_eletronico.checked_items() == ["Físico"]
+    assert window.data_tab.filter_caixa.checked_items() == ["CX-3"]
     dialog.close()
     window.close()
 
@@ -2981,8 +3007,8 @@ def test_load_last_session_falls_back_to_singleton_database(monkeypatch):
 def test_load_session_failure_restores_previous_filter_state(monkeypatch):
     window = MainWindow()
     window.records = [
-        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM"),
-        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2"),
+        make_record(oficio_processo="123/2026", microbacia="Gregorio", eletronico="SIM", caixa="Arquivado"),
+        make_record(excel_row=3, oficio_processo="999/2025", microbacia="Medeiros", eletronico="NAO", uid="u-2", caixa="CX-3"),
     ]
     window.filtered_records = list(window.records)
     window._update_filters_from_records()
@@ -2993,6 +3019,7 @@ def test_load_session_failure_restores_previous_filter_state(monkeypatch):
     window.data_tab.filter_year.setCurrentIndex(year_index)
     window.data_tab.filter_micro.set_checked_items(["Gregorio"], all_selected=False)
     window.data_tab.filter_eletronico.set_checked_items(["Eletrônico"], all_selected=False)
+    window.data_tab.filter_caixa.set_checked_items(["Arquivado"], all_selected=False)
     window.apply_filter()
 
     monkeypatch.setattr(window.session_runtime, "load", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("falhou")))
@@ -3004,6 +3031,7 @@ def test_load_session_failure_restores_previous_filter_state(monkeypatch):
     assert window.data_tab.filter_year.currentText() == "2026"
     assert window.data_tab.filter_micro.checked_items() == ["Gregório"]
     assert window.data_tab.filter_eletronico.checked_items() == ["Eletrônico"]
+    assert window.data_tab.filter_caixa.checked_items() == ["Arquivado"]
     assert len(window.records) == 2
     window.close()
 

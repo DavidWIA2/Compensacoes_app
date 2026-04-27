@@ -69,6 +69,8 @@ class ExportController:
             micro_all_selected=self.window.data_tab.filter_micro.is_all_selected(),
             selected_eletronicos=tuple(self.window.data_tab.filter_eletronico.checked_items()),
             eletronico_all_selected=self.window.data_tab.filter_eletronico.is_all_selected(),
+            selected_caixas=tuple(self.window.data_tab.filter_caixa.checked_items()),
+            caixa_all_selected=self.window.data_tab.filter_caixa.is_all_selected(),
             year=self.window.data_tab.filter_year.currentText(),
         )
 

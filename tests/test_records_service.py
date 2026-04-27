@@ -134,3 +134,24 @@ def test_filter_records_accepts_display_tipo_filter_for_legacy_values():
     )
 
     assert [record.uid for record in filtered] == ["u-1"]
+
+
+def test_filter_records_applies_caixa_filter():
+    records = [
+        make_record(caixa="Arquivado", uid="u-1"),
+        make_record(excel_row=3, caixa="CX-3", uid="u-2", av_tec="AT-2"),
+    ]
+
+    filtered = filter_records(
+        records,
+        text="",
+        status="Todos",
+        selected_micros=[],
+        selected_eletronicos=[],
+        micro_all_selected=True,
+        eletronico_all_selected=True,
+        selected_caixas=["Arquivado"],
+        caixa_all_selected=False,
+    )
+
+    assert [record.uid for record in filtered] == ["u-1"]

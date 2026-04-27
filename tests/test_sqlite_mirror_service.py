@@ -341,6 +341,26 @@ def test_append_records_to_workbook_adds_batch_incrementally(tmp_path):
     assert [record.uid for record in mirrored] == ["uid-1", "uid-2", "uid-3"]
 
 
+def test_query_records_for_workbook_filters_by_caixa(tmp_path):
+    service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
+    workbook_path = tmp_path / "base.xlsx"
+    records = [
+        make_record(excel_row=2, uid="uid-1", av_tec="AT-1"),
+        make_record(excel_row=3, uid="uid-2", av_tec="AT-2"),
+    ]
+    records[0].caixa = "Arquivado"
+    records[1].caixa = "CX-3"
+    service.sync_workbook_snapshot(str(workbook_path), records)
+
+    filtered = service.query_records_for_workbook(
+        str(workbook_path),
+        selected_caixas=("Arquivado",),
+        caixa_all_selected=False,
+    )
+
+    assert [record.uid for record in filtered] == ["uid-1"]
+
+
 def test_sqlite_mirror_service_can_lookup_record_details_and_duplicate_rows(tmp_path):
     service = SqliteMirrorService(db_path=tmp_path / "mirror.db")
     workbook_path = tmp_path / "base.xlsx"

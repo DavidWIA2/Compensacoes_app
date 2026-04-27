@@ -92,6 +92,8 @@ class StubLocalRecordReader:
         selected_eletronicos=(),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas=(),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> list[Compensacao]:
         self.query_calls.append(
@@ -103,6 +105,8 @@ class StubLocalRecordReader:
                 "selected_eletronicos": tuple(selected_eletronicos),
                 "micro_all_selected": micro_all_selected,
                 "eletronico_all_selected": eletronico_all_selected,
+                "selected_caixas": tuple(selected_caixas),
+                "caixa_all_selected": caixa_all_selected,
                 "selected_year": selected_year,
             }
         )
@@ -122,6 +126,8 @@ class StubLocalRecordReader:
         selected_eletronicos=(),
         micro_all_selected: bool = True,
         eletronico_all_selected: bool = True,
+        selected_caixas=(),
+        caixa_all_selected: bool = True,
         selected_year: str = "Todos",
     ) -> dict[str, object]:
         self.metrics_calls.append(
@@ -133,6 +139,8 @@ class StubLocalRecordReader:
                 "selected_eletronicos": tuple(selected_eletronicos),
                 "micro_all_selected": micro_all_selected,
                 "eletronico_all_selected": eletronico_all_selected,
+                "selected_caixas": tuple(selected_caixas),
+                "caixa_all_selected": caixa_all_selected,
                 "selected_year": selected_year,
             }
         )
@@ -307,6 +315,8 @@ def test_local_record_queries_can_use_indexed_sqlite_query_for_filtered_result()
         selected_eletronicos=(),
         micro_all_selected=True,
         eletronico_all_selected=True,
+        selected_caixas=("Arquivado",),
+        caixa_all_selected=False,
         selected_year="Todos",
         fallback_search_index=None,
     )
@@ -318,6 +328,8 @@ def test_local_record_queries_can_use_indexed_sqlite_query_for_filtered_result()
     assert result.metrics["count_total"] == 1
     assert reader.query_calls[0]["search_text"] == "ABC"
     assert reader.metrics_calls[0]["search_text"] == "ABC"
+    assert reader.query_calls[0]["selected_caixas"] == ("Arquivado",)
+    assert reader.metrics_calls[0]["caixa_all_selected"] is False
 
 
 def test_local_record_queries_can_resolve_filter_facets_from_sqlite_snapshot():

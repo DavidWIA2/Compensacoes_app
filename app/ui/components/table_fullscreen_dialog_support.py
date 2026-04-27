@@ -47,6 +47,9 @@ def build_fullscreen_filter_state_from_main(window: Any, filter_use_cases: Table
         eletronico_items=checkable_items(window.data_tab.filter_eletronico),
         eletronico_checked_items=window.data_tab.filter_eletronico.checked_items(),
         eletronico_all_selected=window.data_tab.filter_eletronico.is_all_selected(),
+        caixa_items=checkable_items(window.data_tab.filter_caixa),
+        caixa_checked_items=window.data_tab.filter_caixa.checked_items(),
+        caixa_all_selected=window.data_tab.filter_caixa.is_all_selected(),
     )
 
 
@@ -63,6 +66,9 @@ def build_fullscreen_filter_state_from_dialog(dialog: Any, filter_use_cases: Tab
         eletronico_items=checkable_items(dialog.filter_eletronico_fs),
         eletronico_checked_items=dialog.filter_eletronico_fs.checked_items(),
         eletronico_all_selected=dialog.filter_eletronico_fs.is_all_selected(),
+        caixa_items=checkable_items(dialog.filter_caixa_fs),
+        caixa_checked_items=dialog.filter_caixa_fs.checked_items(),
+        caixa_all_selected=dialog.filter_caixa_fs.is_all_selected(),
     )
 
 
@@ -84,6 +90,11 @@ def apply_fullscreen_filter_state_to_dialog(dialog: Any, state: TableFullscreenF
         list(state.eletronico.checked_items),
         all_selected=state.eletronico.all_selected,
     )
+    dialog.filter_caixa_fs.set_items(list(state.caixa.items))
+    dialog.filter_caixa_fs.set_checked_items(
+        list(state.caixa.checked_items),
+        all_selected=state.caixa.all_selected,
+    )
 
 
 def apply_fullscreen_filter_state_to_main(window: Any, state: TableFullscreenFilterState) -> None:
@@ -97,6 +108,10 @@ def apply_fullscreen_filter_state_to_main(window: Any, state: TableFullscreenFil
     window.data_tab.filter_eletronico.set_checked_items(
         list(state.eletronico.checked_items),
         all_selected=state.eletronico.all_selected,
+    )
+    window.data_tab.filter_caixa.set_checked_items(
+        list(state.caixa.checked_items),
+        all_selected=state.caixa.all_selected,
     )
 
 

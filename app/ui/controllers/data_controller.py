@@ -469,6 +469,8 @@ class DataController:
             selected_eletronicos=self.window.data_tab.filter_eletronico.checked_items(),
             micro_all_selected=self.window.data_tab.filter_micro.is_all_selected(),
             eletronico_all_selected=self.window.data_tab.filter_eletronico.is_all_selected(),
+            selected_caixas=self.window.data_tab.filter_caixa.checked_items(),
+            caixa_all_selected=self.window.data_tab.filter_caixa.is_all_selected(),
             selected_year=self.window.data_tab.filter_year.currentText(),
             fallback_search_index=self.window._record_search_index,
         )
@@ -507,6 +509,7 @@ class DataController:
         self.window.data_tab.filter_year.setCurrentIndex(0)
         self.window.data_tab.filter_micro.select_all()
         self.window.data_tab.filter_eletronico.select_all()
+        self.window.data_tab.filter_caixa.select_all()
         self.apply_filter()
         self.window.statusBar().showMessage("Filtros limpos")
 

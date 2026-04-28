@@ -64,6 +64,12 @@ def test_validate_compensacao_accepts_current_oficio_year():
     assert validate_compensacao(item) == ""
 
 
+def test_validate_compensacao_accepts_process_origin_suffix_after_year():
+    item = make_compensacao(oficio_processo="3529/2024 - SAAE")
+
+    assert validate_compensacao(item) == ""
+
+
 def test_validate_compensacao_requires_compensacao_when_none():
     item = make_compensacao(compensacao=None)
 

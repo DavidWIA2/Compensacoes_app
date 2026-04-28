@@ -1,5 +1,19 @@
 from app.config import DEFAULT_UPDATE_MANIFEST_URL
-from app.ui.components.workers import UpdaterWorker
+from app.ui.components.workers import GeocodeWorker, UpdaterWorker
+
+
+def test_geocode_worker_uses_configurable_generic_geocoder(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "app.ui.components.workers.geocode_address",
+        lambda address, timeout=10: calls.append((address, timeout)) or (-22.01, -47.89),
+    )
+
+    worker = GeocodeWorker([])
+
+    assert worker._geocode_api("Rua Teste") == (-22.01, -47.89)
+    assert calls == [("Rua Teste", 8)]
 
 
 def test_updater_worker_skips_when_no_source_is_configured():

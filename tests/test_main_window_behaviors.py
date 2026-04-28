@@ -849,6 +849,28 @@ def test_tipo_options_are_fixed_even_without_workbook_data():
     window.close()
 
 
+def test_address_field_uses_existing_records_as_completer():
+    window = MainWindow()
+    get_app().processEvents()
+    window.records = [
+        make_record(endereco="Rua Confirmada, 55", endereco_plantio="Plantio antigo"),
+        make_record(endereco="Avenida Teste, 123"),
+    ]
+
+    window._setup_dynamic_form_options_from_records()
+
+    completer = window.data_tab.in_end.completer()
+    values = [
+        completer.model().index(row, 0).data()
+        for row in range(completer.model().rowCount())
+    ]
+
+    assert "Rua Confirmada, 55" in values
+    assert "Avenida Teste, 123" in values
+    assert "Plantio antigo" in values
+    window.close()
+
+
 def test_update_filters_from_records_can_use_sqlite_filter_facets(monkeypatch):
     window = MainWindow()
     get_app().processEvents()
@@ -1034,7 +1056,7 @@ def test_load_gis_refreshes_microbacia_options_after_success(monkeypatch):
     window.close()
 
 
-def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
+def test_eletronico_prefills_caixa_but_keeps_it_locked():
     window = MainWindow()
     get_app().processEvents()
 
@@ -1043,6 +1065,7 @@ def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
             button.click()
             break
 
+    assert window.data_tab.in_caixa.text() == "Eletrônico"
     assert window.data_tab.in_caixa.isEnabled() is False
 
     window.data_tab.chk_arquivado.setChecked(True)
@@ -1052,8 +1075,16 @@ def test_eletronico_disables_caixa_but_arquivado_still_fills_it():
 
     window.data_tab.chk_arquivado.setChecked(False)
 
-    assert window.data_tab.in_caixa.text() == ""
+    assert window.data_tab.in_caixa.text() == "Eletrônico"
     assert window.data_tab.in_caixa.isEnabled() is False
+
+    for button in window.data_tab.eletronico_group.buttons():
+        if button.text() == "Físico":
+            button.click()
+            break
+
+    assert window.data_tab.in_caixa.text() == ""
+    assert window.data_tab.in_caixa.isEnabled() is True
     window.close()
 
 
@@ -2174,6 +2205,39 @@ def test_table_row_selection_populates_form(monkeypatch):
     assert window.data_tab.in_oficio.text() == "PROC-3"
     assert window.last_marker_coords == (-22.01, -47.89)
     assert window.data_tab.btn_street_view.isEnabled() is True
+    window.close()
+
+
+def test_second_click_same_table_row_clears_selection_and_feedback(monkeypatch):
+    window = MainWindow()
+    window.session_runtime.path = "dummy.xlsx"
+    monkeypatch.setattr(window, "_run_map_js", lambda *args, **kwargs: None)
+    record = make_record(excel_row=3, oficio_processo="PROC-3", uid="u3")
+    window.records = [record]
+    window.filtered_records = [record]
+    window.data_tab.table_model.update_data(window.filtered_records)
+
+    index = window.data_tab.proxy.index(0, 0)
+    window.data_tab.table.selectRow(0)
+    window._on_table_clicked(index)
+    assert window.selected is not None
+
+    window.data_tab.lbl_form_feedback.setText("Cadastro consistente para seguir.")
+    window.data_tab.lbl_form_feedback.setVisible(True)
+    window.data_tab.lbl_form_geocode.setText("Geocodificação: revisar ponto principal.")
+    window.data_tab.lbl_form_geocode.setVisible(True)
+
+    window.data_tab.table.selectRow(0)
+    window._on_table_clicked(index)
+
+    assert window.selected is None
+    assert window.data_tab.table.selectionModel().selectedRows() == []
+    assert window.data_tab.in_oficio.text() == ""
+    assert window.data_tab.lbl_form_feedback.text() == ""
+    assert window.data_tab.lbl_form_feedback.isHidden() is True
+    assert window.data_tab.lbl_form_geocode.text() == ""
+    assert window.data_tab.lbl_form_geocode.isHidden() is True
+    assert window.data_tab.lbl_selection_summary.text() == "Nenhum registro selecionado"
     window.close()
 
 

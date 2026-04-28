@@ -154,10 +154,13 @@
   const map = L.map("map", {
     zoomControl:false,
     preferCanvas:true,
-    maxZoom: 18 // Trava de zoom mantida
+    maxZoom: 20
   }).setView([-22.015,-47.89], 12);
 
   L.control.zoom({ position:'bottomright' }).addTo(map);
+  const satelliteLabelsPane = map.createPane("satellite-labels");
+  satelliteLabelsPane.style.zIndex = 450;
+  satelliteLabelsPane.style.pointerEvents = "none";
 
   /* ===========================
      CAMADAS BASE (100% HTTPS)
@@ -165,10 +168,94 @@
   const query = new URLSearchParams(window.location.search);
   const tileScheme = (query.get("tileScheme") || "").trim().toLowerCase();
   const tileProxyBase = (query.get("tileProxy") || "").replace(/\/+$/, "");
+  const mapboxToken = (query.get("mapboxToken") || "").trim();
+  const mapboxStyle = (query.get("mapboxStyle") || "mapbox/satellite-streets-v12").trim();
+  const MAPBOX_LAYER_NAME = "Mapbox Satelite";
+  const mapboxUsageMonth = (query.get("mapboxUsageMonth") || "").trim();
+  const mapboxTileLimit = Math.max(parseInt(query.get("mapboxTileLimit") || "5000", 10) || 5000, 0);
+  const mapboxInitialTilesUsed = Math.max(parseInt(query.get("mapboxTileUsed") || "0", 10) || 0, 0);
+  const mapboxStorageKey = mapboxUsageMonth ? `comp_mapbox_tiles_${mapboxUsageMonth}` : "";
+  let bridge = null;
+  let mapboxTilesUsed = Math.min(mapboxInitialTilesUsed, mapboxTileLimit);
+  let pendingMapboxTileReport = 0;
+  let mapboxTileReportTimer = null;
+  let mapboxUsageStatusTimer = null;
+
+  if (mapboxStorageKey) {
+    try {
+      const stored = parseInt(window.localStorage.getItem(mapboxStorageKey) || "0", 10) || 0;
+      mapboxTilesUsed = Math.min(Math.max(mapboxTilesUsed, stored), mapboxTileLimit);
+    } catch (e) {}
+  }
+
   function resolveTileUrl(remoteTemplate, proxyTemplate, schemeTemplate) {
     if (tileScheme === "compmap" && schemeTemplate) return schemeTemplate;
     if (!tileProxyBase) return remoteTemplate;
     return `${tileProxyBase}${proxyTemplate}`;
+  }
+  function resolveMapboxTileUrl(stylePath) {
+    const parts = String(stylePath || "mapbox/satellite-streets-v12").split("/");
+    const owner = encodeURIComponent(parts[0] || "mapbox");
+    const style = encodeURIComponent(parts[1] || "satellite-streets-v12");
+    return `https://api.mapbox.com/styles/v1/${owner}/${style}/tiles/512/{z}/{x}/{y}?access_token=${encodeURIComponent(mapboxToken)}`;
+  }
+  function mapboxUsageText() {
+    if (!mapboxToken) return "";
+    return `Mapbox: ${mapboxTilesUsed}/${mapboxTileLimit} tiles usados no mes`;
+  }
+  function mapboxStatusMessage(prefix) {
+    const usage = mapboxUsageText();
+    return usage ? `${prefix}\n${usage}` : prefix;
+  }
+  function mapboxLimitReached() {
+    return !!mapboxToken && mapboxTileLimit > 0 && mapboxTilesUsed >= mapboxTileLimit;
+  }
+  function saveMapboxUsageFallback() {
+    if (!mapboxStorageKey) return;
+    try { window.localStorage.setItem(mapboxStorageKey, String(mapboxTilesUsed)); } catch (e) {}
+  }
+  function flushMapboxTileReport() {
+    if (!pendingMapboxTileReport) return;
+    if (!bridge || !bridge.onMapboxTilesRequested) {
+      mapboxTileReportTimer = setTimeout(flushMapboxTileReport, 800);
+      return;
+    }
+    const count = pendingMapboxTileReport;
+    pendingMapboxTileReport = 0;
+    mapboxTileReportTimer = null;
+    bridge.onMapboxTilesRequested(count);
+  }
+  function scheduleMapboxTileReport() {
+    if (mapboxTileReportTimer) return;
+    mapboxTileReportTimer = setTimeout(flushMapboxTileReport, 500);
+  }
+  function scheduleMapboxUsageStatus(prefix) {
+    if (activeBaseLayerName !== MAPBOX_LAYER_NAME) return;
+    if (mapboxUsageStatusTimer) clearTimeout(mapboxUsageStatusTimer);
+    mapboxUsageStatusTimer = setTimeout(function(){
+      setStatus(mapboxStatusMessage(prefix || "Mapa base carregado: Mapbox Satelite"));
+    }, 180);
+  }
+  function recordMapboxTileRequest() {
+    if (!mapboxToken || mapboxTileLimit <= 0 || mapboxLimitReached()) return false;
+    mapboxTilesUsed = Math.min(mapboxTilesUsed + 1, mapboxTileLimit);
+    pendingMapboxTileReport += 1;
+    saveMapboxUsageFallback();
+    scheduleMapboxTileReport();
+    scheduleMapboxUsageStatus(
+      mapboxLimitReached()
+        ? "Cota Mapbox atingida. Novos tiles foram bloqueados."
+        : "Carregando Mapbox Satelite..."
+    );
+    return true;
+  }
+  function mapboxBlockedTileUrl() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+      <rect width="512" height="512" fill="#1f2937"/>
+      <text x="256" y="238" text-anchor="middle" fill="#e5e7eb" font-family="Arial" font-size="24" font-weight="700">Cota Mapbox atingida</text>
+      <text x="256" y="276" text-anchor="middle" fill="#93c5fd" font-family="Arial" font-size="18">${mapboxTilesUsed}/${mapboxTileLimit} tiles no mes</text>
+    </svg>`;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
   }
   if (tileScheme) {
     console.info("[MAP SCHEME]", tileScheme);
@@ -176,6 +263,16 @@
   if (tileProxyBase) {
     console.info("[MAP PROXY]", tileProxyBase);
   }
+  if (mapboxToken) {
+    console.info("[MAP MAPBOX] token configurado");
+  }
+  const responsiveTileOptions = {
+    updateWhenIdle:true,
+    updateWhenZooming:false,
+    updateInterval:240,
+    keepBuffer:1,
+    detectRetina:false
+  };
 
   const tileLight = L.tileLayer(
     resolveTileUrl(
@@ -183,7 +280,7 @@
       "/tiles/carto_light/{z}/{x}/{y}.png",
       "compmap:///carto_light/{z}/{x}/{y}.png"
     ),
-    { maxZoom:19, attribution:"&copy; OpenStreetMap contributors &copy; CARTO" }
+    Object.assign({}, responsiveTileOptions, { maxZoom:20, maxNativeZoom:19, attribution:"&copy; OpenStreetMap contributors &copy; CARTO" })
   );
 
   const tileDark = L.tileLayer(
@@ -192,7 +289,7 @@
       "/tiles/carto_dark/{z}/{x}/{y}.png",
       "compmap:///carto_dark/{z}/{x}/{y}.png"
     ),
-    { maxZoom:19, attribution:"&copy; OpenStreetMap contributors" }
+    Object.assign({}, responsiveTileOptions, { maxZoom:20, maxNativeZoom:19, attribution:"&copy; OpenStreetMap contributors" })
   );
 
   const tileSat = L.tileLayer(
@@ -201,7 +298,64 @@
       "/tiles/satellite/{z}/{x}/{y}.jpg",
       "compmap:///satellite/{z}/{x}/{y}.jpg"
     ),
-    { maxZoom:18, attribution:"&copy; Esri" }
+    Object.assign({}, responsiveTileOptions, { maxZoom:20, maxNativeZoom:18, attribution:"&copy; Esri" })
+  );
+
+  const MapboxLimitedTileLayer = L.TileLayer.extend({
+    getTileUrl: function(coords) {
+      if (!recordMapboxTileRequest()) {
+        return mapboxBlockedTileUrl();
+      }
+      return L.TileLayer.prototype.getTileUrl.call(this, coords);
+    }
+  });
+
+  const tileMapboxSatellite = mapboxToken ? new MapboxLimitedTileLayer(
+    resolveMapboxTileUrl(mapboxStyle),
+    Object.assign({}, responsiveTileOptions, {
+      tileSize:512,
+      zoomOffset:-1,
+      maxZoom:20,
+      maxNativeZoom:20,
+      keepBuffer:1,
+      attribution:"&copy; Mapbox &copy; OpenStreetMap"
+    })
+  ) : null;
+
+  const tileSatTransportation = L.tileLayer(
+    resolveTileUrl(
+      "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+      "/tiles/esri_transportation/{z}/{x}/{y}.png",
+      "compmap:///esri_transportation/{z}/{x}/{y}.png"
+    ),
+    Object.assign({}, responsiveTileOptions, {
+      pane:"satellite-labels",
+      minZoom:13,
+      maxZoom:20,
+      maxNativeZoom:18,
+      opacity:0.96,
+      keepBuffer:0,
+      interactive:false,
+      attribution:"&copy; Esri"
+    })
+  );
+
+  const tileSatPlaces = L.tileLayer(
+    resolveTileUrl(
+      "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      "/tiles/esri_places/{z}/{x}/{y}.png",
+      "compmap:///esri_places/{z}/{x}/{y}.png"
+    ),
+    Object.assign({}, responsiveTileOptions, {
+      pane:"satellite-labels",
+      minZoom:13,
+      maxZoom:20,
+      maxNativeZoom:18,
+      opacity:0.96,
+      keepBuffer:0,
+      interactive:false,
+      attribution:"&copy; Esri"
+    })
   );
 
   const tileOsm = L.tileLayer(
@@ -210,7 +364,7 @@
       "/tiles/osm/{z}/{x}/{y}.png",
       "compmap:///osm/{z}/{x}/{y}.png"
     ),
-    { maxZoom:19, attribution:"&copy; OpenStreetMap contributors" }
+    Object.assign({}, responsiveTileOptions, { maxZoom:20, maxNativeZoom:19, attribution:"&copy; OpenStreetMap contributors" })
   );
 
   // Fallback local para quando a rede/proxy bloquear provedores remotos.
@@ -237,16 +391,22 @@
   const baseLayers = {
     "Mapa Claro": tileLight,
     "Mapa Escuro": tileDark,
+    ...(tileMapboxSatellite ? {[MAPBOX_LAYER_NAME]: tileMapboxSatellite} : {}),
     "Satelite": tileSat,
     "OSM": tileOsm,
     "Offline (grade)": tileOffline
   };
 
-  const BASE_FALLBACK_ORDER = ["Mapa Claro", "OSM", "Mapa Escuro", "Satelite", "Offline (grade)"];
+  const BASE_FALLBACK_ORDER = tileMapboxSatellite
+    ? ["Mapa Claro", "OSM", "Mapa Escuro", MAPBOX_LAYER_NAME, "Satelite", "Offline (grade)"]
+    : ["Mapa Claro", "OSM", "Mapa Escuro", "Satelite", "Offline (grade)"];
   let activeBaseLayerName = "Mapa Claro";
   let activeLayerTileErrors = 0;
   let activeLayerTileLoads = 0;
   let suppressLayerChangePersistence = false;
+  let satelliteLabelsEnabled = false;
+  const satelliteLabelsLayer = L.layerGroup([tileSatTransportation, tileSatPlaces]);
+  let satelliteLabelsNavigationTimer = null;
 
   function resetBaseLayerCounters() {
     activeLayerTileErrors = 0;
@@ -284,7 +444,11 @@
       activeLayerTileLoads += 1;
       if (activeLayerTileLoads === 1) {
         console.info("[MAP TILE OK]", name);
-        setStatus(`Mapa base carregado: ${name}`);
+        setStatus(
+          name === MAPBOX_LAYER_NAME
+            ? mapboxStatusMessage(`Mapa base carregado: ${name}`)
+            : `Mapa base carregado: ${name}`
+        );
       }
     });
     layer.on("tileerror", function(evt) {
@@ -300,8 +464,42 @@
 
   Object.entries(baseLayers).forEach(([name, layer]) => bindBaseLayerEvents(name, layer));
 
+  function normalizeBaseLayerName(name) {
+    const raw = String(name || "");
+    const compact = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (compact === "mapbox satelite") return MAPBOX_LAYER_NAME;
+    if (compact.startsWith("sat") && compact.endsWith("lite")) return "Satelite";
+    return raw;
+  }
+
+  function syncSatelliteLabels() {
+    const shouldShow = activeBaseLayerName === "Satelite" && satelliteLabelsEnabled;
+    if (shouldShow && !map.hasLayer(satelliteLabelsLayer)) {
+      satelliteLabelsLayer.addTo(map);
+    } else if (!shouldShow && map.hasLayer(satelliteLabelsLayer)) {
+      map.removeLayer(satelliteLabelsLayer);
+    }
+    satelliteLabelsPane.style.visibility = shouldShow ? "visible" : "hidden";
+  }
+
+  function setSatelliteLabels(enabled) {
+    satelliteLabelsEnabled = !!enabled;
+    syncSatelliteLabels();
+    bringOverlaysToFront();
+  }
+
+  function setSatelliteLabelsNavigationVisibility(visible) {
+    if (!satelliteLabelsEnabled || activeBaseLayerName !== "Satelite") return;
+    satelliteLabelsPane.style.visibility = visible ? "visible" : "hidden";
+  }
+
   // Objeto para conter as sobreposições (Overlays)
-  const overlayLayers = {};
+  const overlayLayers = {
+    "Rótulos do satélite": satelliteLabelsLayer
+  };
 
   // Inicializa o controle com o seletor de microbacias habilitado futuramente
   const layerControl = L.control.layers(baseLayers, overlayLayers, { position:"topright" }).addTo(map);
@@ -343,15 +541,19 @@
      CONTROLE CAMADA ATIVA
   ============================ */
   function setBaseLayer(name, persistPreference = true){
-    if (name === "Satélite") {
+    name = normalizeBaseLayerName(name);
+    if (name === MAPBOX_LAYER_NAME && mapboxLimitReached()) {
+      setStatus(mapboxStatusMessage("Cota Mapbox atingida. Usando Satelite para evitar novas requisicoes."));
       name = "Satelite";
+      persistPreference = false;
     }
     if (!baseLayers[name]) return;
     const alreadyActive = activeBaseLayerName === name && map.hasLayer(baseLayers[name]);
     if (alreadyActive) {
-      if (persistPreference && bridge && bridge.onLayerChanged) {
+      if (persistPreference && name !== MAPBOX_LAYER_NAME && bridge && bridge.onLayerChanged) {
         bridge.onLayerChanged(name);
       }
+      syncSatelliteLabels();
       bringOverlaysToFront();
       return;
     }
@@ -362,8 +564,13 @@
     resetBaseLayerCounters();
     suppressLayerChangePersistence = !persistPreference;
     console.info("[MAP BASE] carregando", name);
-    setStatus(`Carregando mapa base: ${name}...`);
+    setStatus(
+      name === MAPBOX_LAYER_NAME
+        ? mapboxStatusMessage(`Carregando mapa base: ${name}...`)
+        : `Carregando mapa base: ${name}...`
+    );
     baseLayers[name].addTo(map);
+    syncSatelliteLabels();
     bringOverlaysToFront();
   }
 
@@ -513,22 +720,60 @@
   /* ===========================
      QWEBCHANNEL
   ============================ */
-  let bridge = null;
-
   new QWebChannel(qt.webChannelTransport, function(channel){
     bridge = channel.objects.bridge;
+    flushMapboxTileReport();
   });
 
   map.on("baselayerchange", function(e){
+    activeBaseLayerName = normalizeBaseLayerName(e && e.name ? e.name : activeBaseLayerName);
+    resetBaseLayerCounters();
+    if (activeBaseLayerName === MAPBOX_LAYER_NAME && mapboxLimitReached()) {
+      setBaseLayer("Satelite", false);
+      return;
+    }
+    syncSatelliteLabels();
     if (suppressLayerChangePersistence) {
       suppressLayerChangePersistence = false;
       bringOverlaysToFront();
       return;
     }
-    if(bridge && bridge.onLayerChanged){
+    if(activeBaseLayerName !== MAPBOX_LAYER_NAME && bridge && bridge.onLayerChanged){
       bridge.onLayerChanged(e.name);
     }
     bringOverlaysToFront();
+  });
+
+  map.on("overlayadd", function(e){
+    if (e && e.layer === satelliteLabelsLayer) {
+      satelliteLabelsEnabled = true;
+      syncSatelliteLabels();
+      bringOverlaysToFront();
+    }
+  });
+
+  map.on("overlayremove", function(e){
+    if (e && e.layer === satelliteLabelsLayer) {
+      satelliteLabelsEnabled = false;
+      syncSatelliteLabels();
+    }
+  });
+
+  map.on("movestart zoomstart", function(){
+    if (satelliteLabelsNavigationTimer) {
+      clearTimeout(satelliteLabelsNavigationTimer);
+      satelliteLabelsNavigationTimer = null;
+    }
+    setSatelliteLabelsNavigationVisibility(false);
+  });
+
+  map.on("moveend zoomend", function(){
+    if (satelliteLabelsNavigationTimer) clearTimeout(satelliteLabelsNavigationTimer);
+    satelliteLabelsNavigationTimer = setTimeout(function(){
+      syncSatelliteLabels();
+      setSatelliteLabelsNavigationVisibility(true);
+      bringOverlaysToFront();
+    }, 180);
   });
 
   map.on("click", function(e){
@@ -549,6 +794,7 @@
   ============================ */
   window.setTheme = setTheme;
   window.setBaseLayer = setBaseLayer;
+  window.setSatelliteLabels = setSatelliteLabels;
   window.setHeatmap = setHeatmap;
   window.setStatus = setStatus;
   window.setMarker = setMarker;
@@ -558,5 +804,3 @@
 </script>
 </body>
 </html>
-
-

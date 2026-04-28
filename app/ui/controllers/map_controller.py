@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QLineEdit,
     QMessageBox,
     QSizePolicy,
     QTableView,
@@ -22,7 +23,25 @@ from app.application.use_cases.map_interactions import MapInteractionsUseCases
 from app.application.use_cases.map_layer_operations import MapLayerOperationsUseCases
 from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.compensacao import Compensacao
-from app.services.geocode_service import geocode_address_arcgis
+from app.services.geocode_service import (
+    GeocodeCandidate,
+    confirm_geocode_candidate,
+    geocode_address_candidates,
+    geocode_address_arcgis,
+)
+from app.services.mapbox_config import (
+    DEFAULT_MAPBOX_MONTHLY_TILE_LIMIT,
+    MAPBOX_LAYER_NAME,
+    MAPBOX_TOKEN_ENV_VAR,
+    redact_mapbox_access_token,
+    read_mapbox_usage,
+    record_mapbox_tile_requests,
+    resolve_mapbox_access_token,
+    resolve_mapbox_monthly_tile_limit,
+    save_mapbox_access_token,
+    save_mapbox_monthly_tile_limit,
+)
+from app.services.map_engine import resolve_map_engine_resource
 from app.services.geocode_update_service import (
     build_cached_microbacia_finder,
 )
@@ -33,7 +52,7 @@ from app.services.plantio_service import (
 from app.ui.components.dialogs import MapFullScreenDialog, TableFullScreenDialog
 from app.ui.components.job_specs import BackgroundJobSpec, build_disconnect_callback
 from app.ui.components.timer_utils import schedule_owned_single_shot
-from app.ui.components.ui_utils import msg_confirm, resource_path
+from app.ui.components.ui_utils import msg_confirm
 from app.ui.components.workers import GeocodeWorker
 from app.ui.controllers.window_layout_support import apply_widget_responsive_layout
 from app.utils.logger import get_logger
@@ -42,6 +61,7 @@ from app.utils.logger import get_logger
 logger = get_logger("UI.Map")
 
 BATCH_GEOCODE_JOB_NAME = "batch_geocode"
+_DEFAULT_GEOCODE_ADDRESS_ARCGIS = geocode_address_arcgis
 
 
 class MapController:
@@ -99,6 +119,14 @@ class MapController:
             return False
         return bool(getattr(data_tab, "web", None) is not None)
 
+    @staticmethod
+    def _geocode_single(address: str):
+        if geocode_address_arcgis is not _DEFAULT_GEOCODE_ADDRESS_ARCGIS:
+            return geocode_address_arcgis(address)
+        from app.services.geocode_service import geocode_address
+
+        return geocode_address(address)
+
     def update_address_search_enabled(self):
         has_end = bool(self.window.data_tab.in_end.text().strip())
         has_plantio = bool(self._current_form_plantios() or self.window.data_tab.in_end_plantio.text().strip())
@@ -147,7 +175,7 @@ class MapController:
             self.window.statusBar().showMessage(
                 self.map_use_cases.build_geocoding_status(target_address, purpose="street_view")
             )
-            coords = geocode_address_arcgis(target_address)
+            coords = self._geocode_single(target_address)
             if coords:
                 lat, lon = coords
                 self.set_map_marker(lat, lon)
@@ -253,6 +281,77 @@ class MapController:
         command = self.map_rendering_use_cases.build_status_command(message)
         self.run_map_js(command.script, command.context)
 
+    def configure_mapbox(self):
+        current_token = resolve_mapbox_access_token()
+        current_hint = redact_mapbox_access_token(current_token) or "nenhum token salvo"
+        token, ok = QInputDialog.getText(
+            self.window,
+            "Configurar Mapbox",
+            (
+                "Cole o access token publico do Mapbox para habilitar a camada "
+                "Mapbox Satelite no mapa.\n\n"
+                f"Token atual: {current_hint}\n"
+                f"Tambem e possivel usar a variavel {MAPBOX_TOKEN_ENV_VAR}."
+            ),
+            QLineEdit.Password,
+            current_token,
+        )
+        if not ok:
+            return
+
+        if str(token or "").strip():
+            current_limit = resolve_mapbox_monthly_tile_limit() or DEFAULT_MAPBOX_MONTHLY_TILE_LIMIT
+            monthly_limit, limit_ok = QInputDialog.getInt(
+                self.window,
+                "Cota mensal Mapbox",
+                (
+                    "Defina uma cota mensal local de tiles Mapbox.\n"
+                    "Sugestao segura para teste: 5000 tiles/mes."
+                ),
+                int(current_limit),
+                100,
+                200000,
+                500,
+            )
+            if not limit_ok:
+                return
+            path = save_mapbox_access_token(token)
+            usage = save_mapbox_monthly_tile_limit(monthly_limit)
+            message = (
+                "Token do Mapbox salvo. O mapa sera recarregado e a camada "
+                f"'{MAPBOX_LAYER_NAME}' ficara disponivel no seletor de camadas.\n\n"
+                f"Cota local: {usage.tiles_used}/{usage.monthly_limit} tiles em {usage.month}."
+            )
+        else:
+            path = save_mapbox_access_token(token)
+            message = "Token local do Mapbox removido. O mapa sera recarregado sem a camada Mapbox."
+        QMessageBox.information(self.window, "Configurar Mapbox", f"{message}\n\nArquivo local: {path}")
+        self.reload_map()
+
+    def record_mapbox_tile_requests(self, count: int):
+        usage = record_mapbox_tile_requests(count)
+        if usage.limit_reached:
+            self.window.statusBar().showMessage(
+                f"Cota Mapbox atingida: {usage.tiles_used}/{usage.monthly_limit} tiles em {usage.month}."
+            )
+        return usage
+
+    def current_mapbox_usage(self):
+        return read_mapbox_usage()
+
+    def reload_map(self):
+        data_tab = getattr(self.window, "data_tab", None)
+        if data_tab is None:
+            return
+        if not getattr(data_tab, "has_map_web_view", lambda: False)():
+            return
+        try:
+            data_tab._map_loaded = False
+            data_tab.load_map()
+        except Exception as exc:
+            logger.error(f"Falha ao recarregar mapa: {exc}", exc_info=True)
+            QMessageBox.warning(self.window, "Mapa", f"Nao foi possivel recarregar o mapa:\n{exc}")
+
     def search_on_map(self):
         addr = self.window.data_tab.in_end.text().strip()
         if not addr:
@@ -288,9 +387,74 @@ class MapController:
         )
         self.perform_geocode(target_address)
 
+    def _search_precise_geocode_candidates(self, address: str) -> list[GeocodeCandidate]:
+        # Testes e integracoes antigas ainda substituem a funcao simples diretamente.
+        if geocode_address_arcgis is not _DEFAULT_GEOCODE_ADDRESS_ARCGIS:
+            coords = geocode_address_arcgis(address)
+            if not coords:
+                return []
+            lat, lon = coords
+            return [
+                GeocodeCandidate(
+                    lat=float(lat),
+                    lon=float(lon),
+                    confidence=100.0,
+                    match_addr="Resultado localizado",
+                    query=str(address or "").strip(),
+                    source="legacy",
+                )
+            ]
+        return geocode_address_candidates(address, max_candidates=5)
+
+    @staticmethod
+    def _candidate_is_decisive(candidates: list[GeocodeCandidate]) -> bool:
+        if not candidates:
+            return False
+        if len(candidates) == 1:
+            return True
+        top = candidates[0]
+        runner_up = candidates[1]
+        if top.source in {"cache", "map_link", "legacy"}:
+            return True
+        if top.confidence >= 94:
+            return True
+        return top.confidence >= 86 and (top.confidence - runner_up.confidence) >= 8
+
+    def _choose_geocode_candidate(self, address: str, candidates: list[GeocodeCandidate]) -> GeocodeCandidate | None:
+        if not candidates:
+            return None
+        if self._candidate_is_decisive(candidates):
+            return candidates[0]
+
+        labels: list[str] = []
+        label_to_candidate: dict[str, GeocodeCandidate] = {}
+        for index, candidate in enumerate(candidates, start=1):
+            label = f"{index}. {candidate.choice_label()}"
+            labels.append(label)
+            label_to_candidate[label] = candidate
+
+        selected, ok = QInputDialog.getItem(
+            self.window,
+            "Confirmar endereco",
+            (
+                "Encontrei mais de uma localizacao possivel para este endereco.\n"
+                "Escolha a opcao correta para salvar essa decisao nas proximas buscas."
+            ),
+            labels,
+            0,
+            False,
+        )
+        if not ok or not selected:
+            self.window.statusBar().showMessage("Busca de endereco cancelada")
+            return None
+        return label_to_candidate.get(selected)
+
     def perform_geocode(self, address: str):
-        coords = geocode_address_arcgis(address)
-        if coords:
+        candidates = self._search_precise_geocode_candidates(address)
+        selected_candidate = self._choose_geocode_candidate(address, candidates)
+        if selected_candidate:
+            coords = selected_candidate.coords
+            confirm_geocode_candidate(address, selected_candidate)
             self.set_map_marker(coords[0], coords[1])
             if self.window.gis:
                 micro = self.window.gis.find_microbacia(*coords)
@@ -305,8 +469,15 @@ class MapController:
                 resolved_micro = self.window.shell_controller.resolve_microbacia_display_name(presentation.microbacia)
                 self.window.shell_controller.select_form_microbacia(resolved_micro)
                 self.highlight_microbacia(resolved_micro)
-            self.window.statusBar().showMessage(presentation.status_message)
+            detail = selected_candidate.title
+            status_message = presentation.status_message
+            if detail and selected_candidate.source not in {"legacy"}:
+                status_message = f"{status_message} | {detail}"
+            self.window.statusBar().showMessage(status_message)
             self.window._update_form_action_buttons()
+            return
+
+        if candidates:
             return
 
         presentation = self.map_use_cases.build_geocode_presentation(address=address, coords=None, microbacia="")
@@ -314,10 +485,10 @@ class MapController:
         self.window.statusBar().showMessage(presentation.status_message)
 
     def open_map_fullscreen(self):
-        path = resource_path("app", "ui", "map_leaflet.html")
+        map_resource = resolve_map_engine_resource()
         dialog = MapFullScreenDialog(
             self.window,
-            path,
+            map_resource.html_path,
             self.window.gis.to_geojson_obj() if self.window.gis else None,
             "dark" if self.window.is_dark_mode else "light",
             self.window.last_marker_coords,

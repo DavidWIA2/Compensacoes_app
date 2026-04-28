@@ -20,5 +20,9 @@ tmp_tcra_debug.db*
 data/audit/
 data/state/
 data/geocode_cache.json
+data/manual_backups/
+data/tiles_cache/
+data/mapbox_token.txt
+data/mapbox_usage.json
 .env.supabase
 supabase/.temp/

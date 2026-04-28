@@ -20,6 +20,8 @@ class TileProxyService:
         "osm": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "carto_light": "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
         "carto_dark": "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "esri_places": "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        "esri_transportation": "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         "satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     }
 
@@ -67,6 +69,8 @@ class TileProxyService:
         return None
 
     def _write_to_disk(self, cache_key: str, data: bytes, content_type: str):
+        if not self._should_persist_to_disk(cache_key):
+            return
         path = self._get_disk_cache_path(cache_key)
         try:
             with open(path, "wb") as f:
@@ -74,6 +78,11 @@ class TileProxyService:
                 f.write(data)
         except Exception:
             pass
+
+    @staticmethod
+    def _should_persist_to_disk(cache_key: str) -> bool:
+        host = urlparse(str(cache_key or "")).netloc.lower()
+        return host not in {"tile.openstreetmap.org", "a.tile.openstreetmap.org", "b.tile.openstreetmap.org", "c.tile.openstreetmap.org"}
 
     def start(self) -> str:
         if self._server is not None:

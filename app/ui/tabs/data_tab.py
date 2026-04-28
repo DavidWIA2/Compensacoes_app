@@ -1,7 +1,7 @@
 ﻿import os
 from typing import List, Dict, Optional
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QUrlQuery
 from PySide6.QtGui import QIntValidator, QDoubleValidator, QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTableView, QHeaderView,
@@ -11,6 +11,9 @@ from PySide6.QtWidgets import (
 )
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
+from app.config import MAP_DEFAULT_BASE_LAYER
+from app.services.map_engine import resolve_map_engine_resource
+from app.services.mapbox_config import read_mapbox_usage, resolve_mapbox_access_token
 from app.services.records_service import display_tipo_value
 from app.ui.components.widgets import (
     CheckableComboBox,
@@ -22,7 +25,6 @@ from app.ui.components.widgets import (
 )
 from app.ui.components.model import CompensacoesTableModel
 from app.ui.components.timer_utils import schedule_owned_single_shot
-from app.ui.components.ui_utils import resource_path
 from app.ui.controllers.data_controller_support import (
     COMPENSACOES_QUICK_FILTER_ALL,
     COMPENSACOES_QUICK_FILTER_COM_PLANTIO,
@@ -97,6 +99,8 @@ class DataTab(QWidget):
         self.main_window = parent
         self.sf = getattr(parent, "scale_factor", 1.0)
         self._map_loaded = False
+        self._map_engine = ""
+        self._map_fallback_loaded = False
         self._web_view_initialized = False
         self._locked_table_height: Optional[int] = None
         self._locked_splitter_height: Optional[int] = None
@@ -311,6 +315,23 @@ class DataTab(QWidget):
         actions_row = quick_filters_layout
         self.actions_row = actions_row
         actions_row.addStretch(1)
+        self.lbl_form_feedback = QLabel("")
+        self.lbl_form_feedback.setProperty("role", "helper")
+        self.lbl_form_feedback.setWordWrap(False)
+        self.lbl_form_feedback.setMinimumWidth(max(int(300 * self.sf), 260))
+        self.lbl_form_feedback.setMaximumWidth(max(int(460 * self.sf), 340))
+        self.lbl_form_feedback.setMaximumHeight(max(int(24 * self.sf), 22))
+        self.lbl_form_feedback.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.lbl_form_feedback.setVisible(False)
+        self.lbl_form_geocode = QLabel("")
+        self.lbl_form_geocode.setProperty("role", "status-note")
+        self.lbl_form_geocode.setWordWrap(False)
+        self.lbl_form_geocode.setMinimumWidth(0)
+        self.lbl_form_geocode.setMaximumWidth(int(420 * self.sf))
+        self.lbl_form_geocode.setMaximumHeight(max(int(24 * self.sf), 22))
+        self.lbl_form_geocode.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.lbl_form_geocode.setVisible(False)
+        actions_row.addWidget(self.lbl_form_feedback, 0)
         self.lbl_selection_summary = QLabel("Nenhum registro selecionado")
         self.lbl_selection_summary.setObjectName("FormStateLabel")
         self.lbl_selection_summary.setWordWrap(False)
@@ -394,16 +415,6 @@ class DataTab(QWidget):
         self.lbl_form_context.setProperty("role", "helper")
         self.lbl_form_context.setWordWrap(True)
         r_lay.addWidget(self.lbl_form_context, 0)
-        self.lbl_form_feedback = QLabel("")
-        self.lbl_form_feedback.setProperty("role", "helper")
-        self.lbl_form_feedback.setWordWrap(True)
-        self.lbl_form_feedback.setVisible(False)
-        r_lay.addWidget(self.lbl_form_feedback, 0)
-        self.lbl_form_geocode = QLabel("")
-        self.lbl_form_geocode.setProperty("role", "status-note")
-        self.lbl_form_geocode.setWordWrap(True)
-        self.lbl_form_geocode.setVisible(False)
-        r_lay.addWidget(self.lbl_form_geocode, 0)
         self.form_group = self._create_form_group()
         self._update_form_group_height()
         r_lay.addWidget(self.form_group, 0)
@@ -542,12 +553,14 @@ class DataTab(QWidget):
         self.bridge = MapBridge(
             getattr(self.main_window, "_on_map_click", None) if self.main_window else None,
             getattr(self.main_window, "save_map_layer_preference", None) if self.main_window else None,
+            getattr(self.main_window, "_on_mapbox_tiles_requested", None) if self.main_window else None,
         )
         self.channel.registerObject("bridge", self.bridge)
         web.page().setWebChannel(self.channel)
 
         if self.main_window is not None and hasattr(self.main_window, "_on_map_loaded"):
             web.loadFinished.connect(self.main_window._on_map_loaded)
+        web.loadFinished.connect(self._handle_map_load_finished)
         return web
 
     def ensure_map_web_view(self):
@@ -953,8 +966,28 @@ class DataTab(QWidget):
         )
         header.resizeSection(column_index, target_width)
 
-    def load_map(self):
-        map_html = resource_path("app", "ui", "map_leaflet.html")
+    def _build_map_url(self, map_html: str, *, fallback_html: str = "", engine: str = "") -> QUrl:
+        url = QUrl.fromLocalFile(map_html)
+        query = QUrlQuery()
+        query.addQueryItem("mapEngine", str(engine or ""))
+        query.addQueryItem("defaultBaseLayer", MAP_DEFAULT_BASE_LAYER)
+        if fallback_html:
+            query.addQueryItem("fallbackUrl", QUrl.fromLocalFile(fallback_html).toString())
+        if engine == "leaflet":
+            query.addQueryItem("tileScheme", "compmap")
+            mapbox_token = resolve_mapbox_access_token()
+            if mapbox_token:
+                mapbox_usage = read_mapbox_usage()
+                query.addQueryItem("mapboxToken", mapbox_token)
+                query.addQueryItem("mapboxUsageMonth", mapbox_usage.month)
+                query.addQueryItem("mapboxTileUsed", str(mapbox_usage.tiles_used))
+                query.addQueryItem("mapboxTileLimit", str(mapbox_usage.monthly_limit))
+        url.setQuery(query)
+        return url
+
+    def _load_map_engine(self, engine: str | None = None):
+        resource = resolve_map_engine_resource(engine)
+        map_html = resource.html_path
         if not os.path.exists(map_html):
             if getattr(self, "map_placeholder_label", None) is not None:
                 self.map_placeholder_label.setText(
@@ -963,13 +996,26 @@ class DataTab(QWidget):
             return
 
         web = self.ensure_map_web_view()
-        if self._map_loaded:
-            return
-
-        url = QUrl.fromLocalFile(map_html)
-        url.setQuery("tileScheme=compmap")
+        self._map_engine = resource.engine
+        url = self._build_map_url(
+            map_html,
+            fallback_html=resource.fallback_html_path,
+            engine=resource.engine,
+        )
         web.setUrl(url)
         self._map_loaded = True
+
+    def _handle_map_load_finished(self, ok: bool):
+        if ok or self._map_fallback_loaded or self._map_engine == "leaflet":
+            return
+        self._map_fallback_loaded = True
+        self._map_loaded = False
+        self._load_map_engine("leaflet")
+
+    def load_map(self):
+        if self._map_loaded:
+            return
+        self._load_map_engine()
 
     def _create_totals_group(self):
         g = QGroupBox("Indicadores do recorte")

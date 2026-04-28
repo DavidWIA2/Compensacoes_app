@@ -3,6 +3,7 @@ from app.services.records_service import (
     build_record_search_index,
     compute_metrics,
     display_tipo_value,
+    extract_year,
     filter_records,
     storage_tipo_value,
     to_float,
@@ -37,6 +38,11 @@ def test_unique_non_empty_deduplicates_case_insensitive():
 def test_to_float_handles_comma_and_invalid_values():
     assert to_float("2,5") == 2.5
     assert to_float("abc") == 0.0
+
+
+def test_extract_year_prioritizes_year_after_slash_with_origin_suffix():
+    assert extract_year("3529/2024 - SAAE") == "2024"
+    assert extract_year("3529/2024-SAAE") == "2024"
 
 
 def test_tipo_helpers_normalize_legacy_values():

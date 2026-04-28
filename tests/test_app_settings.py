@@ -25,7 +25,7 @@ def test_app_settings_round_trip_and_defaults():
     assert settings.legacy_workbook_path() == ""
     assert settings.database_bootstrap_source_path() == ""
     assert settings.last_export_dir() == ""
-    assert settings.map_layer() == "Mapa Claro"
+    assert settings.map_layer() == "Satelite"
     assert settings.sort_state() == (-1, 0)
     assert settings.window_geometry() is None
     assert settings.operation_history_filter_state() == {}

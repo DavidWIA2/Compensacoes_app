@@ -190,6 +190,15 @@ def test_form_controller_support_builds_validation_presentation_for_preventive_f
     assert presentation.field_feedback["microbacia"].severity == "info"
 
 
+def test_form_validation_accepts_process_origin_suffix_after_year():
+    presentation = build_form_validation_presentation(
+        record=make_record(oficio_processo="3529/2024 - SAAE"),
+        current_year=2026,
+    )
+
+    assert "oficio_processo" not in presentation.field_feedback
+
+
 def test_form_controller_support_resolves_identity_and_audit_baseline():
     selected = make_record(uid="u-20", excel_row=4, endereco="Original")
     authoritative = make_record(uid="u-20", excel_row=99, endereco="Atualizado")

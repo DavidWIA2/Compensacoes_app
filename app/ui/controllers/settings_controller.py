@@ -3,6 +3,7 @@ from typing import List
 
 from PySide6.QtCore import Qt
 
+from app.services.mapbox_config import MAPBOX_LAYER_NAME
 from app.ui.components.timer_utils import schedule_owned_single_shot
 from app.ui.controllers.settings_support import (
     build_loaded_window_settings_state,
@@ -186,10 +187,14 @@ class SettingsController:
 
     def current_map_layer(self) -> str:
         if hasattr(self.window.settings, "map_layer"):
-            return self.window.settings.map_layer()
-        return str(self._value("map_layer", "Mapa Claro") or "Mapa Claro")
+            layer_name = self.window.settings.map_layer()
+        else:
+            layer_name = str(self._value("map_layer", "Mapa Claro") or "Mapa Claro")
+        return "Mapa Claro" if layer_name == MAPBOX_LAYER_NAME else str(layer_name or "Mapa Claro")
 
     def save_map_layer_preference(self, layer_name: str):
+        if str(layer_name or "") == MAPBOX_LAYER_NAME:
+            return
         if hasattr(self.window.settings, "set_map_layer"):
             self.window.settings.set_map_layer(layer_name)
         else:

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import Dict, List, Optional
-from PySide6.QtCore import Qt, QUrl, QTimer, QDate
+from PySide6.QtCore import Qt, QUrl, QTimer, QDate, QUrlQuery
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, 
@@ -34,6 +34,7 @@ from app.application.use_cases.table_fullscreen_layout import (
 from app.application.use_cases.map_rendering import MapRenderingUseCases
 from app.models.display_columns import display_column_index
 from app.services.tcra_excel_service import TcraWorkbookAnalysis
+from app.services.tile_proxy_service import TileProxyService
 from app.services.records_service import STANDARD_TIPO_OPTIONS
 from app.services.tcra_report_service import TcraPdfExportOptions
 from app.services.tcra_records_service import (
@@ -93,7 +94,10 @@ from app.ui.components.table_fullscreen_dialog_support import (
     restore_fullscreen_table_layout,
 )
 from app.ui.components.widgets import CheckableComboBox, ClickableComboBox, MapBridge, DebugPage
-from app.services.geocode_service import geocode_address_arcgis
+from app.services.geocode_service import geocode_address
+from app.services.mapbox_config import read_mapbox_usage, resolve_mapbox_access_token
+from app.services.map_engine import resolve_map_engine_resource
+from app.config import MAP_DEFAULT_BASE_LAYER
 from app.services.plantio_service import clone_plantios
 from app.utils.logger import get_logger
 
@@ -1425,6 +1429,37 @@ class PlantiosDialog(QDialog):
         self.accept()
 
 class MapFullScreenDialog(QDialog):
+    @staticmethod
+    def _build_map_url(html_path, tile_proxy=None, *, engine: str = "", fallback_html_path: str = "") -> QUrl:
+        url = QUrl.fromLocalFile(str(html_path))
+        query = QUrlQuery()
+        normalized_engine = str(engine or "").strip().lower()
+        if not normalized_engine:
+            normalized_engine = "maplibre" if str(html_path).lower().endswith("map_maplibre.html") else "leaflet"
+        query.addQueryItem("mapEngine", normalized_engine)
+        query.addQueryItem("defaultBaseLayer", MAP_DEFAULT_BASE_LAYER)
+        if fallback_html_path:
+            query.addQueryItem("fallbackUrl", QUrl.fromLocalFile(str(fallback_html_path)).toString())
+        proxy_base = ""
+        if tile_proxy is not None:
+            try:
+                proxy_base = str(tile_proxy.start() or "").strip()
+            except Exception as exc:
+                map_dialog_logger.warning("Falha ao iniciar proxy de tiles da tela cheia: %s", exc)
+        if proxy_base:
+            query.addQueryItem("tileProxy", proxy_base)
+        elif normalized_engine == "leaflet":
+            query.addQueryItem("tileScheme", "compmap")
+        mapbox_token = resolve_mapbox_access_token()
+        if mapbox_token and normalized_engine == "leaflet":
+            mapbox_usage = read_mapbox_usage()
+            query.addQueryItem("mapboxToken", mapbox_token)
+            query.addQueryItem("mapboxUsageMonth", mapbox_usage.month)
+            query.addQueryItem("mapboxTileUsed", str(mapbox_usage.tiles_used))
+            query.addQueryItem("mapboxTileLimit", str(mapbox_usage.monthly_limit))
+        url.setQuery(query)
+        return url
+
     def __init__(self, parent, html_path, geojson_data, theme, marker_coords, gis_service, current_layer, heatmap_points):
         super().__init__(parent)
         self.setWindowFlags(Qt.Window)
@@ -1438,6 +1473,7 @@ class MapFullScreenDialog(QDialog):
         self.heatmap_points = heatmap_points
         self.parent_window = parent
         self._syncing = False
+        self._tile_proxy = TileProxyService(cache_size=1800, startup_wait_sec=0.8)
         self.map_rendering_use_cases = MapRenderingUseCases()
         self.map_interactions_use_cases = MapInteractionsUseCases()
         self.fullscreen_use_cases = MapFullscreenOperationsUseCases(
@@ -1501,12 +1537,21 @@ class MapFullScreenDialog(QDialog):
         s.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
         
         self.channel = QWebChannel(self.web.page())
-        self.bridge = MapBridge(self._on_map_click_fs, self._on_layer_changed_fs)
+        self.bridge = MapBridge(
+            self._on_map_click_fs,
+            self._on_layer_changed_fs,
+            getattr(self.parent_window, "_on_mapbox_tiles_requested", None),
+        )
         self.channel.registerObject("bridge", self.bridge)
         self.web.page().setWebChannel(self.channel)
         
-        url = QUrl.fromLocalFile(str(html_path))
-        url.setQuery("tileScheme=compmap")
+        map_resource = resolve_map_engine_resource()
+        url = self._build_map_url(
+            html_path,
+            self._tile_proxy,
+            engine=map_resource.engine if str(html_path) == str(map_resource.html_path) else "",
+            fallback_html_path=map_resource.fallback_html_path,
+        )
         self.web.setUrl(url)
         self.web.loadFinished.connect(self._on_loaded)
         layout.addWidget(self.web, 1)
@@ -1521,6 +1566,14 @@ class MapFullScreenDialog(QDialog):
         self.combo_fs_heatmap.currentTextChanged.connect(self._sync_heatmap_to_main)
         
         self.showMaximized()
+
+    def closeEvent(self, event):
+        try:
+            tile_proxy = getattr(self, "_tile_proxy", None)
+            if tile_proxy is not None:
+                tile_proxy.stop()
+        finally:
+            super().closeEvent(event)
 
     def _sync_heatmap_to_main(self):
         if self._syncing: return
@@ -1586,7 +1639,7 @@ class MapFullScreenDialog(QDialog):
         addr = self.in_search.text().strip()
         result = self.fullscreen_use_cases.search_address(
             address=addr,
-            geocode_address=geocode_address_arcgis,
+            geocode_address=geocode_address,
         )
         if result.command is not None:
             self._run_map_js(result.command.script, result.command.context)

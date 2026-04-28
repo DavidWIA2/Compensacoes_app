@@ -8,6 +8,7 @@ from PySide6.QtGui import QAction, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
+    QCompleter,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -37,6 +38,7 @@ from app.services.access_service import AccessAuthError
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, DISPLAY_COLUMN_LABELS
 from app.services.records_service import (
     STANDARD_TIPO_OPTIONS,
+    TIPO_ELETRONICO,
     TIPO_OFICIO,
     TIPO_NULO,
     compute_metrics,
@@ -1121,6 +1123,12 @@ class WindowShellController:
 
         file_menu.addSeparator()
 
+        self.window.action_configure_mapbox = QAction("Configurar Mapbox", self.window)
+        self.window.action_configure_mapbox.triggered.connect(build_command("configure_mapbox"))
+        file_menu.addAction(self.window.action_configure_mapbox)
+
+        file_menu.addSeparator()
+
         self.window.action_change_password = QAction("Alterar senha", self.window)
         self.window.action_change_password.triggered.connect(build_command("change_password"))
         self.window.action_change_password.setEnabled(False)
@@ -1551,6 +1559,38 @@ class WindowShellController:
 
         self.window.data_tab.eletronico_layout.addStretch(1)
         self.refresh_tipo_controls()
+        self.apply_address_completer_from_records()
+
+    def apply_address_completer_from_records(self) -> None:
+        data_tab = getattr(self.window, "data_tab", None)
+        if data_tab is None or not hasattr(data_tab, "in_end"):
+            return
+
+        suggestions: list[str] = []
+        for record in getattr(self.window, "records", []) or []:
+            for value in (
+                getattr(record, "endereco", ""),
+                getattr(record, "endereco_plantio", ""),
+            ):
+                text = str(value or "").strip()
+                if text:
+                    suggestions.append(text)
+            for plantio in getattr(record, "plantios", []) or []:
+                text = str(getattr(plantio, "endereco", "") or "").strip()
+                if text:
+                    suggestions.append(text)
+
+        suggestions = unique_non_empty(suggestions)
+        if not suggestions:
+            data_tab.in_end.setCompleter(None)
+            return
+
+        completer = QCompleter(suggestions, data_tab.in_end)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        data_tab.in_end.setCompleter(completer)
+        data_tab.address_completer = completer
 
     def refresh_tipo_controls(
         self,
@@ -1580,7 +1620,11 @@ class WindowShellController:
                     if tipo_changed or not normalized_caixa:
                         if caixa.text() != "Ofícios":
                             caixa.setText("Ofícios")
-                elif tipo_changed and normalized_caixa == "OFICIOS":
+                elif selected_tipo == TIPO_ELETRONICO:
+                    if tipo_changed or not normalized_caixa:
+                        if caixa.text() != "Eletrônico":
+                            caixa.setText("Eletrônico")
+                elif tipo_changed and normalized_caixa in {"OFICIOS", "ELETRONICO"}:
                     caixa.clear()
         finally:
             caixa.blockSignals(False)
@@ -1608,13 +1652,36 @@ class WindowShellController:
         for index, is_visible in new_map.items():
             self.window.data_tab.table.setColumnHidden(index, not is_visible)
 
-    def on_table_clicked(self, index):
-        if self.window.selected is not None and self.window.form_controller.has_pending_changes():
-            if not self.window.form_controller.confirm_discard_changes("trocar de registro"):
-                return
+    @staticmethod
+    def _records_refer_to_same_selection(left, right) -> bool:
+        if left is None or right is None:
+            return False
+        left_uid = str(getattr(left, "uid", "") or "").strip()
+        right_uid = str(getattr(right, "uid", "") or "").strip()
+        if left_uid and right_uid:
+            return left_uid == right_uid
+        left_row = int(getattr(left, "excel_row", 0) or 0)
+        right_row = int(getattr(right, "excel_row", 0) or 0)
+        if left_row > 0 and right_row > 0:
+            return left_row == right_row
+        return left is right
 
+    def on_table_clicked(self, index):
         source_index = self.window.data_tab.proxy.mapToSource(index)
         if not source_index.isValid() or source_index.row() >= len(self.window.filtered_records):
+            return
+
+        clicked_record = self.window.filtered_records[source_index.row()]
+        is_current_selection = self._records_refer_to_same_selection(self.window.selected, clicked_record)
+        if self.window.selected is not None and self.window.form_controller.has_pending_changes():
+            action_text = "remover a seleção" if is_current_selection else "trocar de registro"
+            if not self.window.form_controller.confirm_discard_changes(action_text):
+                return
+
+        if is_current_selection:
+            self.window.clear_form(force=True)
+            self.refresh_compensacoes_selection_state()
+            self.window._refresh_window_chrome()
             return
 
         self.window.selected = self._resolve_filtered_record_selection(source_index.row())

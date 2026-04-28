@@ -49,12 +49,16 @@ def test_data_tab_defers_webengine_until_map_load(monkeypatch, qt_app, tmp_path)
 
     _CountingWebView.created_count = 0
     monkeypatch.setattr(data_tab_module, "QWebEngineView", _CountingWebView)
+    (tmp_path / "map_leaflet.html").write_text("<html></html>", encoding="utf-8")
     monkeypatch.setattr(
         data_tab_module,
-        "resource_path",
-        lambda *parts: str(tmp_path / "map_leaflet.html"),
+        "resolve_map_engine_resource",
+        lambda *args, **kwargs: SimpleNamespace(
+            engine="leaflet",
+            html_path=str(tmp_path / "map_leaflet.html"),
+            fallback_html_path=str(tmp_path / "map_leaflet.html"),
+        ),
     )
-    (tmp_path / "map_leaflet.html").write_text("<html></html>", encoding="utf-8")
 
     parent = QtWidgets.QWidget()
     parent.scale_factor = 1.0

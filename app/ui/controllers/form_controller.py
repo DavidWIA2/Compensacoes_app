@@ -22,6 +22,7 @@ from app.services.plantio_service import (
     validate_record_plantios,
 )
 from app.services.records_service import (
+    TIPO_ELETRONICO,
     TIPO_NULO,
     TIPO_OFICIO,
     display_tipo_value,
@@ -413,7 +414,12 @@ class FormController:
             if str(updated.caixa or "").strip().upper() != "ARQUIVADO":
                 if target_tipo == TIPO_OFICIO:
                     updated.caixa = normalize_caixa_value("Ofícios")
-                elif str(updated.caixa or "").strip().upper() == normalize_caixa_value("Ofícios"):
+                elif target_tipo == TIPO_ELETRONICO:
+                    updated.caixa = normalize_caixa_value("Eletrônico")
+                elif str(updated.caixa or "").strip().upper() in {
+                    normalize_caixa_value("Ofícios"),
+                    normalize_caixa_value("Eletrônico"),
+                }:
                     updated.caixa = ""
         elif action == "microbacia":
             resolver = getattr(self.window.shell_controller, "resolve_microbacia_display_name", None)
@@ -603,14 +609,36 @@ class FormController:
         else:
             widget.setToolTip(feedback_message or base_tooltip)
 
+    @staticmethod
+    def _compact_toolbar_feedback_text(
+        *,
+        summary_text: str,
+        geocode_text: str = "",
+        detail_text: str = "",
+        duplicate_text: str = "",
+    ) -> str:
+        parts = [str(summary_text or "").strip()]
+        normalized_geocode = str(geocode_text or detail_text or "").strip()
+        if normalized_geocode:
+            if "geocod" in normalized_geocode.lower():
+                parts.append("Geocodificação: revisar ponto principal")
+            else:
+                parts.append(normalized_geocode)
+        normalized_duplicate = str(duplicate_text or "").strip()
+        if normalized_duplicate:
+            parts.append(normalized_duplicate)
+        return " | ".join(part for part in parts if part)
+
     def _reset_inline_feedback(self) -> None:
         if hasattr(self.window.data_tab, "lbl_form_feedback"):
             self.window.data_tab.lbl_form_feedback.clear()
+            self.window.data_tab.lbl_form_feedback.setToolTip("")
             self.window.data_tab.lbl_form_feedback.setProperty("role", "helper")
             self.window.data_tab.lbl_form_feedback.setVisible(False)
             self._repolish_widget(self.window.data_tab.lbl_form_feedback)
         if hasattr(self.window.data_tab, "lbl_form_geocode"):
             self.window.data_tab.lbl_form_geocode.clear()
+            self.window.data_tab.lbl_form_geocode.setToolTip("")
             self.window.data_tab.lbl_form_geocode.setProperty("role", "status-note")
             self.window.data_tab.lbl_form_geocode.setVisible(False)
             self._repolish_widget(self.window.data_tab.lbl_form_geocode)
@@ -660,15 +688,26 @@ class FormController:
         feedback_lines = [line for line in feedback_lines if line]
 
         if hasattr(self.window.data_tab, "lbl_form_feedback") and feedback_lines:
-            self.window.data_tab.lbl_form_feedback.setText("\n".join(feedback_lines))
+            full_feedback_text = "\n".join(feedback_lines)
+            compact_feedback_text = self._compact_toolbar_feedback_text(
+                summary_text=str(presentation.summary_text or "").strip(),
+                detail_text=detail_text,
+                duplicate_text=duplicate_text,
+                geocode_text=str(presentation.geocode_text or "").strip(),
+            )
+            self.window.data_tab.lbl_form_feedback.setText(compact_feedback_text)
+            self.window.data_tab.lbl_form_feedback.setToolTip(full_feedback_text)
             self.window.data_tab.lbl_form_feedback.setProperty("role", role)
             self.window.data_tab.lbl_form_feedback.setVisible(True)
+            self.window.data_tab.lbl_form_feedback.updateGeometry()
             self._repolish_widget(self.window.data_tab.lbl_form_feedback)
 
         geocode_text = str(presentation.geocode_text or "").strip()
         if hasattr(self.window.data_tab, "lbl_form_geocode") and geocode_text:
-            self.window.data_tab.lbl_form_geocode.setText(geocode_text)
-            self.window.data_tab.lbl_form_geocode.setVisible(True)
+            compact_geocode_text = " ".join(geocode_text.split())
+            self.window.data_tab.lbl_form_geocode.setText(compact_geocode_text)
+            self.window.data_tab.lbl_form_geocode.setToolTip(geocode_text)
+            self.window.data_tab.lbl_form_geocode.setVisible(False)
             self._repolish_widget(self.window.data_tab.lbl_form_geocode)
 
         for field_name, feedback in dict(presentation.field_feedback or {}).items():

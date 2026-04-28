@@ -10,7 +10,7 @@ from PySide6.QtCore import QThread, Signal
 from app import __version__ as APP_VERSION
 from app.config import resolve_update_manifest_url
 from app.services.auto_update_service import AutoUpdateCancelled, prepare_staged_update
-from app.services.geocode_service import geocode_address_arcgis
+from app.services.geocode_service import geocode_address
 from app.services.plantio_service import record_plantio_items
 from app.utils.logger import logger
 
@@ -102,7 +102,7 @@ class GeocodeWorker(QThread):
         self.requestInterruption()
 
     def _geocode_api(self, address: str):
-        return geocode_address_arcgis(address, timeout=8)
+        return geocode_address(address, timeout=8)
 
 
 class UpdaterWorker(QThread):

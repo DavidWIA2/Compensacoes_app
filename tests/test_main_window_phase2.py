@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from app.application.use_cases.local_record_queries import LocalRecordReadStatus
 from app.application.use_cases.persistence_monitoring import PersistenceRecordOverviewReport
 from app.models.compensacao import Compensacao
+from app.ui.controllers.form_controller_support import FormValidationPresentation
 from app.ui.main_window import MainWindow
 from app.ui.tabs.data_tab import DataTab
 
@@ -313,6 +314,38 @@ def test_dirty_form_refreshes_window_chrome(monkeypatch):
     window.close()
 
 
+def test_form_feedback_uses_compact_top_toolbar():
+    window = MainWindow()
+    data_tab = window.data_tab
+
+    assert data_tab.actions_row.indexOf(data_tab.lbl_form_feedback) >= 0
+    assert data_tab.right_panel.layout().indexOf(data_tab.lbl_form_feedback) == -1
+    assert data_tab.right_panel.layout().indexOf(data_tab.lbl_form_geocode) == -1
+    assert data_tab.lbl_form_feedback.wordWrap() is False
+    assert data_tab.lbl_form_geocode.wordWrap() is False
+    assert data_tab.lbl_form_feedback.minimumWidth() >= 260
+
+    window.form_controller._apply_validation_feedback(
+        FormValidationPresentation(
+            severity="success",
+            summary_text="Cadastro consistente para seguir.",
+            detail_text="Geocodificação: Buscar Endereço pode revisar o ponto principal do cadastro.",
+            duplicate_text="",
+            geocode_text="Geocodificação: Buscar Endereço pode revisar o ponto principal do cadastro.",
+        )
+    )
+
+    assert "\n" not in data_tab.lbl_form_feedback.text()
+    assert data_tab.lbl_form_feedback.isHidden() is False
+    assert " | " in data_tab.lbl_form_feedback.text()
+    assert "Geocodificação" in data_tab.lbl_form_feedback.text()
+    assert data_tab.lbl_form_feedback.toolTip().startswith("Cadastro consistente")
+    assert "\n" not in data_tab.lbl_form_geocode.text()
+    assert data_tab.lbl_form_geocode.isVisible() is False
+    assert data_tab.lbl_form_feedback.maximumHeight() <= max(int(24 * window.scale_factor), 22)
+    window.close()
+
+
 def test_window_chrome_shows_authoritative_write_status():
     window = MainWindow()
     window.session_runtime.path = os.path.join("C:\\base", "compensacoes.xlsx")
@@ -577,6 +610,25 @@ def test_compensacoes_bulk_action_updates_selected_records(monkeypatch):
 
     assert [record.eletronico for record in window.records] == ["Ofício", "Ofício"]
     assert [record.caixa for record in window.records] == ["OFÍCIOS", "OFÍCIOS"]
+    window.close()
+
+
+def test_bulk_tipo_eletronico_prefills_caixa_with_eletronico():
+    window = MainWindow()
+
+    updated = window.form_controller._build_bulk_updated_record(
+        make_record(eletronico="Ofício", caixa="OFÍCIOS"),
+        {"action": "tipo", "tipo": "Eletrônico"},
+    )
+    cleared = window.form_controller._build_bulk_updated_record(
+        make_record(eletronico="Eletrônico", caixa="ELETRÔNICO"),
+        {"action": "tipo", "tipo": "Físico"},
+    )
+
+    assert updated.eletronico == "Eletrônico"
+    assert updated.caixa == "ELETRÔNICO"
+    assert cleared.eletronico == "Físico"
+    assert cleared.caixa == ""
     window.close()
 
 

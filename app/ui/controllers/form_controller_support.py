@@ -7,7 +7,7 @@ from typing import Callable, Iterable, Mapping, Optional, Sequence, cast
 
 from app.models.compensacao import Compensacao
 from app.services.plantio_service import serialize_plantios_state, sync_legacy_plantio_fields
-from app.services.records_service import display_tipo_value, safe_upper, storage_tipo_value
+from app.services.records_service import display_tipo_value, extract_year, safe_upper, storage_tipo_value
 
 
 @dataclass(frozen=True)
@@ -334,9 +334,9 @@ def build_form_validation_presentation(
     if not oficio_text:
         add_feedback("oficio_processo", "error", "Informe Ofício/Processo ou marque S/N.")
     else:
-        year_tokens = [token for token in oficio_text.replace("-", "/").split("/") if token.isdigit() and len(token) == 4]
-        if year_tokens:
-            extracted_year = int(year_tokens[-1])
+        oficio_year = extract_year(oficio_text)
+        if oficio_year:
+            extracted_year = int(oficio_year)
             if extracted_year > current_year:
                 add_feedback(
                     "oficio_processo",

@@ -56,6 +56,8 @@ class TileSchemeHandler(QWebEngineUrlSchemeHandler):
         "osm": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "carto_light": "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
         "carto_dark": "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "esri_places": "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        "esri_transportation": "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         "satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     }
     _PATH_RE = re.compile(r"^/([a-z_]+)/(\d+)/(\d+)/(\d+)\.(png|jpg|jpeg)$")

@@ -40,6 +40,7 @@ def build_window_command_bindings() -> tuple[WindowCommandBinding, ...]:
         WindowCommandBinding("search_on_map_plantio", "map_controller", "search_on_map_plantio"),
         WindowCommandBinding("run_batch_geocode", "map_controller", "run_batch_geocode"),
         WindowCommandBinding("open_map_fullscreen", "map_controller", "open_map_fullscreen"),
+        WindowCommandBinding("configure_mapbox", "map_controller", "configure_mapbox"),
         WindowCommandBinding("open_street_view", "map_controller", "open_street_view"),
         WindowCommandBinding("load_custom_layer", "map_controller", "load_custom_layer"),
         WindowCommandBinding("toggle_heatmap", "map_controller", "toggle_heatmap"),

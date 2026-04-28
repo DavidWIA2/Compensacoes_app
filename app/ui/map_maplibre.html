@@ -1,0 +1,553 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Mapa Microbacias - MapLibre</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+<link href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css" rel="stylesheet"/>
+<script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<style>
+  html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background: #111827;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 100%;
+  }
+
+  .floating {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.25;
+    background: rgba(20,22,25,0.86);
+    color: #f8fafc;
+    border: 1px solid rgba(148,163,184,0.42);
+    max-width: min(560px, calc(100vw - 24px));
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    user-select: none;
+    pointer-events: none;
+    white-space: pre-line;
+  }
+
+  .layer-switcher {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgba(20,22,25,0.86);
+    color: #f8fafc;
+    border: 1px solid rgba(148,163,184,0.42);
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .layer-switcher button {
+    min-width: 124px;
+    border: 1px solid rgba(148,163,184,0.5);
+    border-radius: 10px;
+    background: rgba(31,41,55,0.92);
+    color: #e5e7eb;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .layer-switcher button.active {
+    background: #2f80ed;
+    border-color: #60a5fa;
+    color: white;
+  }
+
+  .maplibregl-ctrl-attrib {
+    font-size: 11px;
+  }
+
+  .marker-main {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: #2f80ed;
+    border: 3px solid #ffffff;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  }
+</style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <div class="floating" id="status">Carregando MapLibre...</div>
+  <div class="layer-switcher" id="layerSwitcher">
+    <button type="button" data-layer="Satelite">Satélite</button>
+    <button type="button" data-layer="Mapa Claro">Mapa claro</button>
+  </div>
+
+<script>
+  const query = new URLSearchParams(window.location.search);
+  const tileProxyBase = (query.get("tileProxy") || "").replace(/\/+$/, "");
+  const fallbackUrl = (query.get("fallbackUrl") || "").trim();
+  const defaultBaseLayer = (query.get("defaultBaseLayer") || "satellite").trim().toLowerCase();
+  const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+  const ESRI_ATTRIBUTION = 'Tiles &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+
+  function setStatus(txt) {
+    const el = document.getElementById("status");
+    if (el) el.innerText = txt;
+  }
+
+  function providerTile(remoteTemplate, proxyTemplate) {
+    if (!tileProxyBase || proxyTemplate.startsWith("/tiles/osm/")) return remoteTemplate;
+    return `${tileProxyBase}${proxyTemplate}`;
+  }
+
+  function fallbackToLeaflet(reason) {
+    console.error("[MAPLIBRE FALLBACK]", reason || "unknown");
+    setStatus("MapLibre indisponível. Abrindo Leaflet...");
+    if (fallbackUrl) window.location.href = fallbackUrl;
+  }
+
+  if (typeof maplibregl === "undefined") {
+    fallbackToLeaflet("maplibregl undefined");
+  }
+
+  let bridge = null;
+  let map = null;
+  let activeBaseLayerName = defaultBaseLayer === "light" ? "Mapa Claro" : "Satelite";
+  let mainMarker = null;
+  let customLayerId = "";
+  let heatMarkerIds = [];
+  let pendingCommands = [];
+
+  const initialStyle = {
+    version: 8,
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sources: {
+      satellite: {
+        type: "raster",
+        tiles: [
+          providerTile(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            "/tiles/satellite/{z}/{x}/{y}.jpg"
+          )
+        ],
+        tileSize: 256,
+        attribution: ESRI_ATTRIBUTION,
+        maxzoom: 18
+      },
+      osm: {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        attribution: OSM_ATTRIBUTION,
+        maxzoom: 19
+      },
+      esri_transportation: {
+        type: "raster",
+        tiles: [
+          providerTile(
+            "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+            "/tiles/esri_transportation/{z}/{x}/{y}.png"
+          )
+        ],
+        tileSize: 256,
+        attribution: "Reference &copy; Esri",
+        maxzoom: 18
+      },
+      esri_places: {
+        type: "raster",
+        tiles: [
+          providerTile(
+            "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+            "/tiles/esri_places/{z}/{x}/{y}.png"
+          )
+        ],
+        tileSize: 256,
+        attribution: "Reference &copy; Esri",
+        maxzoom: 18
+      },
+      microbacias: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      },
+      compensacoes: {
+        type: "geojson",
+        cluster: true,
+        clusterRadius: 42,
+        clusterMaxZoom: 14,
+        data: { type: "FeatureCollection", features: [] }
+      },
+      plantios: {
+        type: "geojson",
+        cluster: true,
+        clusterRadius: 42,
+        clusterMaxZoom: 14,
+        data: { type: "FeatureCollection", features: [] }
+      }
+    },
+    layers: [
+      { id: "base-satellite", type: "raster", source: "satellite", layout: { visibility: "visible" } },
+      { id: "base-osm", type: "raster", source: "osm", layout: { visibility: "none" } },
+      { id: "satellite-roads", type: "raster", source: "esri_transportation", minzoom: 12, layout: { visibility: "visible" }, paint: { "raster-opacity": 0.95 } },
+      { id: "satellite-places", type: "raster", source: "esri_places", minzoom: 12, layout: { visibility: "visible" }, paint: { "raster-opacity": 0.95 } },
+      {
+        id: "microbacias-fill",
+        type: "fill",
+        source: "microbacias",
+        paint: {
+          "fill-color": ["coalesce", ["get", "_mapColor"], "#3388ff"],
+          "fill-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.08, 14, 0.25]
+        }
+      },
+      {
+        id: "microbacias-line",
+        type: "line",
+        source: "microbacias",
+        paint: {
+          "line-color": ["coalesce", ["get", "_mapColor"], "#3388ff"],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.2, 15, 2.8],
+          "line-opacity": 0.94
+        }
+      },
+      {
+        id: "compensacoes-clusters",
+        type: "circle",
+        source: "compensacoes",
+        filter: ["has", "point_count"],
+        paint: {
+          "circle-color": "#2f80ed",
+          "circle-radius": ["step", ["get", "point_count"], 16, 20, 20, 80, 25],
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 2
+        }
+      },
+      {
+        id: "compensacoes-cluster-count",
+        type: "symbol",
+        source: "compensacoes",
+        filter: ["has", "point_count"],
+        layout: {
+          "text-field": ["get", "point_count_abbreviated"],
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-size": 12
+        },
+        paint: { "text-color": "#fff" }
+      },
+      {
+        id: "compensacoes-points",
+        type: "circle",
+        source: "compensacoes",
+        filter: ["!", ["has", "point_count"]],
+        paint: {
+          "circle-color": "#2f80ed",
+          "circle-radius": 7,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 2
+        }
+      },
+      {
+        id: "plantios-points",
+        type: "circle",
+        source: "plantios",
+        filter: ["!", ["has", "point_count"]],
+        paint: {
+          "circle-color": "#22c55e",
+          "circle-radius": 6,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 2
+        }
+      }
+    ]
+  };
+
+  try {
+    map = new maplibregl.Map({
+      container: "map",
+      style: initialStyle,
+      center: [-47.89, -22.015],
+      zoom: 12,
+      maxZoom: 20,
+      attributionControl: false,
+      fadeDuration: 120,
+      preserveDrawingBuffer: false
+    });
+    window.map = map;
+  } catch (e) {
+    fallbackToLeaflet(e && e.message ? e.message : e);
+  }
+
+  function runWhenReady(fn) {
+    if (!map) return;
+    if (map.loaded()) {
+      fn();
+    } else {
+      pendingCommands.push(fn);
+    }
+  }
+
+  function updateLayerButtons() {
+    document.querySelectorAll("#layerSwitcher button").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.layer === activeBaseLayerName);
+    });
+  }
+
+  function setLayerVisibility(ids, visibility) {
+    ids.forEach(id => {
+      if (map && map.getLayer(id)) map.setLayoutProperty(id, "visibility", visibility);
+    });
+  }
+
+  function normalizeBaseLayerName(name) {
+    const raw = String(name || "");
+    const compact = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (compact === "mapa claro" || compact === "light" || compact === "osm") return "Mapa Claro";
+    if (compact.startsWith("sat") || compact === "satellite") return "Satelite";
+    return raw || "Satelite";
+  }
+
+  function setBaseLayer(name, persistPreference = true) {
+    activeBaseLayerName = normalizeBaseLayerName(name);
+    runWhenReady(() => {
+      const satelliteVisible = activeBaseLayerName === "Satelite";
+      setLayerVisibility(["base-satellite"], satelliteVisible ? "visible" : "none");
+      setLayerVisibility(["satellite-roads", "satellite-places"], satelliteVisible ? "visible" : "none");
+      setLayerVisibility(["base-osm"], satelliteVisible ? "none" : "visible");
+      updateLayerButtons();
+      setStatus(`Mapa base carregado: ${activeBaseLayerName}`);
+      if (persistPreference && bridge && bridge.onLayerChanged) {
+        bridge.onLayerChanged(activeBaseLayerName);
+      }
+    });
+  }
+
+  function setTheme(_theme) {
+    // O estilo MapLibre gratuito fica consistente em claro/escuro via controles do app.
+  }
+
+  const palette = [
+    "#e6194B","#3cb44b","#ffe119","#4363d8","#f58231",
+    "#911eb4","#42d4f4","#f032e6","#bfef45","#fabed4",
+    "#469990","#dcbeff","#9A6324","#fffac8","#800000"
+  ];
+
+  function colorizeMicrobacias(geojsonObj) {
+    const colorByName = new Map();
+    let idx = 0;
+    const clone = JSON.parse(JSON.stringify(geojsonObj || { type: "FeatureCollection", features: [] }));
+    clone.features = Array.isArray(clone.features) ? clone.features : [];
+    clone.features.forEach(feature => {
+      feature.properties = feature.properties || {};
+      const name = feature.properties.Nome_Do_Arquivo || "Desconhecido";
+      if (!colorByName.has(name)) {
+        colorByName.set(name, palette[idx % palette.length]);
+        idx += 1;
+      }
+      feature.properties._mapColor = colorByName.get(name);
+    });
+    return clone;
+  }
+
+  function boundsFromGeoJson(geojsonObj) {
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    function visit(coords) {
+      if (!Array.isArray(coords)) return;
+      if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+        const lng = coords[0], lat = coords[1];
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+        return;
+      }
+      coords.forEach(visit);
+    }
+    (geojsonObj.features || []).forEach(feature => visit(feature.geometry && feature.geometry.coordinates));
+    if (!Number.isFinite(minLng) || !Number.isFinite(minLat)) return null;
+    return [[minLng, minLat], [maxLng, maxLat]];
+  }
+
+  function setMicrobacias(geojsonObj) {
+    runWhenReady(() => {
+      const data = colorizeMicrobacias(geojsonObj);
+      const source = map.getSource("microbacias");
+      if (source && source.setData) source.setData(data);
+      const total = Array.isArray(data.features) ? data.features.length : 0;
+      const bounds = boundsFromGeoJson(data);
+      if (bounds) map.fitBounds(bounds, { padding: 18, duration: 250, maxZoom: 15 });
+      setStatus(total ? `Microbacias carregadas: ${total}` : "Sem microbacias para exibir.");
+    });
+  }
+
+  function setMarker(lat, lng) {
+    runWhenReady(() => {
+      const position = [Number(lng), Number(lat)];
+      if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) return;
+      if (!mainMarker) {
+        const el = document.createElement("div");
+        el.className = "marker-main";
+        mainMarker = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat(position).addTo(map);
+      } else {
+        mainMarker.setLngLat(position);
+      }
+      map.easeTo({ center: position, zoom: Math.max(map.getZoom(), 16), duration: 650 });
+    });
+  }
+
+  function featuresFromPoints(points) {
+    return {
+      type: "FeatureCollection",
+      features: (points || []).map((point, index) => {
+        const lat = Number(Array.isArray(point) ? point[0] : point.lat);
+        const lng = Number(Array.isArray(point) ? point[1] : (point.lng ?? point.lon));
+        return {
+          type: "Feature",
+          properties: Object.assign({ id: index }, (point && point.properties) || {}),
+          geometry: { type: "Point", coordinates: [lng, lat] }
+        };
+      }).filter(feature => Number.isFinite(feature.geometry.coordinates[0]) && Number.isFinite(feature.geometry.coordinates[1]))
+    };
+  }
+
+  function setMarkers(points) {
+    runWhenReady(() => {
+      const source = map.getSource("compensacoes");
+      if (source && source.setData) source.setData(featuresFromPoints(points));
+    });
+  }
+
+  function setPlantioMarkers(points) {
+    runWhenReady(() => {
+      const source = map.getSource("plantios");
+      if (source && source.setData) source.setData(featuresFromPoints(points));
+    });
+  }
+
+  function setHeatmap(points) {
+    runWhenReady(() => {
+      heatMarkerIds.forEach(id => {
+        if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(id)) map.removeSource(id);
+      });
+      heatMarkerIds = [];
+      if (!points || !points.length) return;
+      const sourceId = "heatmap-source";
+      const layerId = "heatmap-layer";
+      if (map.getSource(sourceId)) {
+        map.getSource(sourceId).setData(featuresFromPoints(points));
+      } else {
+        map.addSource(sourceId, { type: "geojson", data: featuresFromPoints(points) });
+      }
+      if (!map.getLayer(layerId)) {
+        map.addLayer({
+          id: layerId,
+          type: "heatmap",
+          source: sourceId,
+          maxzoom: 16,
+          paint: {
+            "heatmap-weight": 0.7,
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 16, 1.8],
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 14, 16, 28],
+            "heatmap-opacity": 0.65
+          }
+        }, "compensacoes-clusters");
+      }
+      heatMarkerIds = [layerId, sourceId];
+    });
+  }
+
+  function highlightGeoJsonByName(field, value) {
+    runWhenReady(() => {
+      const target = String(value || "").trim().toUpperCase();
+      if (!target) {
+        map.setFilter("microbacias-line", null);
+        return;
+      }
+      map.setPaintProperty("microbacias-line", "line-width", [
+        "case",
+        ["==", ["upcase", ["to-string", ["get", field]]], target],
+        4,
+        ["interpolate", ["linear"], ["zoom"], 9, 1.2, 15, 2.8]
+      ]);
+      map.setPaintProperty("microbacias-fill", "fill-opacity", [
+        "case",
+        ["==", ["upcase", ["to-string", ["get", field]]], target],
+        0.36,
+        ["interpolate", ["linear"], ["zoom"], 9, 0.06, 14, 0.18]
+      ]);
+    });
+  }
+
+  if (map) {
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "bottom-right");
+    map.addControl(new maplibregl.AttributionControl({ compact: false }), "bottom-right");
+    map.on("load", () => {
+      setBaseLayer(defaultBaseLayer === "light" ? "Mapa Claro" : "Satelite", false);
+      setStatus("MapLibre carregado.");
+      pendingCommands.splice(0).forEach(fn => fn());
+    });
+    map.on("error", evt => {
+      const msg = evt && evt.error ? evt.error.message : "Erro no MapLibre";
+      console.error("[MAPLIBRE ERROR]", msg);
+      setStatus(`Erro no mapa: ${msg}`);
+    });
+    map.on("click", evt => {
+      setMarker(evt.lngLat.lat, evt.lngLat.lng);
+      if (bridge && bridge.onMapClicked) bridge.onMapClicked(evt.lngLat.lat, evt.lngLat.lng);
+    });
+    ["compensacoes-clusters", "plantios-points", "compensacoes-points"].forEach(layerId => {
+      map.on("mouseenter", layerId, () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", layerId, () => { map.getCanvas().style.cursor = ""; });
+    });
+  }
+
+  document.querySelectorAll("#layerSwitcher button").forEach(btn => {
+    btn.addEventListener("click", () => setBaseLayer(btn.dataset.layer, true));
+  });
+
+  new QWebChannel(qt.webChannelTransport, function(channel){
+    bridge = channel.objects.bridge;
+  });
+
+  window.addEventListener("resize", function(){
+    try { if (map) map.resize(); } catch(e) {}
+  });
+
+  window.setTheme = setTheme;
+  window.setBaseLayer = setBaseLayer;
+  window.setHeatmap = setHeatmap;
+  window.setStatus = setStatus;
+  window.setMarker = setMarker;
+  window.setMarkers = setMarkers;
+  window.setPlantioMarkers = setPlantioMarkers;
+  window.setMicrobacias = setMicrobacias;
+  window.highlightGeoJsonByName = highlightGeoJsonByName;
+
+</script>
+</body>
+</html>

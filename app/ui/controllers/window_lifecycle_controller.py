@@ -108,6 +108,8 @@ class WindowLifecycleController:
             )
 
     def prepare_close(self, event) -> bool:
+        if getattr(self.window, "_close_prepared", False):
+            return True
         form_controller = getattr(self.window, "form_controller", None)
         should_confirm_discard = (
             not getattr(self.window, "_skip_close_discard_confirmation", False)
@@ -119,6 +121,9 @@ class WindowLifecycleController:
 
         if form_controller is not None and hasattr(form_controller, "persist_form_draft_now"):
             form_controller.persist_form_draft_now()
+        data_tab = getattr(self.window, "data_tab", None)
+        if data_tab is not None and hasattr(data_tab, "shutdown_transient_widgets"):
+            data_tab.shutdown_transient_widgets()
         self.stop_owned_timers()
         settings_controller = getattr(self.window, "settings_controller", None)
         if settings_controller is not None:
@@ -130,6 +135,7 @@ class WindowLifecycleController:
         if hasattr(self.window, "job_runner"):
             self.window.job_runner.shutdown_all_workers()
 
+        self.window._close_prepared = True
         return True
 
     def stop_owned_timers(self):

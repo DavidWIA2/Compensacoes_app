@@ -698,9 +698,56 @@ class DataTab(QWidget):
     def _connect_cadastro_review_actions(self) -> None:
         if not hasattr(self, "btn_review_search_address"):
             return
-        self.btn_review_search_address.clicked.connect(self.btn_maps.click)
-        self.btn_review_open_plantios.clicked.connect(self.btn_manage_plantios.click)
-        self.btn_review_save.clicked.connect(self.btn_save_edit.click)
+        self.btn_review_search_address.clicked.connect(self._trigger_review_search_address)
+        self.btn_review_open_plantios.clicked.connect(self._trigger_review_open_plantios)
+        self.btn_review_save.clicked.connect(self._trigger_review_save)
+
+    def shutdown_review_actions(self) -> None:
+        for button, callback in [
+            (getattr(self, "btn_review_search_address", None), getattr(self, "_trigger_review_search_address", None)),
+            (getattr(self, "btn_review_open_plantios", None), getattr(self, "_trigger_review_open_plantios", None)),
+            (getattr(self, "btn_review_save", None), getattr(self, "_trigger_review_save", None)),
+        ]:
+            if button is None or callback is None:
+                continue
+            try:
+                button.clicked.disconnect(callback)
+            except (RuntimeError, TypeError):
+                continue
+
+    def shutdown_transient_widgets(self) -> None:
+        self.shutdown_review_actions()
+        completer = getattr(self, "address_completer", None)
+        if completer is None:
+            return
+        try:
+            popup = completer.popup()
+            if popup is not None:
+                popup.hide()
+                popup.deleteLater()
+        except RuntimeError:
+            pass
+        try:
+            self.in_end.setCompleter(None)
+        except RuntimeError:
+            pass
+        try:
+            completer.deleteLater()
+        except RuntimeError:
+            pass
+        self.address_completer = None
+
+    def _trigger_review_search_address(self) -> None:
+        if hasattr(self, "btn_maps") and self.btn_maps.isEnabled():
+            self.btn_maps.click()
+
+    def _trigger_review_open_plantios(self) -> None:
+        if hasattr(self, "btn_manage_plantios") and self.btn_manage_plantios.isEnabled():
+            self.btn_manage_plantios.click()
+
+    def _trigger_review_save(self) -> None:
+        if hasattr(self, "btn_save_edit") and self.btn_save_edit.isEnabled():
+            self.btn_save_edit.click()
 
     def _set_recommended_button(self, button, recommended: bool) -> None:
         button.setProperty("recommended", "true" if recommended else "false")

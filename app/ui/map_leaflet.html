@@ -150,12 +150,15 @@
     setStatus("Erro JS:\n" + msg);
   };
 
+  const SAO_CARLOS_CENTER = [-22.017, -47.89];
+  const SAO_CARLOS_CITY_ZOOM = 12;
+
   // Mapa base
   const map = L.map("map", {
     zoomControl:false,
     preferCanvas:true,
     maxZoom: 20
-  }).setView([-22.015,-47.89], 12);
+  }).setView(SAO_CARLOS_CENTER, SAO_CARLOS_CITY_ZOOM);
 
   L.control.zoom({ position:'bottomright' }).addTo(map);
   const satelliteLabelsPane = map.createPane("satellite-labels");
@@ -512,16 +515,6 @@
 
       // ADICIONA O TOGGLE: Permite ligar/desligar no menu superior direito
       layerControl.addOverlay(microLayer, "Exibir Microbacias");
-
-      try {
-        const b = microLayer.getBounds();
-        if (b && b.isValid()) {
-          map.fitBounds(b, { padding:[18,18] });
-          console.info("[MICRO] bounds aplicados");
-        }
-      } catch(e) {
-        console.error("[MICRO] erro ao aplicar bounds", e);
-      }
 
       lastMicroSignature = signature;
       try { map.invalidateSize(true); } catch(e) {}

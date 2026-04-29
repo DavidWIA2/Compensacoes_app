@@ -403,6 +403,10 @@ class MapController:
             if detail and selected_candidate.source not in {"legacy"}:
                 status_message = f"{status_message} | {detail}"
             self.window.statusBar().showMessage(status_message)
+            if hasattr(self.window.data_tab, "show_form_feedback"):
+                self.window.data_tab.show_form_feedback("Endereço localizado no mapa.", role="feedback-success")
+            if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+                self.window.data_tab.refresh_cadastro_review()
             self.window._update_form_action_buttons()
             return
 
@@ -411,6 +415,8 @@ class MapController:
 
         presentation = self.map_use_cases.build_geocode_presentation(address=address, coords=None, microbacia="")
         QMessageBox.warning(self.window, presentation.warning_title, presentation.warning_message)
+        if hasattr(self.window.data_tab, "show_form_feedback"):
+            self.window.data_tab.show_form_feedback("Não foi possível localizar esse endereço.", role="feedback-warning")
         self.window.statusBar().showMessage(presentation.status_message)
 
     def open_map_fullscreen(self):

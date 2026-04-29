@@ -81,9 +81,7 @@ class DashboardTab(QWidget):
         self.lbl_panel_kicker.setProperty("role", "eyebrow")
         self.lbl_panel_title = QLabel("Painel consolidado da base sincronizada")
         self.lbl_panel_title.setProperty("role", "page-title")
-        self.lbl_panel_subtitle = QLabel(
-            "Acompanhe indicadores, pendências e leituras executivas sem sair do contexto operacional."
-        )
+        self.lbl_panel_subtitle = QLabel("Indicadores e pendências da rotina operacional.")
         self.lbl_panel_subtitle.setProperty("role", "page-subtitle")
         self.lbl_panel_subtitle.setWordWrap(True)
         self.lbl_panel_context = QLabel("Base sincronizada pronta para leitura executiva.")
@@ -382,7 +380,7 @@ class DashboardTab(QWidget):
         placeholder_layout.setContentsMargins(0, 0, 0, 0)
         placeholder_layout.setSpacing(0)
 
-        placeholder = QLabel("Abra esta visão para carregar os gráficos executivos do recorte atual sem pesar a abertura do aplicativo.")
+        placeholder = QLabel("Gráficos em espera. Esta visão carrega sob demanda para manter a abertura do app leve.")
         placeholder.setWordWrap(True)
         placeholder.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         placeholder.setObjectName("FormStateLabel")

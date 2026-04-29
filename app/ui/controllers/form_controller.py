@@ -777,6 +777,8 @@ class FormController:
         self.window.data_tab.btn_ficha_pdf.setEnabled(action_state.enable_ficha)
         if hasattr(self.window.data_tab, "btn_open_cadastro_window"):
             self.window.data_tab.btn_open_cadastro_window.setEnabled(has_selected)
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review()
 
     def on_compensado_toggled(self, checked: bool):
         if not checked and self.window.form_plantios:
@@ -799,6 +801,8 @@ class FormController:
         self.validate_as_you_type()
         self.update_form_action_buttons()
         self.window._update_address_search_enabled()
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review()
 
     def open_plantios_dialog(self):
         if not self.window.data_tab.chk_compensado.isChecked():
@@ -813,6 +817,10 @@ class FormController:
             self._set_form_plantios(dialog.plantios, block_signals=True)
             self.remember_current_state()
             self.validate_as_you_type()
+            if hasattr(self.window.data_tab, "show_form_feedback"):
+                self.window.data_tab.show_form_feedback("Plantios atualizados.", role="feedback-success")
+            if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+                self.window.data_tab.refresh_cadastro_review()
             self.update_form_action_buttons()
             self.window._update_address_search_enabled()
 
@@ -980,6 +988,8 @@ class FormController:
             self.persistence.publish_write_result(self.window, write_result)
             self._clear_saved_form_draft()
             self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
+            if hasattr(self.window.data_tab, "show_form_feedback"):
+                self.window.data_tab.show_form_feedback("Cadastro adicionado com sucesso.", role="feedback-success")
             QMessageBox.information(self.window, "Sucesso", "Adicionado com sucesso.")
         except Exception as exc:
             root_exc = self.persistence.unwrap_write_exception(self.window, exc)
@@ -1056,6 +1066,8 @@ class FormController:
         refresh_result = self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
         if refresh_result is False:
             return
+        if hasattr(self.window.data_tab, "show_form_feedback"):
+            self.window.data_tab.show_form_feedback("Alterações salvas com sucesso.", role="feedback-success")
         QMessageBox.information(self.window, "Sucesso", "Salvo com sucesso.")
 
     def delete_selected(self):
@@ -1085,6 +1097,8 @@ class FormController:
                 return
             self.persistence.publish_write_result(self.window, write_result)
             self.window.data_controller.refresh_runtime_after_mutation(list(write_result.records))
+            if hasattr(self.window.data_tab, "show_form_feedback"):
+                self.window.data_tab.show_form_feedback("Registro excluído.", role="feedback-success")
             self.window.statusBar().showMessage("Registro excluído")
 
     def clear_form(self, force: bool = False):
@@ -1120,10 +1134,14 @@ class FormController:
 
         if hasattr(self.window.data_tab, "update_record_summary"):
             self.window.data_tab.update_record_summary(None)
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review(None)
         self._reset_inline_feedback()
         self.window.shell_controller.refresh_tipo_controls()
         self.window._update_address_search_enabled()
         self.update_form_action_buttons()
+        if hasattr(self.window.data_tab, "show_form_feedback"):
+            self.window.data_tab.show_form_feedback("Formulário pronto para novo cadastro.", role="feedback-info")
         self.window.statusBar().showMessage("Novo registro")
         self.reset_history()
         return True

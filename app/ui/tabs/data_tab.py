@@ -151,13 +151,9 @@ class DataTab(QWidget):
         self.lbl_workspace_kicker.setProperty("role", "eyebrow")
         self.lbl_workspace_title = QLabel("Base de compensa\u00e7\u00f5es")
         self.lbl_workspace_title.setProperty("role", "section-title")
-        self.lbl_workspace_subtitle = QLabel(
-            "Consulta operacional da base, filtros do recorte e edição do cadastro em andamento."
-        )
+        self.lbl_workspace_subtitle = QLabel("Consulta, triagem e abertura rápida do cadastro.")
         self.lbl_workspace_subtitle.setProperty("role", "page-subtitle")
-        self.lbl_workspace_helper = QLabel(
-            "Use a grade para localizar processos e o painel lateral para revisar cadastro, plantios e mapa."
-        )
+        self.lbl_workspace_helper = QLabel("Localize processos na grade; revise o contexto à direita.")
         self.lbl_workspace_helper.setProperty("role", "helper")
         self.lbl_workspace_helper.setWordWrap(True)
         header_text_layout.addWidget(self.lbl_workspace_kicker)
@@ -235,7 +231,9 @@ class DataTab(QWidget):
         quick_filters_layout = QHBoxLayout()
         self.quick_filters_layout = quick_filters_layout
         quick_filters_layout.setSpacing(int(6 * self.sf))
-        quick_filters_layout.addWidget(QLabel("Filtros rápidos:"))
+        quick_caption = QLabel("Recorte")
+        quick_caption.setProperty("role", "panel-caption")
+        quick_filters_layout.addWidget(quick_caption)
         for mode, label, tooltip in [
             (
                 COMPENSACOES_QUICK_FILTER_ALL,
@@ -272,11 +270,15 @@ class DataTab(QWidget):
             quick_filters_layout.addWidget(button)
         self.quick_filter_buttons[COMPENSACOES_QUICK_FILTER_ALL].setChecked(True)
 
+        filters_host_layout.addLayout(quick_filters_layout)
+
         self.quality_filter_buttons: Dict[str, QPushButton] = {}
-        quality_filters_layout = quick_filters_layout
+        quality_filters_layout = QHBoxLayout()
         self.quality_filters_layout = quality_filters_layout
-        quality_filters_layout.addSpacing(int(8 * self.sf))
-        quality_filters_layout.addWidget(QLabel("Qualidade:"))
+        quality_filters_layout.setSpacing(int(6 * self.sf))
+        quality_caption = QLabel("Qualidade")
+        quality_caption.setProperty("role", "panel-caption")
+        quality_filters_layout.addWidget(quality_caption)
         for mode, label, tooltip in [
             (
                 COMPENSACOES_QUICK_FILTER_QUALIDADE,
@@ -312,9 +314,12 @@ class DataTab(QWidget):
         self.lbl_quality_summary.setWordWrap(False)
         self.lbl_quality_summary.setVisible(False)
 
-        actions_row = quick_filters_layout
+        quality_filters_layout.addStretch(1)
+        filters_host_layout.addLayout(quality_filters_layout)
+
+        actions_row = QHBoxLayout()
         self.actions_row = actions_row
-        actions_row.addStretch(1)
+        actions_row.setSpacing(int(6 * self.sf))
         self.lbl_form_feedback = QLabel("")
         self.lbl_form_feedback.setProperty("role", "helper")
         self.lbl_form_feedback.setWordWrap(False)
@@ -338,6 +343,7 @@ class DataTab(QWidget):
         self.lbl_selection_summary.setMinimumWidth(0)
         self.lbl_selection_summary.setMaximumWidth(int(260 * self.sf))
         actions_row.addWidget(self.lbl_selection_summary, 0)
+        actions_row.addStretch(1)
         self.btn_process_history = QPushButton("Histórico")
         self.btn_process_history.setProperty("kind", "chip-quiet")
         self.btn_process_history.setToolTip("Abre o histórico filtrado pelo processo/ofício do registro atual.")
@@ -423,9 +429,30 @@ class DataTab(QWidget):
         form_workspace_layout.setContentsMargins(0, 0, 0, 0)
         form_workspace_layout.setSpacing(int(6 * self.sf))
 
+        cadastro_body = QFrame(self.form_workspace)
+        cadastro_body.setProperty("panel", "section")
+        self.cadastro_body = cadastro_body
+        cadastro_body_layout = QHBoxLayout(cadastro_body)
+        cadastro_body_layout.setContentsMargins(int(8 * self.sf), int(8 * self.sf), int(8 * self.sf), int(8 * self.sf))
+        cadastro_body_layout.setSpacing(int(10 * self.sf))
+
+        self.cadastro_left_panel = QWidget(cadastro_body)
+        self.cadastro_left_panel.setMinimumWidth(max(int(500 * self.sf), 460))
+        self.cadastro_left_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        cadastro_left_layout = QVBoxLayout(self.cadastro_left_panel)
+        cadastro_left_layout.setContentsMargins(0, 0, 0, 0)
+        cadastro_left_layout.setSpacing(int(6 * self.sf))
+
+        self.cadastro_map_panel = QWidget(cadastro_body)
+        self.cadastro_map_panel.setMinimumWidth(max(int(520 * self.sf), 460))
+        self.cadastro_map_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        cadastro_map_layout = QVBoxLayout(self.cadastro_map_panel)
+        cadastro_map_layout.setContentsMargins(0, 0, 0, 0)
+        cadastro_map_layout.setSpacing(int(6 * self.sf))
+
         self.form_group = self._create_form_group()
         self._update_form_group_height()
-        form_workspace_layout.addWidget(self.form_group, 0)
+        cadastro_left_layout.addWidget(self.form_group, 0)
 
         crud_frame = QFrame(self.right_panel)
         crud_frame.setProperty("panel", "subtle")
@@ -454,25 +481,32 @@ class DataTab(QWidget):
             b.setFixedHeight(max(int(28 * self.sf), 28))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             crud.addWidget(b)
-        form_workspace_layout.addWidget(crud_frame, 0)
+        cadastro_left_layout.addWidget(crud_frame, 0)
+        self.cadastro_review_panel = self._create_cadastro_review_panel()
+        cadastro_left_layout.addWidget(self.cadastro_review_panel, 1)
 
         self.map_group = self._create_map_group()
-        form_workspace_layout.addWidget(self.map_group, 0)
+        cadastro_map_layout.addWidget(self.map_group, 0)
+        self._connect_cadastro_review_actions()
 
         self.map_host = QWidget()
-        self.map_host.setMinimumHeight(0)
-        self.map_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.map_host.setMinimumHeight(max(int(420 * self.sf), 360))
+        self.map_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.map_host_layout = QVBoxLayout(self.map_host)
         self.map_host_layout.setContentsMargins(0, 0, 0, 0)
         self.map_host_layout.setSpacing(0)
         self._build_map_placeholder()
-        form_workspace_layout.addWidget(self.map_host, 1)
+        cadastro_map_layout.addWidget(self.map_host, 1)
+        cadastro_body_layout.addWidget(self.cadastro_left_panel, 0)
+        cadastro_body_layout.addWidget(self.cadastro_map_panel, 1)
+        form_workspace_layout.addWidget(cadastro_body, 1)
         self.splitter.addWidget(self.right_panel)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
         self._update_responsive_constraints()
         self._apply_responsive_layout()
         self.splitter.setSizes([max(int(980 * self.sf), 720), self.right_panel.minimumWidth()])
+        self.refresh_cadastro_review()
         schedule_owned_single_shot(self, 0, self._sync_left_panel_heights)
         schedule_owned_single_shot(self, 0, self._update_responsive_constraints)
         schedule_owned_single_shot(self, 0, self.align_splitter_to_table_width)
@@ -538,6 +572,328 @@ class DataTab(QWidget):
         layout.addWidget(detail_frame)
         return panel
 
+    def _create_cadastro_review_panel(self):
+        panel = QFrame()
+        panel.setProperty("panel", "subtle")
+        panel.setMinimumHeight(max(int(310 * self.sf), 270))
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(int(12 * self.sf), int(10 * self.sf), int(12 * self.sf), int(10 * self.sf))
+        layout.setSpacing(int(8 * self.sf))
+
+        header = QHBoxLayout()
+        header.setSpacing(int(8 * self.sf))
+        title = QLabel("Revisão rápida")
+        title.setProperty("role", "sidebar-title")
+        header.addWidget(title)
+        header.addStretch(1)
+        self.lbl_cadastro_review_score = QLabel("0/6")
+        self.lbl_cadastro_review_score.setObjectName("StatusChip")
+        self.lbl_cadastro_review_score.setAlignment(Qt.AlignCenter)
+        header.addWidget(self.lbl_cadastro_review_score, 0, Qt.AlignRight)
+        layout.addLayout(header)
+
+        self.lbl_cadastro_review_next = QLabel("Selecione ou preencha um cadastro para ver os pontos de atenção.")
+        self.lbl_cadastro_review_next.setWordWrap(True)
+        self.lbl_cadastro_review_next.setObjectName("FormStateLabel")
+        layout.addWidget(self.lbl_cadastro_review_next)
+
+        cards_frame = QFrame(panel)
+        cards_frame.setProperty("panel", "micro")
+        cards_layout = QGridLayout(cards_frame)
+        cards_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        cards_layout.setHorizontalSpacing(int(8 * self.sf))
+        cards_layout.setVerticalSpacing(int(8 * self.sf))
+        self.cadastro_review_labels = {}
+        self.cadastro_review_cards = {}
+        for index, key in enumerate(["Endereço", "Microbacia", "GPS", "Plantio", "Mudas", "Tipo"]):
+            card = QFrame(cards_frame)
+            card.setProperty("panel", "subtle")
+            card.setProperty("reviewState", "neutral")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(int(9 * self.sf), int(7 * self.sf), int(9 * self.sf), int(7 * self.sf))
+            card_layout.setSpacing(int(2 * self.sf))
+            label = QLabel(key)
+            label.setProperty("role", "panel-caption")
+            value = QLabel("--")
+            value.setProperty("role", "helper-strong")
+            value.setWordWrap(True)
+            self.cadastro_review_labels[key] = value
+            self.cadastro_review_cards[key] = card
+            card_layout.addWidget(label)
+            card_layout.addWidget(value)
+            cards_layout.addWidget(card, index // 3, index % 3)
+        for col in range(3):
+            cards_layout.setColumnStretch(col, 1)
+        layout.addWidget(cards_frame)
+
+        details_row = QHBoxLayout()
+        details_row.setSpacing(int(8 * self.sf))
+        self.cadastro_review_detail_labels = {}
+        for section_title, keys in [
+            ("Localização", ["Endereço cadastrado", "Coordenadas", "Plantio"]),
+            ("Compensação", ["Mudas", "Status", "Caixa"]),
+        ]:
+            section = QFrame(panel)
+            section.setProperty("panel", "micro")
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+            section_layout.setSpacing(int(5 * self.sf))
+            section_label = QLabel(section_title)
+            section_label.setProperty("role", "panel-caption")
+            section_layout.addWidget(section_label)
+            for key in keys:
+                row = QHBoxLayout()
+                row.setSpacing(int(6 * self.sf))
+                name = QLabel(key)
+                name.setProperty("role", "muted")
+                value = QLabel("--")
+                value.setProperty("role", "helper-strong")
+                value.setWordWrap(True)
+                self.cadastro_review_detail_labels[key] = value
+                row.addWidget(name, 0, Qt.AlignTop)
+                row.addWidget(value, 1)
+                section_layout.addLayout(row)
+            details_row.addWidget(section, 1)
+        layout.addLayout(details_row)
+
+        pending_frame = QFrame(panel)
+        pending_frame.setProperty("panel", "micro")
+        pending_layout = QVBoxLayout(pending_frame)
+        pending_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
+        pending_layout.setSpacing(int(4 * self.sf))
+        pending_title = QLabel("Pendências e conferência")
+        pending_title.setProperty("role", "panel-caption")
+        self.lbl_cadastro_review_pending = QLabel("--")
+        self.lbl_cadastro_review_pending.setProperty("role", "helper")
+        self.lbl_cadastro_review_pending.setWordWrap(True)
+        pending_layout.addWidget(pending_title)
+        pending_layout.addWidget(self.lbl_cadastro_review_pending)
+        layout.addWidget(pending_frame)
+
+        shortcut_row = QHBoxLayout()
+        shortcut_row.setSpacing(int(6 * self.sf))
+        self.btn_review_search_address = QPushButton("Buscar endereço")
+        self.btn_review_open_plantios = QPushButton("Plantios")
+        self.btn_review_save = QPushButton("Salvar")
+        for button in [self.btn_review_search_address, self.btn_review_open_plantios, self.btn_review_save]:
+            button.setProperty("kind", "chip-quiet")
+            button.setMinimumHeight(max(int(24 * self.sf), 22))
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            shortcut_row.addWidget(button)
+        layout.addLayout(shortcut_row)
+        layout.addStretch(1)
+        return panel
+
+    @staticmethod
+    def _repolish_widget(widget) -> None:
+        try:
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+            widget.update()
+        except RuntimeError:
+            return
+
+    def _connect_cadastro_review_actions(self) -> None:
+        if not hasattr(self, "btn_review_search_address"):
+            return
+        self.btn_review_search_address.clicked.connect(self.btn_maps.click)
+        self.btn_review_open_plantios.clicked.connect(self.btn_manage_plantios.click)
+        self.btn_review_save.clicked.connect(self.btn_save_edit.click)
+
+    def _set_recommended_button(self, button, recommended: bool) -> None:
+        button.setProperty("recommended", "true" if recommended else "false")
+        self._repolish_widget(button)
+
+    def _set_review_card_state(self, key: str, state: str) -> None:
+        card = getattr(self, "cadastro_review_cards", {}).get(key)
+        if card is None:
+            return
+        card.setProperty("reviewState", state)
+        self._repolish_widget(card)
+
+    def _update_contextual_form_states(self, *, compensado: bool, arquivado: bool) -> None:
+        for widget, active in [
+            (self.in_end_plantio, compensado),
+            (self.btn_manage_plantios, compensado),
+            (self.in_caixa, arquivado),
+        ]:
+            widget.setProperty("contextState", "active" if active else "quiet")
+            self._repolish_widget(widget)
+
+    def show_form_feedback(self, message: str, *, role: str = "feedback-info", timeout_ms: int = 4500) -> None:
+        if not hasattr(self, "lbl_form_feedback"):
+            return
+        text = str(message or "").strip()
+        self.lbl_form_feedback.setText(text)
+        self.lbl_form_feedback.setToolTip(text)
+        self.lbl_form_feedback.setProperty("role", role)
+        self.lbl_form_feedback.setVisible(bool(text))
+        self._repolish_widget(self.lbl_form_feedback)
+        if text and timeout_ms > 0:
+            schedule_owned_single_shot(self.lbl_form_feedback, timeout_ms, self.lbl_form_feedback.hide)
+
+    def _review_value_text(self, value: object, *, fallback: str = "Pendente") -> str:
+        text = str(value or "").strip()
+        return text if text else fallback
+
+    def refresh_cadastro_review(self, record: Optional[Compensacao] = None):
+        if not hasattr(self, "cadastro_review_labels"):
+            return
+        source = record
+        if source is None and self.main_window is not None:
+            form_controller = getattr(self.main_window, "form_controller", None)
+            read_form = getattr(form_controller, "read_form", None)
+            if callable(read_form):
+                try:
+                    source = read_form()
+                except Exception:
+                    source = getattr(self.main_window, "selected", None)
+            else:
+                source = getattr(self.main_window, "selected", None)
+
+        if source is None:
+            values = {
+                "Endereço": "--",
+                "Microbacia": "--",
+                "GPS": "--",
+                "Plantio": "--",
+                "Mudas": "--",
+                "Tipo": "--",
+            }
+            details = {
+                "Endereço cadastrado": "--",
+                "Coordenadas": "--",
+                "Plantio": "--",
+                "Mudas": "--",
+                "Status": "--",
+                "Caixa": "--",
+            }
+            next_step = "Selecione ou preencha um cadastro para ver os pontos de atenção."
+            pending_text = "Abra um cadastro existente ou preencha um novo processo para revisar os dados."
+            score_text = "0/6"
+            recommended_action = ""
+            card_states = {key: "neutral" for key in values}
+            compensado = False
+            arquivado = False
+        else:
+            endereco = str(getattr(source, "endereco", "") or "").strip()
+            micro = str(getattr(source, "microbacia", "") or "").strip()
+            lat = str(getattr(source, "latitude", "") or "").strip()
+            lon = str(getattr(source, "longitude", "") or "").strip()
+            plantios = tuple(getattr(source, "plantios", ()) or ())
+            plantio_text = str(getattr(source, "endereco_plantio", "") or "").strip()
+            mudas = self._format_summary_number(getattr(source, "compensacao", ""))
+            tipo = display_tipo_value(getattr(source, "eletronico", "") or "") or "Pendente"
+            caixa = str(getattr(source, "caixa", "") or "").strip() or "--"
+            compensado = str(getattr(source, "compensado", "") or "").strip().upper() == "SIM"
+            arquivado = caixa.strip().upper() == "ARQUIVADO"
+            has_gps = bool(lat and lon)
+            if plantios:
+                plantio_status = f"{len(plantios)} plantio(s)"
+            elif plantio_text:
+                plantio_status = "Informado"
+            else:
+                plantio_status = "Nenhum"
+            values = {
+                "Endereço": "OK" if endereco else "Pendente",
+                "Microbacia": micro or "Pendente",
+                "GPS": "Com ponto" if has_gps else "Sem ponto",
+                "Plantio": plantio_status,
+                "Mudas": mudas if mudas != "--" else "Pendente",
+                "Tipo": tipo,
+            }
+            details = {
+                "Endereço cadastrado": endereco or "--",
+                "Coordenadas": f"{lat}, {lon}" if has_gps else "Sem ponto",
+                "Plantio": plantio_text or plantio_status,
+                "Mudas": mudas if mudas != "--" else "Pendente",
+                "Status": "Compensado" if compensado else "Pendente",
+                "Caixa": caixa,
+            }
+            pending = []
+            if not endereco:
+                next_step = "Próximo passo: preencher o endereço principal."
+                pending.append("Endereço principal pendente.")
+                recommended_action = "endereco"
+            elif not has_gps:
+                next_step = "Próximo passo: usar Buscar Endereço para validar o ponto no mapa."
+                pending.append("Ponto no mapa ainda não validado.")
+                recommended_action = "buscar_endereco"
+            elif not micro:
+                next_step = "Próximo passo: confirmar a microbacia pelo mapa."
+                pending.append("Microbacia ainda não confirmada.")
+                recommended_action = "buscar_endereco"
+            elif mudas == "--":
+                next_step = "Próximo passo: informar o número de mudas a compensar."
+                pending.append("Número de mudas pendente.")
+                recommended_action = "mudas"
+            else:
+                next_step = "Cadastro com dados principais prontos para revisão final."
+                recommended_action = "salvar" if self.main_window is not None and self.main_window.selected is not None else ""
+            if compensado and not (plantios or plantio_text):
+                pending.append("Cadastro compensado sem plantio vinculado.")
+                recommended_action = "plantios"
+            if tipo == "Pendente":
+                pending.append("Tipo do processo pendente.")
+                if not recommended_action:
+                    recommended_action = "tipo"
+            if not pending:
+                pending.append("Sem pendências principais. Confira dados antes de salvar.")
+            pending_text = "\n".join(f"- {item}" for item in pending[:4])
+            completed = sum(
+                [
+                    bool(endereco),
+                    bool(micro),
+                    has_gps,
+                    bool(plantios or plantio_text or not compensado),
+                    mudas != "--",
+                    tipo != "Pendente",
+                ]
+            )
+            score_text = f"{completed}/6"
+            card_states = {
+                "Endereço": "ok" if endereco else "warning",
+                "Microbacia": "ok" if micro else "warning",
+                "GPS": "ok" if has_gps else "warning",
+                "Plantio": "ok" if plantios or plantio_text or not compensado else "warning",
+                "Mudas": "ok" if mudas != "--" else "warning",
+                "Tipo": "ok" if tipo != "Pendente" else "warning",
+            }
+
+        for key, label in self.cadastro_review_labels.items():
+            label.setText(values.get(key, "--"))
+            self._set_review_card_state(key, card_states.get(key, "neutral"))
+        for key, label in getattr(self, "cadastro_review_detail_labels", {}).items():
+            label.setText(details.get(key, "--"))
+        self.lbl_cadastro_review_next.setText(next_step)
+        self.lbl_cadastro_review_score.setText(score_text)
+        self.lbl_cadastro_review_pending.setText(pending_text)
+        self._update_contextual_form_states(compensado=compensado, arquivado=arquivado)
+        for button in [
+            self.btn_maps,
+            self.btn_maps_plantio,
+            self.btn_manage_plantios,
+            self.btn_save_edit,
+            self.btn_review_search_address,
+            self.btn_review_open_plantios,
+            self.btn_review_save,
+        ]:
+            self._set_recommended_button(button, False)
+        if recommended_action == "buscar_endereco":
+            self._set_recommended_button(self.btn_maps, True)
+            self._set_recommended_button(self.btn_review_search_address, True)
+        elif recommended_action == "plantios":
+            self._set_recommended_button(self.btn_manage_plantios, True)
+            self._set_recommended_button(self.btn_review_open_plantios, True)
+        elif recommended_action == "salvar":
+            self._set_recommended_button(self.btn_save_edit, True)
+            self._set_recommended_button(self.btn_review_save, True)
+        self.btn_review_search_address.setEnabled(bool(recommended_action in {"buscar_endereco", "endereco"}))
+        self.btn_review_open_plantios.setEnabled(bool(compensado))
+        self.btn_review_save.setEnabled(bool(self.btn_save_edit.isEnabled()))
+
     def _summary_value_label(self, text: str):
         label = QLabel(text)
         label.setWordWrap(True)
@@ -591,6 +947,8 @@ class DataTab(QWidget):
             self.lbl_summary_micro.setText("--")
             if hasattr(self, "btn_open_cadastro_window"):
                 self.btn_open_cadastro_window.setEnabled(False)
+            self._update_form_dialog_header(None)
+            self.refresh_cadastro_review(None)
             return
 
         oficio = str(getattr(record, "oficio_processo", "") or "").strip() or "S/N"
@@ -612,6 +970,8 @@ class DataTab(QWidget):
         self.lbl_summary_micro.setText(micro)
         if hasattr(self, "btn_open_cadastro_window"):
             self.btn_open_cadastro_window.setEnabled(True)
+        self._update_form_dialog_header(record)
+        self.refresh_cadastro_review(record)
 
     def open_new_cadastro_window(self):
         if self.main_window is not None:
@@ -620,6 +980,7 @@ class DataTab(QWidget):
 
     def open_cadastro_window(self):
         dialog = self._ensure_form_dialog()
+        self._update_form_dialog_header(self.main_window.selected if self.main_window is not None else None)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -633,13 +994,57 @@ class DataTab(QWidget):
         dialog = QDialog(self.window())
         dialog.setWindowTitle("Cadastro de compensação")
         dialog.setModal(False)
-        dialog.resize(max(int(1180 * self.sf), 980), max(int(760 * self.sf), 660))
+        dialog.resize(max(int(1260 * self.sf), 1080), max(int(780 * self.sf), 700))
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
         layout.setSpacing(int(8 * self.sf))
+
+        header = QFrame(dialog)
+        header.setProperty("panel", "toolbar")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(int(12 * self.sf), int(10 * self.sf), int(12 * self.sf), int(10 * self.sf))
+        header_layout.setSpacing(int(10 * self.sf))
+        title_box = QVBoxLayout()
+        title_box.setSpacing(int(2 * self.sf))
+        self.form_dialog_kicker = QLabel("CADASTRO")
+        self.form_dialog_kicker.setProperty("role", "eyebrow")
+        self.form_dialog_title = QLabel("Novo cadastro")
+        self.form_dialog_title.setProperty("role", "section-title")
+        self.form_dialog_meta = QLabel("Sem registro selecionado")
+        self.form_dialog_meta.setProperty("role", "helper")
+        self.form_dialog_meta.setWordWrap(True)
+        title_box.addWidget(self.form_dialog_kicker)
+        title_box.addWidget(self.form_dialog_title)
+        title_box.addWidget(self.form_dialog_meta)
+        header_layout.addLayout(title_box, 1)
+        self.form_dialog_status = QLabel("Novo")
+        self.form_dialog_status.setObjectName("StatusChip")
+        self.form_dialog_status.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(self.form_dialog_status, 0, Qt.AlignTop | Qt.AlignRight)
+        layout.addWidget(header)
+
         layout.addWidget(self.form_workspace, 1)
         self.form_dialog = dialog
+        self._update_form_dialog_header(self.main_window.selected if self.main_window is not None else None)
         return dialog
+
+    def _update_form_dialog_header(self, record: Optional[Compensacao]):
+        if not hasattr(self, "form_dialog_title"):
+            return
+        if record is None:
+            self.form_dialog_kicker.setText("CADASTRO")
+            self.form_dialog_title.setText("Novo cadastro")
+            self.form_dialog_meta.setText("Preencha os dados e salve para incluir um novo processo.")
+            self.form_dialog_status.setText("Novo")
+            return
+        oficio = str(getattr(record, "oficio_processo", "") or "").strip() or "S/N"
+        mudas = self._format_summary_number(getattr(record, "compensacao", ""))
+        micro = str(getattr(record, "microbacia", "") or "").strip() or "--"
+        compensado = str(getattr(record, "compensado", "") or "").strip().upper() == "SIM"
+        self.form_dialog_kicker.setText("REGISTRO EM EDIÇÃO")
+        self.form_dialog_title.setText(oficio)
+        self.form_dialog_meta.setText(f"Mudas: {mudas} | Microbacia: {micro}")
+        self.form_dialog_status.setText("Compensado" if compensado else "Pendente")
 
     def _prepare_compact_map_for_dialog(self):
         try:
@@ -647,7 +1052,7 @@ class DataTab(QWidget):
         except Exception:
             return
         if self.has_map_web_view():
-            self.web.setMinimumHeight(max(int(260 * self.sf), 230))
+            self.web.setMinimumHeight(max(int(460 * self.sf), 380))
 
     def _current_root_dimensions(self) -> tuple[int, int]:
         try:
@@ -693,9 +1098,7 @@ class DataTab(QWidget):
         placeholder_layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
         placeholder_layout.setSpacing(int(6 * self.sf))
 
-        self.map_placeholder_label = QLabel(
-            "O mapa embutido é carregado sob demanda para manter a abertura do app estável. Use-o quando precisar validar endereço, microbacia ou plantio no contexto do cadastro."
-        )
+        self.map_placeholder_label = QLabel("Mapa não carregado. Abra quando precisar validar endereço, plantio ou microbacia.")
         self.map_placeholder_label.setWordWrap(True)
         self.map_placeholder_label.setObjectName("FormStateLabel")
 
@@ -722,8 +1125,8 @@ class DataTab(QWidget):
     def _create_map_web_view(self):
         webengine_view_cls, webchannel_cls, webengine_settings_cls = _ensure_webengine_classes()
         web = webengine_view_cls()
-        web.setMinimumHeight(int(350 * self.sf))
-        web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        web.setMinimumHeight(max(int(460 * self.sf), 380))
+        web.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         web.setPage(DebugPage(web))
         settings = web.page().settings()
         settings.setAttribute(webengine_settings_cls.LocalContentCanAccessFileUrls, True)
@@ -1000,8 +1403,8 @@ class DataTab(QWidget):
                 button.setMinimumHeight(map_button_height)
             if self.has_map_web_view():
                 map_height = max(
-                    int(((200 if very_short_mode else 230 if short_mode else 350) * self.sf)),
-                    170 if very_short_mode else 205 if short_mode else 280,
+                    int(((380 if very_short_mode else 420 if short_mode else 460) * self.sf)),
+                    340 if very_short_mode else 360 if short_mode else 380,
                 )
                 self.web.setMinimumHeight(map_height)
 
@@ -1270,11 +1673,19 @@ class DataTab(QWidget):
             return le
 
         self.in_oficio = mk_in(primary_field_w)
+        self.in_oficio.setMinimumWidth(max(int(172 * self.sf), 150))
         self.in_oficio.setPlaceholderText("Ex.: 206/2021 - SMMACTI")
         self.in_oficio.setToolTip("Número do ofício ou processo principal do cadastro.")
         self.chk_sn = QCheckBox("S/N")
-        self.chk_sn.setFixedWidth(aux_col_w)
+        self.chk_sn.setMinimumWidth(max(int(86 * self.sf), 76))
         self.chk_sn.setToolTip("Marque quando o cadastro não possuir ofício ou processo definido.")
+        self.oficio_sn_container = QWidget()
+        self.oficio_sn_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.oficio_sn_layout = QHBoxLayout(self.oficio_sn_container)
+        self.oficio_sn_layout.setContentsMargins(0, 0, 0, 0)
+        self.oficio_sn_layout.setSpacing(int(16 * self.sf))
+        self.oficio_sn_layout.addWidget(self.in_oficio, 1)
+        self.oficio_sn_layout.addWidget(self.chk_sn, 0, Qt.AlignLeft | Qt.AlignVCenter)
 
         self.in_avtec = mk_in(secondary_field_w)
         self.in_avtec.setPlaceholderText("Ex.: 107/2021")
@@ -1328,6 +1739,7 @@ class DataTab(QWidget):
         self.chk_arquivado = QCheckBox("Arquivado")
         self.chk_arquivado.setToolTip("Preenche automaticamente a caixa como Arquivado.")
         self.chk_compensado = QCheckBox("Compensado (SIM)")
+        self.chk_compensado.setMinimumWidth(max(int(156 * self.sf), 142))
         self.chk_compensado.setToolTip("Marca o cadastro como já compensado.")
         self.plantio_actions_layout.addWidget(self.btn_manage_plantios, 0, Qt.AlignLeft | Qt.AlignVCenter)
         self.plantio_actions_layout.addWidget(self.chk_compensado, 0, Qt.AlignLeft | Qt.AlignVCenter)
@@ -1352,8 +1764,7 @@ class DataTab(QWidget):
         lbl_caixa = mk_lbl("Caixa:")
 
         l.addWidget(lbl_oficio, 0, 0)
-        l.addWidget(self.in_oficio, 0, 1)
-        l.addWidget(self.chk_sn, 0, 2, Qt.AlignLeft | Qt.AlignVCenter)
+        l.addWidget(self.oficio_sn_container, 0, 1, 1, 2)
         l.addWidget(lbl_avtec, 0, 3)
         l.addWidget(self.in_avtec, 0, 4)
 
@@ -1372,7 +1783,7 @@ class DataTab(QWidget):
         l.addWidget(lbl_caixa, 3, 3)
         l.addWidget(self.in_caixa, 3, 4)
 
-        l.addWidget(self.plantio_actions_container, 4, 1, 1, 2)
+        l.addWidget(self.plantio_actions_container, 4, 1, 1, 3)
         l.addWidget(self.chk_arquivado, 4, 4)
 
         l.setColumnMinimumWidth(0, label_w)
@@ -1424,8 +1835,10 @@ class DataTab(QWidget):
         for b in [self.btn_maps, self.btn_maps_plantio, self.btn_batch_geo, self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
             b.setMinimumHeight(int(24 * self.sf))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        for b in [self.btn_maps, self.btn_maps_plantio, self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
+        for b in [self.btn_map_full, self.btn_street_view, self.btn_add_layer]:
             b.setProperty("kind", "chip-quiet")
+        self.btn_maps.setProperty("kind", "primary")
+        self.btn_maps_plantio.setProperty("kind", "primary")
         self.btn_batch_geo.setProperty("kind", "secondary")
         self.btn_maps.setToolTip("Geocodifica o endereço principal e posiciona o mapa.")
         self.btn_maps_plantio.setToolTip("Geocodifica o endereço de plantio cadastrado.")

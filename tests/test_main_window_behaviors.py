@@ -1671,8 +1671,12 @@ def test_right_panel_uses_compact_summary_and_keeps_form_layout_in_dialog_worksp
     assert window.data_tab.record_summary_group.isVisible()
     assert window.data_tab.record_actions_group.isVisible()
     assert not window.data_tab.form_workspace.isVisible()
-    assert window.data_tab.form_group.parentWidget() is window.data_tab.form_workspace
-    assert window.data_tab.map_group.parentWidget() is window.data_tab.form_workspace
+    assert window.data_tab.form_group.parentWidget() is window.data_tab.cadastro_left_panel
+    assert window.data_tab.map_group.parentWidget() is window.data_tab.cadastro_map_panel
+    assert window.data_tab.map_host.parentWidget() is window.data_tab.cadastro_map_panel
+    assert window.data_tab.map_host.minimumHeight() >= 360
+    assert window.data_tab.cadastro_review_panel.parentWidget() is window.data_tab.cadastro_left_panel
+    assert "Revisão" in window.data_tab.cadastro_review_panel.findChildren(QtWidgets.QLabel)[0].text()
     assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
     assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
     assert window.data_tab.form_group.layout().itemAtPosition(4, 1).widget() is window.data_tab.plantio_actions_container

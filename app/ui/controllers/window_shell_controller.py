@@ -149,10 +149,11 @@ class WindowShellController:
         search_header.addWidget(self.window.search_context_label, 0)
         search_header.addStretch(1)
         self.window.search_helper_label = QLabel(
-            "Use a busca superior para localizar rapidamente itens no módulo em foco."
+            "Localize itens no módulo em foco."
         )
         self.window.search_helper_label.setProperty("role", "helper")
         self.window.search_helper_label.setWordWrap(True)
+        self.window.search_helper_label.setVisible(False)
         search_panel_layout.addLayout(search_header)
         search_panel_layout.addWidget(self.window.search_helper_label, 0)
         search_panel_layout.addWidget(self.window.search, 0)
@@ -199,6 +200,7 @@ class WindowShellController:
         self.window.session_context_label.setProperty("role", "account-meta")
         self.window.session_context_label.setWordWrap(True)
         self.window.session_context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.window.session_context_label.setVisible(False)
 
         self.window.btn_sign_out = QPushButton("Sair")
         self.window.btn_sign_out.setProperty("kind", "secondary")
@@ -536,11 +538,11 @@ class WindowShellController:
                     max(int((28 if compact_mode else 30) * scale_factor), 26)
                 )
             if hasattr(self.window, "search_helper_label"):
-                self.window.search_helper_label.setVisible(not compact_mode)
+                self.window.search_helper_label.setVisible(False)
             if hasattr(self.window, "search_context_label"):
                 self.window.search_context_label.setVisible(not tight_mode)
             if hasattr(self.window, "session_context_label"):
-                self.window.session_context_label.setVisible(not compact_mode)
+                self.window.session_context_label.setVisible(False)
             if hasattr(self.window, "account_environment_chip"):
                 self.window.account_environment_chip.setVisible(not tight_mode)
             if hasattr(self.window, "session_role_label"):
@@ -584,7 +586,7 @@ class WindowShellController:
             for widget in getattr(self, "_secondary_status_widgets", []):
                 widget.setVisible(not compact_mode)
             for widget in getattr(self, "_tertiary_status_widgets", []):
-                widget.setVisible(not tight_mode)
+                widget.setVisible(False)
             self._apply_process_status_visibility(compact_mode=compact_mode)
         except RuntimeError:
             return
@@ -1371,6 +1373,8 @@ class WindowShellController:
         self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
         self.window._update_address_search_enabled()
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review()
 
     def validate_as_you_type(self):
         self.window.form_controller.validate_as_you_type()
@@ -1397,6 +1401,8 @@ class WindowShellController:
         self.window.form_controller.remember_current_state()
         self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review()
 
     def on_chk_arquivado_toggled(self, checked):
         self.window.data_tab.in_caixa.blockSignals(True)
@@ -1415,6 +1421,8 @@ class WindowShellController:
         self.window.form_controller.remember_current_state()
         self.window.form_controller.validate_as_you_type()
         self.window._update_form_action_buttons()
+        if hasattr(self.window.data_tab, "refresh_cadastro_review"):
+            self.window.data_tab.refresh_cadastro_review()
 
     def finalize_startup_layout(self):
         try:
@@ -1589,6 +1597,31 @@ class WindowShellController:
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)
         completer.setCompletionMode(QCompleter.PopupCompletion)
+        popup = completer.popup()
+        popup.setObjectName("addressCompleterPopup")
+        popup.setMinimumWidth(max(data_tab.in_end.width(), 360))
+        popup.setStyleSheet(
+            """
+            QAbstractItemView#addressCompleterPopup {
+                background-color: #f8fafc;
+                color: #111827;
+                border: 1px solid #64748b;
+                border-radius: 6px;
+                padding: 4px;
+                outline: 0;
+                selection-background-color: #2d8cff;
+                selection-color: #ffffff;
+            }
+            QAbstractItemView#addressCompleterPopup::item {
+                min-height: 24px;
+                padding: 4px 8px;
+            }
+            QAbstractItemView#addressCompleterPopup::item:hover {
+                background-color: #dbeafe;
+                color: #111827;
+            }
+            """
+        )
         data_tab.in_end.setCompleter(completer)
         data_tab.address_completer = completer
 

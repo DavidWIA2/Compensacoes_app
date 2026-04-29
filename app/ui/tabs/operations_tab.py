@@ -81,7 +81,7 @@ class OperationsTab(QWidget):
         title = QLabel("Operações e histórico")
         title.setProperty("role", "page-title")
         self.header_subtitle = QLabel(
-            "Acompanhe movimentações, sincronia da produção e restaurações sem deixar o uso diário técnico demais."
+            "Movimentações, sincronia e restaurações da sessão."
         )
         self.header_subtitle.setWordWrap(True)
         self.header_subtitle.setProperty("role", "page-subtitle")
@@ -213,7 +213,7 @@ class OperationsTab(QWidget):
         toolbar_container.setContentsMargins(int(10 * self.sf), int(9 * self.sf), int(10 * self.sf), int(9 * self.sf))
         toolbar_container.setSpacing(int(5 * self.sf))
         self.toolbar_hint = QLabel(
-            "Filtre o histórico do recorte atual, sincronize a produção e acesse restaurações quando precisar agir."
+            "Filtre o histórico, sincronize a produção e acesse restaurações."
         )
         self.toolbar_hint.setProperty("role", "helper")
         self.toolbar_hint.setWordWrap(True)
@@ -292,7 +292,7 @@ class OperationsTab(QWidget):
         table_panel_layout.setSpacing(int(6 * self.sf))
         table_title = QLabel("Linha do tempo operacional")
         table_title.setProperty("role", "section-title")
-        table_hint = QLabel("Selecione uma operação para revisar o resumo, o backup disponível e os detalhes da ação.")
+        table_hint = QLabel("Selecione uma operação para revisar detalhes e backup.")
         table_hint.setProperty("role", "helper")
         table_hint.setWordWrap(True)
         table_panel_layout.addWidget(table_title)
@@ -320,7 +320,7 @@ class OperationsTab(QWidget):
         details_layout.setSpacing(int(6 * self.sf))
         self.lbl_details_title = QLabel("Painel da operação")
         self.lbl_details_title.setProperty("role", "section-title")
-        details_hint = QLabel("Use esta área para validar a ação registrada e decidir quando restaurar ou exportar.")
+        details_hint = QLabel("Detalhes da ação selecionada.")
         details_hint.setProperty("role", "helper")
         details_hint.setWordWrap(True)
         self.details = QPlainTextEdit(self)

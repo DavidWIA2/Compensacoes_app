@@ -286,12 +286,15 @@
     ]
   };
 
+  const SAO_CARLOS_CENTER = [-47.89, -22.017];
+  const SAO_CARLOS_CITY_ZOOM = 12;
+
   try {
     map = new maplibregl.Map({
       container: "map",
       style: initialStyle,
-      center: [-47.89, -22.015],
-      zoom: 12,
+      center: SAO_CARLOS_CENTER,
+      zoom: SAO_CARLOS_CITY_ZOOM,
       maxZoom: 20,
       attributionControl: false,
       fadeDuration: 120,
@@ -398,8 +401,6 @@
       const source = map.getSource("microbacias");
       if (source && source.setData) source.setData(data);
       const total = Array.isArray(data.features) ? data.features.length : 0;
-      const bounds = boundsFromGeoJson(data);
-      if (bounds) map.fitBounds(bounds, { padding: 18, duration: 250, maxZoom: 15 });
       setStatus(total ? `Microbacias carregadas: ${total}` : "Sem microbacias para exibir.");
     });
   }

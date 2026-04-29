@@ -168,6 +168,20 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             border-radius: {radius}px;
         }}
 
+        QFrame[reviewState="ok"] {{
+            border-left: {max(int(3 * sf), 3)}px solid {t['btn_success']};
+            background-color: rgba(45, 138, 95, 0.10);
+        }}
+
+        QFrame[reviewState="warning"] {{
+            border-left: {max(int(3 * sf), 3)}px solid #d97706;
+            background-color: rgba(217, 119, 6, 0.11);
+        }}
+
+        QFrame[reviewState="neutral"] {{
+            border-left: {max(int(3 * sf), 3)}px solid {t['status_border']};
+        }}
+
         QMainWindow, QDialog {{
             background-color: {t['bg_main']};
             color: {t['text']};
@@ -368,6 +382,11 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
             image: url("{spin_down}");
         }}
         QLineEdit::placeholder, QTextEdit::placeholder, QPlainTextEdit::placeholder {{ color: {t['placeholder']}; }}
+
+        QLineEdit[contextState="quiet"] {{
+            color: {t['muted']};
+            background-color: {t['bg_subtle']};
+        }}
         
         QComboBox QAbstractItemView {{
             background-color: {t['input_bg']};
@@ -434,6 +453,11 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
         }}
         QPushButton[kind="primary"]:hover:!disabled {{ background-color: {t['btn_primary_hover']}; }}
         QPushButton[kind="primary"]:pressed:!disabled {{ background-color: {t['btn_primary_pressed']}; }}
+
+        QPushButton[recommended="true"]:!disabled {{
+            border: 2px solid {t['btn_primary']};
+            padding: {max(padding_v - 1, 2)}px {max(padding_h - 1, 6)}px;
+        }}
 
         QPushButton[kind="success"] {{
             background-color: {t['btn_success']};

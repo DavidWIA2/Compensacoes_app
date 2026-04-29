@@ -465,9 +465,6 @@ class MainWindow(QMainWindow):
     def _on_map_click(self, lat, lon):
         return self.map_controller.on_map_click(lat, lon)
 
-    def _on_mapbox_tiles_requested(self, count: int):
-        return self.map_controller.record_mapbox_tile_requests(count)
-
     def _set_map_marker(self, lat, lon):
         return self.map_controller.set_map_marker(lat, lon)
 

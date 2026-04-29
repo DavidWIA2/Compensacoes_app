@@ -735,21 +735,12 @@ class FormController:
         )
 
     def validate_as_you_type(self):
-        record = self.read_form()
-        if (
-            self.window.selected is None
-            and not str(record.oficio_processo or "").strip()
-            and not str(record.av_tec or "").strip()
-            and not str(record.compensacao or "").strip()
-            and not str(record.endereco or "").strip()
-            and not str(record.endereco_plantio or "").strip()
-            and not str(record.microbacia or "").strip()
-            and not tuple(getattr(record, "plantios", ()) or ())
-        ):
+        if self.window.selected is None:
             self._reset_inline_feedback()
             return
 
-        uid = self.window.selected.uid if self.window.selected else ""
+        record = self.read_form()
+        uid = self.window.selected.uid
         duplicate_row = self.check_duplicate_av_tec(str(record.av_tec or "").strip(), uid)
         presentation = build_form_validation_presentation(
             record=record,
@@ -784,6 +775,8 @@ class FormController:
         self.window.data_tab.btn_save_edit.setEnabled(action_state.enable_save)
         self.window.data_tab.btn_delete.setEnabled(action_state.enable_delete)
         self.window.data_tab.btn_ficha_pdf.setEnabled(action_state.enable_ficha)
+        if hasattr(self.window.data_tab, "btn_open_cadastro_window"):
+            self.window.data_tab.btn_open_cadastro_window.setEnabled(has_selected)
 
     def on_compensado_toggled(self, checked: bool):
         if not checked and self.window.form_plantios:
@@ -1125,6 +1118,8 @@ class FormController:
             self.window.last_marker_coords = None
             self.window.data_tab.btn_street_view.setEnabled(False)
 
+        if hasattr(self.window.data_tab, "update_record_summary"):
+            self.window.data_tab.update_record_summary(None)
         self._reset_inline_feedback()
         self.window.shell_controller.refresh_tipo_controls()
         self.window._update_address_search_enabled()

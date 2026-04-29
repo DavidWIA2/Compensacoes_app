@@ -8,12 +8,12 @@ from PySide6.QtWidgets import (
     QGroupBox, QGridLayout, QLabel, QLineEdit, QCheckBox, QComboBox,
     QPushButton, QSizePolicy, QButtonGroup, QStyle, QStyleOptionButton, QFrame,
     QMenu, QToolButton,
+    QDialog,
 )
 from app.models.compensacao import Compensacao
 from app.models.display_columns import DISPLAY_COLUMN_ATTRS, display_column_index
 from app.config import MAP_DEFAULT_BASE_LAYER
 from app.services.map_engine import resolve_map_engine_resource
-from app.services.mapbox_config import read_mapbox_usage, resolve_mapbox_access_token
 from app.services.records_service import display_tipo_value
 from app.ui.components.widgets import (
     CheckableComboBox,
@@ -42,7 +42,6 @@ from app.ui.tabs.data_tab_support import (
     build_totals_rows,
     compute_crud_buttons_minimum_width,
     compute_preferred_left_panel_width,
-    compute_preferred_right_panel_width,
     compute_splitter_anchor_left_width,
     compute_splitter_sizes,
     compute_target_column_width,
@@ -107,6 +106,7 @@ class DataTab(QWidget):
         self.web = None
         self.channel = None
         self.bridge = None
+        self.form_dialog = None
         self.setup_ui()
 
     def showEvent(self, event):
@@ -408,16 +408,24 @@ class DataTab(QWidget):
         self.right_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         r_lay = QVBoxLayout(self.right_panel)
         r_lay.setContentsMargins(panel_gap, 0, 0, 0)
-        r_lay.setSpacing(int(6 * self.sf))
-        self.lbl_form_context = QLabel(
-            "O painel lateral concentra o cadastro do processo, plantios vinculados e ações de geocodificação."
-        )
-        self.lbl_form_context.setProperty("role", "helper")
-        self.lbl_form_context.setWordWrap(True)
-        r_lay.addWidget(self.lbl_form_context, 0)
+        r_lay.setSpacing(int(8 * self.sf))
+        self.record_context_panel = self._create_record_context_panel()
+        self.record_summary_group = self.record_context_panel
+        self.record_actions_group = self.record_context_panel
+        r_lay.addWidget(self.record_context_panel, 0)
+        r_lay.addStretch(1)
+
+        self.form_workspace = QWidget(self)
+        self.form_workspace.setVisible(False)
+        self.form_workspace.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        form_workspace_layout = QVBoxLayout(self.form_workspace)
+        self.form_workspace_layout = form_workspace_layout
+        form_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        form_workspace_layout.setSpacing(int(6 * self.sf))
+
         self.form_group = self._create_form_group()
         self._update_form_group_height()
-        r_lay.addWidget(self.form_group, 0)
+        form_workspace_layout.addWidget(self.form_group, 0)
 
         crud_frame = QFrame(self.right_panel)
         crud_frame.setProperty("panel", "subtle")
@@ -446,10 +454,10 @@ class DataTab(QWidget):
             b.setFixedHeight(max(int(28 * self.sf), 28))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             crud.addWidget(b)
-        r_lay.addWidget(crud_frame, 0)
+        form_workspace_layout.addWidget(crud_frame, 0)
 
         self.map_group = self._create_map_group()
-        r_lay.addWidget(self.map_group)
+        form_workspace_layout.addWidget(self.map_group, 0)
 
         self.map_host = QWidget()
         self.map_host.setMinimumHeight(0)
@@ -458,7 +466,7 @@ class DataTab(QWidget):
         self.map_host_layout.setContentsMargins(0, 0, 0, 0)
         self.map_host_layout.setSpacing(0)
         self._build_map_placeholder()
-        r_lay.addWidget(self.map_host, 1)
+        form_workspace_layout.addWidget(self.map_host, 1)
         self.splitter.addWidget(self.right_panel)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
@@ -468,6 +476,178 @@ class DataTab(QWidget):
         schedule_owned_single_shot(self, 0, self._sync_left_panel_heights)
         schedule_owned_single_shot(self, 0, self._update_responsive_constraints)
         schedule_owned_single_shot(self, 0, self.align_splitter_to_table_width)
+
+    def _create_record_context_panel(self):
+        panel = QFrame()
+        panel.setProperty("panel", "sidebar")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
+        layout.setSpacing(int(10 * self.sf))
+
+        self.lbl_context_caption = QLabel("REGISTRO")
+        self.lbl_context_caption.setProperty("role", "eyebrow")
+        self.lbl_summary_oficio = QLabel("Nenhum registro selecionado")
+        self.lbl_summary_oficio.setProperty("role", "section-title")
+        self.lbl_summary_oficio.setWordWrap(True)
+        self.lbl_summary_status = QLabel("Aguardando seleção")
+        self.lbl_summary_status.setObjectName("StatusChip")
+        self.lbl_summary_status.setAlignment(Qt.AlignCenter)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(int(8 * self.sf))
+        title_text = QVBoxLayout()
+        title_text.setSpacing(int(2 * self.sf))
+        title_text.addWidget(self.lbl_context_caption)
+        title_text.addWidget(self.lbl_summary_oficio)
+        title_row.addLayout(title_text, 1)
+        title_row.addWidget(self.lbl_summary_status, 0, Qt.AlignTop | Qt.AlignRight)
+        layout.addLayout(title_row)
+
+        self.lbl_summary_hint = QLabel("Selecione uma linha para revisar o contexto sem sair da consulta.")
+        self.lbl_summary_hint.setProperty("role", "helper")
+        self.lbl_summary_hint.setWordWrap(True)
+        layout.addWidget(self.lbl_summary_hint)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(int(6 * self.sf))
+        self.btn_new_cadastro_window = QPushButton("Novo")
+        self.btn_open_cadastro_window = QPushButton("Abrir cadastro")
+        self.btn_open_map_window = QPushButton("Mapa")
+        self.btn_new_cadastro_window.setProperty("kind", "success")
+        self.btn_open_cadastro_window.setProperty("kind", "primary")
+        self.btn_open_map_window.setProperty("kind", "secondary")
+        self.btn_new_cadastro_window.setToolTip("Abre a janela de cadastro para inserir um novo processo.")
+        self.btn_open_cadastro_window.setToolTip("Abre a janela de cadastro do registro selecionado.")
+        self.btn_open_map_window.setToolTip("Abre o mapa em janela ampliada com os overlays atuais.")
+        for button in [self.btn_new_cadastro_window, self.btn_open_cadastro_window, self.btn_open_map_window]:
+            button.setMinimumHeight(max(int(30 * self.sf), 28))
+            action_row.addWidget(button)
+        self.btn_open_cadastro_window.setEnabled(False)
+        layout.addLayout(action_row)
+
+        detail_frame = QFrame(panel)
+        detail_frame.setProperty("panel", "subtle")
+        detail_layout = QVBoxLayout(detail_frame)
+        detail_layout.setContentsMargins(int(12 * self.sf), int(10 * self.sf), int(12 * self.sf), int(10 * self.sf))
+        detail_layout.setSpacing(int(6 * self.sf))
+        self.lbl_summary_tipo = self._add_summary_row(detail_layout, "Tipo", "--")
+        self.lbl_summary_mudas = self._add_summary_row(detail_layout, "Mudas a compensar", "--")
+        self.lbl_summary_micro = self._add_summary_row(detail_layout, "Microbacia", "--")
+        self.lbl_summary_endereco = self._add_summary_row(detail_layout, "Endereço", "--")
+        self.lbl_summary_plantio = self._add_summary_row(detail_layout, "Plantio", "--", add_separator=False)
+        layout.addWidget(detail_frame)
+        return panel
+
+    def _summary_value_label(self, text: str):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return label
+
+    def _add_summary_row(self, layout: QVBoxLayout, label: str, value: str, *, add_separator: bool = True):
+        row = QWidget()
+        row_layout = QVBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(int(2 * self.sf))
+
+        key = QLabel(label)
+        key.setProperty("role", "muted")
+        key.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        value_label = QLabel(value)
+        value_label.setWordWrap(True)
+        value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row_layout.addWidget(key)
+        row_layout.addWidget(value_label)
+        layout.addWidget(row)
+
+        if add_separator:
+            separator = QFrame()
+            separator.setFrameShape(QFrame.HLine)
+            separator.setFrameShadow(QFrame.Plain)
+            layout.addWidget(separator)
+        return value_label
+
+    @staticmethod
+    def _format_summary_number(value: object) -> str:
+        if value is None:
+            return "--"
+        text = str(value).strip()
+        if not text:
+            return "--"
+        try:
+            return f"{float(text.replace(',', '.')):g}"
+        except ValueError:
+            return text
+
+    def update_record_summary(self, record: Optional[Compensacao]):
+        if record is None:
+            self.lbl_summary_oficio.setText("Nenhum registro selecionado")
+            self.lbl_summary_status.setText("Aguardando seleção")
+            self.lbl_summary_hint.setText("Selecione uma linha para revisar o contexto sem sair da consulta.")
+            self.lbl_summary_tipo.setText("--")
+            self.lbl_summary_mudas.setText("--")
+            self.lbl_summary_endereco.setText("--")
+            self.lbl_summary_plantio.setText("--")
+            self.lbl_summary_micro.setText("--")
+            if hasattr(self, "btn_open_cadastro_window"):
+                self.btn_open_cadastro_window.setEnabled(False)
+            return
+
+        oficio = str(getattr(record, "oficio_processo", "") or "").strip() or "S/N"
+        tipo = display_tipo_value(getattr(record, "eletronico", "") or "") or "--"
+        mudas = self._format_summary_number(getattr(record, "compensacao", ""))
+        compensado = str(getattr(record, "compensado", "") or "").strip().upper() == "SIM"
+        status = "Compensado" if compensado else "Pendente"
+        endereco = str(getattr(record, "endereco", "") or "").strip() or "--"
+        plantio = str(getattr(record, "endereco_plantio", "") or "").strip() or "--"
+        micro = str(getattr(record, "microbacia", "") or "").strip() or "--"
+
+        self.lbl_summary_oficio.setText(oficio)
+        self.lbl_summary_status.setText(status)
+        self.lbl_summary_hint.setText("Duplo clique na linha também abre o cadastro.")
+        self.lbl_summary_tipo.setText(tipo)
+        self.lbl_summary_mudas.setText(mudas)
+        self.lbl_summary_endereco.setText(endereco)
+        self.lbl_summary_plantio.setText(plantio)
+        self.lbl_summary_micro.setText(micro)
+        if hasattr(self, "btn_open_cadastro_window"):
+            self.btn_open_cadastro_window.setEnabled(True)
+
+    def open_new_cadastro_window(self):
+        if self.main_window is not None:
+            self.main_window.clear_form(force=True)
+        self.open_cadastro_window()
+
+    def open_cadastro_window(self):
+        dialog = self._ensure_form_dialog()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self.form_workspace.setVisible(True)
+        schedule_owned_single_shot(self, 0, self._prepare_compact_map_for_dialog)
+
+    def _ensure_form_dialog(self):
+        if self.form_dialog is not None:
+            return self.form_dialog
+
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle("Cadastro de compensação")
+        dialog.setModal(False)
+        dialog.resize(max(int(1180 * self.sf), 980), max(int(760 * self.sf), 660))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
+        layout.setSpacing(int(8 * self.sf))
+        layout.addWidget(self.form_workspace, 1)
+        self.form_dialog = dialog
+        return dialog
+
+    def _prepare_compact_map_for_dialog(self):
+        try:
+            self.load_map()
+        except Exception:
+            return
+        if self.has_map_web_view():
+            self.web.setMinimumHeight(max(int(260 * self.sf), 230))
 
     def _current_root_dimensions(self) -> tuple[int, int]:
         try:
@@ -553,7 +733,6 @@ class DataTab(QWidget):
         self.bridge = MapBridge(
             getattr(self.main_window, "_on_map_click", None) if self.main_window else None,
             getattr(self.main_window, "save_map_layer_preference", None) if self.main_window else None,
-            getattr(self.main_window, "_on_mapbox_tiles_requested", None) if self.main_window else None,
         )
         self.channel.registerObject("bridge", self.bridge)
         web.page().setWebChannel(self.channel)
@@ -668,23 +847,14 @@ class DataTab(QWidget):
         )
 
     def preferred_right_panel_width(self) -> int:
-        return compute_preferred_right_panel_width(
-            scale_factor=self.sf,
-            map_group_width=self.map_group.minimumSizeHint().width() if hasattr(self, "map_group") else None,
-            crud_buttons_width=self._crud_buttons_minimum_width() if hasattr(self, "btn_ficha_pdf") else None,
-            form_group_width=(
-                self.form_group.minimumSizeHint().width() + max(int(12 * self.sf), 12)
-                if hasattr(self, "form_group")
-                else None
-            ),
-        )
+        return max(int(340 * self.sf), 320)
 
     def _update_responsive_constraints(self):
         try:
             if not hasattr(self, "right_panel"):
                 return
             preferred_width = self.preferred_right_panel_width()
-            self.right_panel.setMinimumWidth(max(preferred_width, 520))
+            self.right_panel.setMinimumWidth(preferred_width)
         except RuntimeError:
             return
 
@@ -713,7 +883,8 @@ class DataTab(QWidget):
 
             self.lbl_workspace_subtitle.setVisible(not tight_mode and not very_short_mode)
             self.lbl_workspace_helper.setVisible(not compact_mode and not short_mode)
-            self.lbl_form_context.setVisible(not compact_mode and not short_mode)
+            if hasattr(self, "lbl_summary_hint"):
+                self.lbl_summary_hint.setVisible(not (tight_mode and short_mode))
 
             filter_margin = max(int((8 if short_mode else 10) * self.sf), 6)
             filter_spacing = max(int((4 if short_mode else 6) * self.sf), 4)
@@ -975,13 +1146,6 @@ class DataTab(QWidget):
             query.addQueryItem("fallbackUrl", QUrl.fromLocalFile(fallback_html).toString())
         if engine == "leaflet":
             query.addQueryItem("tileScheme", "compmap")
-            mapbox_token = resolve_mapbox_access_token()
-            if mapbox_token:
-                mapbox_usage = read_mapbox_usage()
-                query.addQueryItem("mapboxToken", mapbox_token)
-                query.addQueryItem("mapboxUsageMonth", mapbox_usage.month)
-                query.addQueryItem("mapboxTileUsed", str(mapbox_usage.tiles_used))
-                query.addQueryItem("mapboxTileLimit", str(mapbox_usage.monthly_limit))
         url.setQuery(query)
         return url
 

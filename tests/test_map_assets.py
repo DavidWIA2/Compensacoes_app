@@ -21,15 +21,10 @@ def test_map_uses_local_leaflet_assets_and_heatmap_fallback():
     assert "syncSatelliteLabels" in html
     assert "window.setSatelliteLabels" in html
     assert "let satelliteLabelsEnabled = false" in html
-    assert "mapboxToken" in html
-    assert "mapboxTileLimit" in html
-    assert "onMapboxTilesRequested" in html
-    assert "MapboxLimitedTileLayer" in html
-    assert "Cota Mapbox atingida" in html
-    assert "satellite-streets-v12" in html
-    assert "Mapbox Satelite" in html
-    assert "tileSize:512" in html
-    assert "zoomOffset:-1" in html
+    assert "mapboxToken" not in html
+    assert "onMapboxTilesRequested" not in html
+    assert "MapboxLimitedTileLayer" not in html
+    assert "api.mapbox.com" not in html
     assert "Rótulos do satélite" in html
     assert 'map.on("overlayadd"' in html
     assert 'map.on("movestart zoomstart"' in html

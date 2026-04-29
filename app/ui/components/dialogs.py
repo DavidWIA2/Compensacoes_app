@@ -95,7 +95,6 @@ from app.ui.components.table_fullscreen_dialog_support import (
 )
 from app.ui.components.widgets import CheckableComboBox, ClickableComboBox, MapBridge, DebugPage
 from app.services.geocode_service import geocode_address
-from app.services.mapbox_config import read_mapbox_usage, resolve_mapbox_access_token
 from app.services.map_engine import resolve_map_engine_resource
 from app.config import MAP_DEFAULT_BASE_LAYER
 from app.services.plantio_service import clone_plantios
@@ -1450,13 +1449,6 @@ class MapFullScreenDialog(QDialog):
             query.addQueryItem("tileProxy", proxy_base)
         elif normalized_engine == "leaflet":
             query.addQueryItem("tileScheme", "compmap")
-        mapbox_token = resolve_mapbox_access_token()
-        if mapbox_token and normalized_engine == "leaflet":
-            mapbox_usage = read_mapbox_usage()
-            query.addQueryItem("mapboxToken", mapbox_token)
-            query.addQueryItem("mapboxUsageMonth", mapbox_usage.month)
-            query.addQueryItem("mapboxTileUsed", str(mapbox_usage.tiles_used))
-            query.addQueryItem("mapboxTileLimit", str(mapbox_usage.monthly_limit))
         url.setQuery(query)
         return url
 
@@ -1540,7 +1532,6 @@ class MapFullScreenDialog(QDialog):
         self.bridge = MapBridge(
             self._on_map_click_fs,
             self._on_layer_changed_fs,
-            getattr(self.parent_window, "_on_mapbox_tiles_requested", None),
         )
         self.channel.registerObject("bridge", self.bridge)
         self.web.page().setWebChannel(self.channel)

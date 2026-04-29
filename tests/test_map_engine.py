@@ -8,8 +8,6 @@ from app.config import (
     MAP_ENGINE,
     MAP_FALLBACK_ENGINE,
     MAP_PROVIDER,
-    MAPBOX_ENABLED,
-    MAPBOX_TOKEN_ENV_VAR,
 )
 from app.services.map_engine import normalize_map_engine, resolve_map_engine_resource
 
@@ -19,8 +17,6 @@ def test_map_provider_configuration_defaults_to_free_stack():
     assert MAP_FALLBACK_ENGINE == "leaflet"
     assert MAP_DEFAULT_BASE_LAYER == "satellite"
     assert MAP_PROVIDER == "osm_esri"
-    assert MAPBOX_ENABLED is False
-    assert MAPBOX_TOKEN_ENV_VAR == "MAPBOX_TOKEN"
     assert GEOCODER_PROVIDER == "nominatim"
     assert GEOCODER_FALLBACK_PROVIDER == "arcgis"
     assert GEOCODER_RATE_LIMIT_SECONDS == 1.0

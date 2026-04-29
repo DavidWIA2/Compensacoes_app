@@ -267,6 +267,8 @@ class DataController:
             self.window._refresh_window_chrome()
             if self.window.selected is not None:
                 self.window._fill_form(previous_selected)
+                if hasattr(self.window.data_tab, "update_record_summary"):
+                    self.window.data_tab.update_record_summary(self.window.selected)
                 self.window._update_form_action_buttons()
                 self.window._update_address_search_enabled()
         else:

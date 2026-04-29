@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
-    QLineEdit,
     QMessageBox,
     QSizePolicy,
     QTableView,
@@ -28,18 +27,6 @@ from app.services.geocode_service import (
     confirm_geocode_candidate,
     geocode_address_candidates,
     geocode_address_arcgis,
-)
-from app.services.mapbox_config import (
-    DEFAULT_MAPBOX_MONTHLY_TILE_LIMIT,
-    MAPBOX_LAYER_NAME,
-    MAPBOX_TOKEN_ENV_VAR,
-    redact_mapbox_access_token,
-    read_mapbox_usage,
-    record_mapbox_tile_requests,
-    resolve_mapbox_access_token,
-    resolve_mapbox_monthly_tile_limit,
-    save_mapbox_access_token,
-    save_mapbox_monthly_tile_limit,
 )
 from app.services.map_engine import resolve_map_engine_resource
 from app.services.geocode_update_service import (
@@ -280,64 +267,6 @@ class MapController:
     def set_map_status(self, message: str):
         command = self.map_rendering_use_cases.build_status_command(message)
         self.run_map_js(command.script, command.context)
-
-    def configure_mapbox(self):
-        current_token = resolve_mapbox_access_token()
-        current_hint = redact_mapbox_access_token(current_token) or "nenhum token salvo"
-        token, ok = QInputDialog.getText(
-            self.window,
-            "Configurar Mapbox",
-            (
-                "Cole o access token publico do Mapbox para habilitar a camada "
-                "Mapbox Satelite no mapa.\n\n"
-                f"Token atual: {current_hint}\n"
-                f"Tambem e possivel usar a variavel {MAPBOX_TOKEN_ENV_VAR}."
-            ),
-            QLineEdit.Password,
-            current_token,
-        )
-        if not ok:
-            return
-
-        if str(token or "").strip():
-            current_limit = resolve_mapbox_monthly_tile_limit() or DEFAULT_MAPBOX_MONTHLY_TILE_LIMIT
-            monthly_limit, limit_ok = QInputDialog.getInt(
-                self.window,
-                "Cota mensal Mapbox",
-                (
-                    "Defina uma cota mensal local de tiles Mapbox.\n"
-                    "Sugestao segura para teste: 5000 tiles/mes."
-                ),
-                int(current_limit),
-                100,
-                200000,
-                500,
-            )
-            if not limit_ok:
-                return
-            path = save_mapbox_access_token(token)
-            usage = save_mapbox_monthly_tile_limit(monthly_limit)
-            message = (
-                "Token do Mapbox salvo. O mapa sera recarregado e a camada "
-                f"'{MAPBOX_LAYER_NAME}' ficara disponivel no seletor de camadas.\n\n"
-                f"Cota local: {usage.tiles_used}/{usage.monthly_limit} tiles em {usage.month}."
-            )
-        else:
-            path = save_mapbox_access_token(token)
-            message = "Token local do Mapbox removido. O mapa sera recarregado sem a camada Mapbox."
-        QMessageBox.information(self.window, "Configurar Mapbox", f"{message}\n\nArquivo local: {path}")
-        self.reload_map()
-
-    def record_mapbox_tile_requests(self, count: int):
-        usage = record_mapbox_tile_requests(count)
-        if usage.limit_reached:
-            self.window.statusBar().showMessage(
-                f"Cota Mapbox atingida: {usage.tiles_used}/{usage.monthly_limit} tiles em {usage.month}."
-            )
-        return usage
-
-    def current_mapbox_usage(self):
-        return read_mapbox_usage()
 
     def reload_map(self):
         data_tab = getattr(self.window, "data_tab", None)

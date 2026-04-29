@@ -821,24 +821,40 @@ def get_app_qss(t: dict, sf: float = 1.0) -> str:
 
         QLabel[role="feedback-error"] {{
             color: {t['btn_danger']};
+            background: rgba(196, 71, 71, 0.10);
+            border: 1px solid rgba(196, 71, 71, 0.28);
+            border-radius: {int(6 * sf)}px;
+            padding: {int(3 * sf)}px {int(8 * sf)}px;
             font-size: {int(10 * sf)}px;
             font-weight: 700;
         }}
 
         QLabel[role="feedback-warning"] {{
             color: #d97706;
+            background: rgba(217, 119, 6, 0.11);
+            border: 1px solid rgba(217, 119, 6, 0.30);
+            border-radius: {int(6 * sf)}px;
+            padding: {int(3 * sf)}px {int(8 * sf)}px;
             font-size: {int(10 * sf)}px;
             font-weight: 700;
         }}
 
         QLabel[role="feedback-info"] {{
             color: {t['btn_primary']};
+            background: rgba(45, 112, 201, 0.10);
+            border: 1px solid rgba(45, 112, 201, 0.26);
+            border-radius: {int(6 * sf)}px;
+            padding: {int(3 * sf)}px {int(8 * sf)}px;
             font-size: {int(10 * sf)}px;
             font-weight: 700;
         }}
 
         QLabel[role="feedback-success"] {{
             color: {t['btn_success']};
+            background: rgba(45, 138, 95, 0.10);
+            border: 1px solid rgba(45, 138, 95, 0.26);
+            border-radius: {int(6 * sf)}px;
+            padding: {int(3 * sf)}px {int(8 * sf)}px;
             font-size: {int(10 * sf)}px;
             font-weight: 700;
         }}

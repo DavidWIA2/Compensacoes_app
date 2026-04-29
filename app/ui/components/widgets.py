@@ -31,12 +31,10 @@ class MapBridge(QObject):
         self,
         on_clicked_callback,
         on_layer_changed_callback=None,
-        on_mapbox_tiles_requested_callback=None,
     ):
         super().__init__()
         self._on_clicked = on_clicked_callback
         self._on_layer_changed = on_layer_changed_callback
-        self._on_mapbox_tiles_requested = on_mapbox_tiles_requested_callback
 
     @Slot(float, float)
     def onMapClicked(self, lat: float, lng: float):
@@ -47,11 +45,6 @@ class MapBridge(QObject):
     def onLayerChanged(self, layer_name: str):
         if self._on_layer_changed:
             self._on_layer_changed(layer_name)
-
-    @Slot(int)
-    def onMapboxTilesRequested(self, count: int):
-        if self._on_mapbox_tiles_requested:
-            self._on_mapbox_tiles_requested(count)
 
 
 def DebugPage(parent=None):

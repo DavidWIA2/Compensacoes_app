@@ -968,6 +968,8 @@ class WindowShellController:
             )
 
         data_tab.lbl_selection_summary.setText(summary)
+        if hasattr(data_tab, "btn_open_cadastro_window"):
+            data_tab.btn_open_cadastro_window.setEnabled(self.window.selected is not None)
         if hasattr(data_tab, "btn_bulk_action"):
             data_tab.btn_bulk_action.setEnabled(selected_count > 0)
             data_tab.btn_bulk_action.setText(
@@ -1123,12 +1125,6 @@ class WindowShellController:
 
         file_menu.addSeparator()
 
-        self.window.action_configure_mapbox = QAction("Configurar Mapbox", self.window)
-        self.window.action_configure_mapbox.triggered.connect(build_command("configure_mapbox"))
-        file_menu.addAction(self.window.action_configure_mapbox)
-
-        file_menu.addSeparator()
-
         self.window.action_change_password = QAction("Alterar senha", self.window)
         self.window.action_change_password.triggered.connect(build_command("change_password"))
         self.window.action_change_password.setEnabled(False)
@@ -1184,6 +1180,7 @@ class WindowShellController:
         self.window.data_tab.btn_columns.clicked.connect(build_command("open_columns_dialog"))
         self.window.data_tab.btn_table_full.clicked.connect(build_command("open_table_fullscreen"))
         self.window.data_tab.table.clicked.connect(self.window._on_table_clicked)
+        self.window.data_tab.table.doubleClicked.connect(self.window.data_tab.open_cadastro_window)
         selection_model = self.window.data_tab.table.selectionModel()
         if selection_model is not None:
             selection_model.selectionChanged.connect(lambda *_args: self.refresh_compensacoes_selection_state())
@@ -1198,6 +1195,9 @@ class WindowShellController:
             )
         self.window.data_tab.btn_process_history.clicked.connect(self.window.data_controller.show_selected_process_history)
         self.window.data_tab.btn_bulk_action.clicked.connect(self.window.form_controller.apply_bulk_action)
+        self.window.data_tab.btn_new_cadastro_window.clicked.connect(self.window.data_tab.open_new_cadastro_window)
+        self.window.data_tab.btn_open_cadastro_window.clicked.connect(self.window.data_tab.open_cadastro_window)
+        self.window.data_tab.btn_open_map_window.clicked.connect(build_command("open_map_fullscreen"))
         self.window.data_tab.action_selected_process_history.triggered.connect(
             self.window.data_controller.show_selected_process_history
         )
@@ -1686,6 +1686,7 @@ class WindowShellController:
 
         self.window.selected = self._resolve_filtered_record_selection(source_index.row())
         self.window._fill_form(self.window.selected)
+        self.window.data_tab.update_record_summary(self.window.selected)
         self.window._update_form_action_buttons()
         self.window._update_address_search_enabled()
 

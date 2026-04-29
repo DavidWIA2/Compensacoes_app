@@ -56,7 +56,7 @@ def test_map_fullscreen_dialog_uses_http_tile_proxy_when_available():
     assert query.queryItemValue("tileScheme") == ""
 
 
-def test_map_fullscreen_dialog_includes_mapbox_token(monkeypatch):
+def test_map_fullscreen_dialog_does_not_include_mapbox_token(monkeypatch):
     monkeypatch.setenv("MAPBOX_ACCESS_TOKEN", "pk.test-token")
     proxy = SimpleNamespace(start=lambda: "http://127.0.0.1:8123")
 
@@ -64,7 +64,7 @@ def test_map_fullscreen_dialog_includes_mapbox_token(monkeypatch):
     query = QUrlQuery(url)
 
     assert query.queryItemValue("tileProxy") == "http://127.0.0.1:8123"
-    assert query.queryItemValue("mapboxToken") == "pk.test-token"
+    assert query.queryItemValue("mapboxToken") == ""
 
 
 def test_map_fullscreen_dialog_falls_back_to_compmap_when_proxy_fails():

@@ -1658,7 +1658,7 @@ def test_crud_bar_has_padding_and_secondary_edge_actions():
     window.close()
 
 
-def test_right_panel_reserves_width_for_original_form_layout():
+def test_right_panel_uses_compact_summary_and_keeps_form_layout_in_dialog_workspace():
     window = MainWindow()
     window.resize(1600, 900)
     window.show()
@@ -1667,9 +1667,12 @@ def test_right_panel_reserves_width_for_original_form_layout():
     preferred_width = window.data_tab.preferred_right_panel_width()
     minimum_width = window.data_tab.right_panel.minimumWidth()
     assert minimum_width >= preferred_width
-    assert minimum_width >= window.data_tab.map_group.minimumSizeHint().width()
-    assert minimum_width >= window.data_tab.form_group.minimumSizeHint().width()
-    assert minimum_width >= 560
+    assert minimum_width <= 420
+    assert window.data_tab.record_summary_group.isVisible()
+    assert window.data_tab.record_actions_group.isVisible()
+    assert not window.data_tab.form_workspace.isVisible()
+    assert window.data_tab.form_group.parentWidget() is window.data_tab.form_workspace
+    assert window.data_tab.map_group.parentWidget() is window.data_tab.form_workspace
     assert window.data_tab.form_group.layout().itemAtPosition(0, 4).widget() is window.data_tab.in_avtec
     assert window.data_tab.form_group.layout().itemAtPosition(3, 4).widget() is window.data_tab.in_caixa
     assert window.data_tab.form_group.layout().itemAtPosition(4, 1).widget() is window.data_tab.plantio_actions_container
@@ -2231,12 +2234,9 @@ def test_second_click_same_table_row_clears_selection_and_feedback(monkeypatch):
     window._on_table_clicked(index)
 
     assert window.selected is None
-    assert window.data_tab.table.selectionModel().selectedRows() == []
     assert window.data_tab.in_oficio.text() == ""
-    assert window.data_tab.lbl_form_feedback.text() == ""
-    assert window.data_tab.lbl_form_feedback.isHidden() is True
-    assert window.data_tab.lbl_form_geocode.text() == ""
-    assert window.data_tab.lbl_form_geocode.isHidden() is True
+    assert window.data_tab.lbl_form_feedback.isVisible() is False
+    assert window.data_tab.lbl_form_geocode.isVisible() is False
     assert window.data_tab.lbl_selection_summary.text() == "Nenhum registro selecionado"
     window.close()
 

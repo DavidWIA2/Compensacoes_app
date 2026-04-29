@@ -483,7 +483,8 @@ class DataTab(QWidget):
             crud.addWidget(b)
         cadastro_left_layout.addWidget(crud_frame, 0)
         self.cadastro_review_panel = self._create_cadastro_review_panel()
-        cadastro_left_layout.addWidget(self.cadastro_review_panel, 1)
+        cadastro_left_layout.addWidget(self.cadastro_review_panel, 0)
+        cadastro_left_layout.addStretch(1)
 
         self.map_group = self._create_map_group()
         cadastro_map_layout.addWidget(self.map_group, 0)
@@ -575,7 +576,9 @@ class DataTab(QWidget):
     def _create_cadastro_review_panel(self):
         panel = QFrame()
         panel.setProperty("panel", "subtle")
-        panel.setMinimumHeight(max(int(310 * self.sf), 270))
+        self._cadastro_review_base_height = max(int(385 * self.sf), 340)
+        panel.setMinimumHeight(self._cadastro_review_base_height)
+        panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(int(12 * self.sf), int(10 * self.sf), int(12 * self.sf), int(10 * self.sf))
         layout.setSpacing(int(8 * self.sf))
@@ -609,6 +612,7 @@ class DataTab(QWidget):
             card = QFrame(cards_frame)
             card.setProperty("panel", "subtle")
             card.setProperty("reviewState", "neutral")
+            card.setMinimumHeight(max(int(42 * self.sf), 38))
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(int(9 * self.sf), int(7 * self.sf), int(9 * self.sf), int(7 * self.sf))
             card_layout.setSpacing(int(2 * self.sf))
@@ -617,6 +621,7 @@ class DataTab(QWidget):
             value = QLabel("--")
             value.setProperty("role", "helper-strong")
             value.setWordWrap(True)
+            value.setMinimumHeight(max(int(18 * self.sf), 16))
             self.cadastro_review_labels[key] = value
             self.cadastro_review_cards[key] = card
             card_layout.addWidget(label)
@@ -635,6 +640,7 @@ class DataTab(QWidget):
         ]:
             section = QFrame(panel)
             section.setProperty("panel", "micro")
+            section.setMinimumHeight(max(int(88 * self.sf), 76))
             section_layout = QVBoxLayout(section)
             section_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
             section_layout.setSpacing(int(5 * self.sf))
@@ -649,6 +655,7 @@ class DataTab(QWidget):
                 value = QLabel("--")
                 value.setProperty("role", "helper-strong")
                 value.setWordWrap(True)
+                value.setMinimumHeight(max(int(16 * self.sf), 14))
                 self.cadastro_review_detail_labels[key] = value
                 row.addWidget(name, 0, Qt.AlignTop)
                 row.addWidget(value, 1)
@@ -658,6 +665,7 @@ class DataTab(QWidget):
 
         pending_frame = QFrame(panel)
         pending_frame.setProperty("panel", "micro")
+        self.cadastro_review_pending_frame = pending_frame
         pending_layout = QVBoxLayout(pending_frame)
         pending_layout.setContentsMargins(int(10 * self.sf), int(8 * self.sf), int(10 * self.sf), int(8 * self.sf))
         pending_layout.setSpacing(int(4 * self.sf))
@@ -781,6 +789,31 @@ class DataTab(QWidget):
         if text and timeout_ms > 0:
             schedule_owned_single_shot(self.lbl_form_feedback, timeout_ms, self.lbl_form_feedback.hide)
 
+    def _adjust_form_dialog_for_review(self, pending_count: int) -> None:
+        pending_count = max(int(pending_count or 0), 1)
+        extra_height = max(0, pending_count - 1) * max(int(22 * self.sf), 20)
+        base_review_height = getattr(self, "_cadastro_review_base_height", max(int(310 * self.sf), 270))
+        target_review_height = base_review_height + extra_height
+        if hasattr(self, "cadastro_review_panel"):
+            self.cadastro_review_panel.setMinimumHeight(target_review_height)
+            self.cadastro_review_panel.setMaximumHeight(target_review_height)
+        if hasattr(self, "cadastro_review_pending_frame"):
+            self.cadastro_review_pending_frame.setMinimumHeight(max(int(52 * self.sf), 48) + extra_height)
+
+        dialog = getattr(self, "form_dialog", None)
+        if dialog is None or not dialog.isVisible() or dialog.isMaximized():
+            return
+        base_dialog_height = max(int(860 * self.sf), 780)
+        target_height = base_dialog_height + extra_height
+        if dialog.height() >= target_height:
+            return
+        try:
+            available_height = dialog.screen().availableGeometry().height()
+        except RuntimeError:
+            available_height = QApplication.primaryScreen().availableGeometry().height()
+        max_height = max(base_dialog_height, available_height - int(32 * self.sf))
+        dialog.resize(dialog.width(), min(target_height, max_height))
+
     def _review_value_text(self, value: object, *, fallback: str = "Pendente") -> str:
         text = str(value or "").strip()
         return text if text else fallback
@@ -819,6 +852,7 @@ class DataTab(QWidget):
             }
             next_step = "Selecione ou preencha um cadastro para ver os pontos de atenção."
             pending_text = "Abra um cadastro existente ou preencha um novo processo para revisar os dados."
+            pending_count = 1
             score_text = "0/6"
             recommended_action = ""
             card_states = {key: "neutral" for key in values}
@@ -888,7 +922,9 @@ class DataTab(QWidget):
                     recommended_action = "tipo"
             if not pending:
                 pending.append("Sem pendências principais. Confira dados antes de salvar.")
-            pending_text = "\n".join(f"- {item}" for item in pending[:4])
+            visible_pending = pending[:4]
+            pending_count = len(visible_pending)
+            pending_text = "\n".join(f"- {item}" for item in visible_pending)
             completed = sum(
                 [
                     bool(endereco),
@@ -917,6 +953,7 @@ class DataTab(QWidget):
         self.lbl_cadastro_review_next.setText(next_step)
         self.lbl_cadastro_review_score.setText(score_text)
         self.lbl_cadastro_review_pending.setText(pending_text)
+        self._adjust_form_dialog_for_review(pending_count)
         self._update_contextual_form_states(compensado=compensado, arquivado=arquivado)
         for button in [
             self.btn_maps,
@@ -1032,6 +1069,7 @@ class DataTab(QWidget):
         dialog.raise_()
         dialog.activateWindow()
         self.form_workspace.setVisible(True)
+        self.refresh_cadastro_review(self.main_window.selected if self.main_window is not None else None)
         schedule_owned_single_shot(self, 0, self._prepare_compact_map_for_dialog)
 
     def _ensure_form_dialog(self):
@@ -1041,7 +1079,7 @@ class DataTab(QWidget):
         dialog = QDialog(self.window())
         dialog.setWindowTitle("Cadastro de compensação")
         dialog.setModal(False)
-        dialog.resize(max(int(1260 * self.sf), 1080), max(int(780 * self.sf), 700))
+        dialog.resize(max(int(1260 * self.sf), 1080), max(int(860 * self.sf), 780))
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(int(12 * self.sf), int(12 * self.sf), int(12 * self.sf), int(12 * self.sf))
         layout.setSpacing(int(8 * self.sf))

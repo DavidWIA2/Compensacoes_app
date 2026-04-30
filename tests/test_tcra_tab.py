@@ -449,6 +449,42 @@ def test_tcra_record_details_dialog_can_register_event_from_consulta(monkeypatch
     assert dialog.tabs.tabText(2).startswith("Eventos (1)")
 
 
+def test_tcra_event_document_copy_prefers_shared_directory(tmp_path):
+    source = tmp_path / "Relatorio entregue.pdf"
+    source.write_bytes(b"%PDF-1.4\n")
+    shared_root = tmp_path / "rede" / "anexos"
+
+    managed_ref = tcra_tab_module._copy_event_document_to_managed_store(
+        str(source),
+        record=make_tcra(uid="tcra-1", numero_tcra="108483/2018"),
+        sequence=2,
+        shared_root=shared_root,
+    )
+
+    managed_path = os.path.abspath(managed_ref)
+    expected_root = os.path.abspath(shared_root)
+    assert managed_path.startswith(expected_root)
+    assert os.path.exists(managed_path)
+    assert os.path.basename(managed_path) == "02_Relatorio_entregue.pdf"
+    assert open(managed_path, "rb").read() == b"%PDF-1.4\n"
+    assert not list(shared_root.rglob("*.part"))
+
+
+def test_tcra_shared_document_open_uses_local_cache(tmp_path):
+    shared_root = tmp_path / "rede" / "anexos"
+    source_dir = shared_root / "tcra_event_documents" / "tcra-1"
+    source_dir.mkdir(parents=True)
+    source = source_dir / "02_relatorio.pdf"
+    source.write_bytes(b"%PDF-1.4\n")
+
+    open_ref = tcra_tab_module._prepare_document_for_open(str(source), shared_root=shared_root)
+
+    assert os.path.exists(open_ref)
+    assert os.path.abspath(open_ref) != os.path.abspath(source)
+    assert os.path.basename(open_ref).endswith("02_relatorio.pdf")
+    assert open(open_ref, "rb").read() == b"%PDF-1.4\n"
+
+
 def test_tcra_tab_handle_tab_activated_schedules_window_fit(tmp_path, monkeypatch):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     main_window = SimpleNamespace()

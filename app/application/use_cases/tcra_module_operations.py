@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.services.tcra_records_service import (
     build_record_overview,
     build_record_search_index,
     build_work_agenda,
+    normalize_key,
     normalize_orgao_label,
     normalize_status_label,
     operational_sort_key,
@@ -45,6 +47,17 @@ def _format_date_text(value: date | None) -> str:
     if value is None:
         return ""
     return value.strftime("%d/%m/%Y")
+
+
+def _add_months(base_date: date, months: int | None) -> date | None:
+    normalized_months = max(int(months or 0), 0)
+    if normalized_months <= 0:
+        return None
+    total_month = base_date.month - 1 + normalized_months
+    year = base_date.year + total_month // 12
+    month = total_month % 12 + 1
+    day = min(base_date.day, monthrange(year, month)[1])
+    return date(year, month, day)
 
 
 def _serialize_tcra_evento(evento: TcraEvento) -> dict[str, object]:
@@ -575,10 +588,12 @@ class TcraModuleOperations:
         prazo_final = evento.prazo_resultante or record.prazo_final
         data_ultimo_relatorio = record.data_ultimo_relatorio
         data_proximo_relatorio = record.data_proximo_relatorio
-        if "RELATORIO" in _stringify(evento.tipo_evento).upper() and evento.data_evento is not None:
+        if "RELATORIO" in normalize_key(evento.tipo_evento) and evento.data_evento is not None:
             data_ultimo_relatorio = evento.data_evento
-            if evento.prazo_resultante is not None:
-                data_proximo_relatorio = evento.prazo_resultante
+            data_proximo_relatorio = evento.prazo_resultante or _add_months(
+                evento.data_evento,
+                record.periodicidade_relatorio_meses,
+            )
         if status in {STATUS_CUMPRIDO, STATUS_ARQUIVADO}:
             data_proximo_relatorio = None
         return replace(

@@ -327,6 +327,31 @@ def test_tcra_module_operations_generates_bulk_campaign_and_links_documents(tmp_
     assert audit_calls[-1]["action"] == "TCRA_BULK_CAMPAIGN"
 
 
+def test_tcra_module_operations_report_delivery_advances_next_report_from_periodicity(tmp_path):
+    service = TcraSqliteService(db_path=tmp_path / "local.db")
+    operations = make_operations(service, [])
+    record = make_tcra(
+        status="Relatório pendente",
+        prazo_final=date(2028, 12, 10),
+        periodicidade_relatorio_meses=12,
+        data_ultimo_relatorio=date(2024, 3, 22),
+        data_proximo_relatorio=date(2026, 4, 13),
+    )
+    evento = TcraEvento(
+        sequence=2,
+        data_evento=date(2026, 4, 22),
+        tipo_evento="Relatório entregue",
+        descricao="Relatório periódico protocolado e anexado ao processo.",
+        status_resultante="Em acompanhamento",
+    )
+
+    updated = operations.append_event_to_record(record, evento)
+
+    assert updated.status == "Em acompanhamento"
+    assert updated.data_ultimo_relatorio == date(2026, 4, 22)
+    assert updated.data_proximo_relatorio == date(2027, 4, 22)
+
+
 def test_tcra_module_operations_imports_and_exports_reports(tmp_path):
     service = TcraSqliteService(db_path=tmp_path / "local.db")
     audit_calls: list[dict] = []

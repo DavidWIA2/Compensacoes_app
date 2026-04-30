@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 from PySide6.QtGui import QColor
 
@@ -160,7 +161,8 @@ def build_event_summary_line(evento: TcraEvento, *, separator: str = " | ") -> s
     if getattr(evento, "protocolo", ""):
         parts.append(f"protocolo {evento.protocolo}")
     if getattr(evento, "documento_ref", ""):
-        parts.append(f"doc {evento.documento_ref}")
+        suffix = Path(stringify(evento.documento_ref)).suffix.lower()
+        parts.append("PDF anexado" if suffix == ".pdf" else "documento vinculado")
     if evento.descricao:
         parts.append(evento.descricao)
     return separator.join(part for part in parts if part)

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from calendar import monthrange
 from dataclasses import replace
+import hashlib
 import os
+import re
+import shutil
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Mapping
@@ -82,12 +86,15 @@ from app.services.tcra_records_service import (
     TCRA_WORKFLOW_EVENT_SNOOZE,
     UPCOMING_REPORT_WINDOW_DAYS,
     build_filter_facets,
+    normalize_key,
     normalize_orgao_label,
     normalize_status_label,
     resolve_tcra_risk_profile,
     tcra_workflow_issue_key,
+    tcra_has_missing_responsavel,
     tcra_has_prazo_vencido,
     tcra_has_relatorio_pendente,
+    tcra_has_report_due_soon,
     tcra_has_stale_movement,
 )
 from app.services.tcra_sqlite_service import TcraSqliteService
@@ -148,6 +155,7 @@ from app.ui.tabs.tcra_tab_view_support import (
     build_quality_overview_rows,
     build_selection_state,
 )
+from app.utils.app_paths import ensure_dir, resolve_data_path
 from app.utils.logger import get_logger
 
 
@@ -161,6 +169,157 @@ SUPPORTED_AGENDA_SCOPES = (
     AGENDA_SCOPE_PENDENTES,
 )
 EXPORTED_AGENDA_SCOPE_TODOS = AGENDA_SCOPE_TODOS
+
+
+def _is_external_document_ref(value: object) -> bool:
+    return _stringify(value).lower().startswith(("http://", "https://"))
+
+
+def _safe_file_component(value: object, *, fallback: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", _stringify(value)).strip("._-")
+    return text[:80] or fallback
+
+
+def _event_document_storage_dir(record: Tcra | None, *, shared_root: str | Path | None = None) -> Path:
+    label = "sem_identificacao"
+    if record is not None:
+        label = _safe_file_component(
+            record.uid or record.numero_tcra or record.numero_processo or record.local,
+            fallback="sem_identificacao",
+        )
+    if shared_root:
+        return ensure_dir(Path(shared_root) / "tcra_event_documents" / label)
+    return ensure_dir(resolve_data_path("tcra_event_documents", label))
+
+
+def _file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _copy_file_verified(source: Path, destination: Path) -> None:
+    temp_destination = destination.with_name(f".{destination.name}.{os.getpid()}.part")
+    temp_destination.unlink(missing_ok=True)
+    try:
+        with source.open("rb") as input_file, temp_destination.open("wb") as output_file:
+            shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+            output_file.flush()
+            os.fsync(output_file.fileno())
+        if source.stat().st_size != temp_destination.stat().st_size:
+            raise OSError("A copia do anexo ficou com tamanho diferente do arquivo original.")
+        if _file_digest(source) != _file_digest(temp_destination):
+            raise OSError("A copia do anexo nao confere com o arquivo original.")
+        temp_destination.replace(destination)
+    finally:
+        temp_destination.unlink(missing_ok=True)
+
+
+def _copy_event_document_to_managed_store(
+    document_ref: object,
+    *,
+    record: Tcra | None,
+    sequence: int,
+    shared_root: str | Path | None = None,
+) -> str:
+    target = _stringify(document_ref)
+    if not target or _is_external_document_ref(target):
+        return target
+    source = Path(target)
+    if not source.exists() or not source.is_file():
+        return target
+
+    try:
+        storage_dir = _event_document_storage_dir(record, shared_root=shared_root).resolve()
+    except OSError:
+        storage_dir = _event_document_storage_dir(record).resolve()
+    try:
+        if source.resolve().is_relative_to(storage_dir):
+            return str(source)
+    except ValueError:
+        pass
+
+    safe_stem = _safe_file_component(source.stem, fallback="documento")
+    suffix = source.suffix or ".pdf"
+    sequence_number = max(int(sequence or 0), 1)
+    destination = storage_dir / f"{sequence_number:02d}_{safe_stem}{suffix}"
+    counter = 2
+    while destination.exists() and source.resolve() != destination.resolve():
+        destination = storage_dir / f"{sequence_number:02d}_{safe_stem}_{counter}{suffix}"
+        counter += 1
+    if source.resolve() != destination.resolve():
+        try:
+            _copy_file_verified(source, destination)
+        except OSError:
+            if not shared_root:
+                raise
+            storage_dir = _event_document_storage_dir(record).resolve()
+            destination = storage_dir / destination.name
+            counter = 2
+            while destination.exists() and source.resolve() != destination.resolve():
+                destination = storage_dir / f"{sequence_number:02d}_{safe_stem}_{counter}{suffix}"
+                counter += 1
+            _copy_file_verified(source, destination)
+    return str(destination)
+
+
+def _document_ref_is_under_root(document_ref: object, root: str | Path | None) -> bool:
+    target = _stringify(document_ref)
+    if not target or not root or _is_external_document_ref(target):
+        return False
+    try:
+        Path(target).resolve().relative_to(Path(root).resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _shared_document_ref_is_local_fallback(document_ref: object, *, shared_root: str | Path | None) -> bool:
+    target = _stringify(document_ref)
+    if not target or not shared_root or _is_external_document_ref(target):
+        return False
+    try:
+        Path(target).resolve().relative_to(Path(shared_root).resolve())
+        return False
+    except ValueError:
+        return Path(target).exists()
+
+
+def _prepare_document_for_open(document_ref: object, *, shared_root: str | Path | None) -> str:
+    target = _stringify(document_ref)
+    if not target or _is_external_document_ref(target):
+        return target
+    source = Path(target)
+    if not source.exists() or not source.is_file():
+        return target
+    if not _document_ref_is_under_root(source, shared_root):
+        return str(source)
+
+    cache_dir = ensure_dir(Path(tempfile.gettempdir()) / "CompensacoesApp" / "tcra_open_cache")
+    cache_name = f"{_safe_file_component(source.parent.name, fallback='tcra')}_{source.name}"
+    cache_path = cache_dir / cache_name
+    shutil.copyfile(source, cache_path)
+    try:
+        os.chmod(cache_path, 0o666)
+    except OSError:
+        pass
+    return str(cache_path)
+
+
+def _document_display_label(document_ref: object) -> str:
+    target = _stringify(document_ref)
+    if not target:
+        return "--"
+    if _is_external_document_ref(target):
+        return "Link vinculado"
+    suffix = Path(target).suffix.lower()
+    if suffix == ".pdf":
+        return "PDF anexado"
+    if suffix:
+        return f"{suffix[1:].upper()} anexado"
+    return "Documento vinculado"
 
 
 class _LegacyTcraRecordDetailsDialog(QDialog):
@@ -272,10 +431,13 @@ class _LegacyTcraRecordDetailsDialog(QDialog):
                 _format_date(evento.prazo_resultante),
                 evento.status_resultante or "--",
                 getattr(evento, "protocolo", "") or "--",
-                getattr(evento, "documento_ref", "") or "--",
+                _document_display_label(getattr(evento, "documento_ref", "")),
             )
             for column_index, value in enumerate(values):
-                table.setItem(row_index, column_index, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column_index == 6 and getattr(evento, "documento_ref", ""):
+                    item.setToolTip(_stringify(getattr(evento, "documento_ref", "")))
+                table.setItem(row_index, column_index, item)
         if not eventos:
             table.setRowCount(1)
             table.setSpan(0, 0, 1, 7)
@@ -295,6 +457,7 @@ class TcraRecordDetailsDialog(QDialog):
         apply_event_effects_to_record: Callable[[Tcra], Tcra],
         persist_record_changes: Callable[[Tcra, Mapping[str, object]], Tcra | None],
         open_audit_callback: Callable[[Tcra], None] | None = None,
+        shared_documents_dir: str = "",
     ):
         super().__init__(parent)
         self.record = replace(record, eventos=list(record.eventos))
@@ -304,6 +467,7 @@ class TcraRecordDetailsDialog(QDialog):
         self._apply_event_effects_to_record = apply_event_effects_to_record
         self._persist_record_changes = persist_record_changes
         self._open_audit_callback = open_audit_callback
+        self.shared_documents_dir = _stringify(shared_documents_dir)
         self._event_rows: list[TcraEvento] = []
 
         panel_data = build_record_panel_data(self.record, today=today)
@@ -511,6 +675,17 @@ class TcraRecordDetailsDialog(QDialog):
             )
         return normalized
 
+    def _with_managed_document(self, evento: TcraEvento) -> TcraEvento:
+        document_ref = _copy_event_document_to_managed_store(
+            getattr(evento, "documento_ref", ""),
+            record=self.record,
+            sequence=evento.sequence,
+            shared_root=self.shared_documents_dir,
+        )
+        if document_ref == getattr(evento, "documento_ref", ""):
+            return evento
+        return replace(evento, documento_ref=document_ref)
+
     def _populate_events(self) -> None:
         self._event_rows = sorted(list(self.record.eventos), key=self._event_sort_key, reverse=True)
         self.events_table.clearContents()
@@ -523,10 +698,13 @@ class TcraRecordDetailsDialog(QDialog):
                 _format_date(evento.prazo_resultante),
                 evento.status_resultante or "--",
                 getattr(evento, "protocolo", "") or "--",
-                getattr(evento, "documento_ref", "") or "--",
+                _document_display_label(getattr(evento, "documento_ref", "")),
             )
             for column_index, value in enumerate(values):
-                self.events_table.setItem(row_index, column_index, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column_index == 6 and getattr(evento, "documento_ref", ""):
+                    item.setToolTip(_stringify(getattr(evento, "documento_ref", "")))
+                self.events_table.setItem(row_index, column_index, item)
         self.lbl_events_summary.setText(f"Historico e registro de eventos ({len(self._event_rows)})")
         self.tabs.setTabText(2, f"Eventos ({len(self._event_rows)})")
         self._refresh_event_actions()
@@ -568,15 +746,18 @@ class TcraRecordDetailsDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(self, "Aviso", str(exc))
             return
+        evento = self._with_managed_document(evento)
         updated_record = replace(
             self.record,
             eventos=self._normalize_events(list(self.record.eventos) + [evento]),
         )
+        persisted_record = self._apply_event_effects_to_record(updated_record)
         self._persist_updated_record(
-            self._apply_event_effects_to_record(updated_record),
+            persisted_record,
             action="add",
             event_type=evento.tipo_evento,
         )
+        self._show_event_result_feedback(persisted_record, evento)
 
     def _add_event(self) -> None:
         self._add_event_with_preset("")
@@ -607,6 +788,7 @@ class TcraRecordDetailsDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(self, "Aviso", str(exc))
             return
+        updated_event = self._with_managed_document(updated_event)
         updated_events = [
             updated_event if int(evento.sequence) == int(selected.sequence) else evento
             for evento in self.record.eventos
@@ -616,6 +798,17 @@ class TcraRecordDetailsDialog(QDialog):
             self._apply_event_effects_to_record(updated_record),
             action="edit",
             event_type=updated_event.tipo_evento,
+        )
+
+    def _show_event_result_feedback(self, record: Tcra, evento: TcraEvento) -> None:
+        if "RELATORIO" not in normalize_key(evento.tipo_evento):
+            return
+        QMessageBox.information(
+            self,
+            "Relatorio registrado",
+            "Relatorio entregue registrado.\n"
+            f"Proximo relatorio: {_format_date(record.data_proximo_relatorio)}\n"
+            f"Status: {_stringify(record.status) or '--'}",
         )
 
     def _delete_selected_event(self) -> None:
@@ -647,7 +840,8 @@ class TcraRecordDetailsDialog(QDialog):
             return
         candidate = Path(target)
         if candidate.exists():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate)))
+            open_target = _prepare_document_for_open(target, shared_root=self.shared_documents_dir)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(open_target))
             return
         QMessageBox.warning(self, "Aviso", f"Documento não encontrado: {target}")
 
@@ -762,6 +956,7 @@ class TcraTab(QWidget):
         self.sqlite_service = sqlite_service or TcraSqliteService(db_path=db_path)
         self.today = today or date.today()
         self.operational_rules = self._load_operational_rules()
+        self.shared_documents_dir = self._load_shared_documents_dir()
         self.module_operations = TcraModuleOperations(
             self.sqlite_service,
             today=self.today,
@@ -821,6 +1016,24 @@ class TcraTab(QWidget):
         self._setup_ui()
         self._set_initial_loading_state()
         self._initial_prefetch_timer.start(self.INITIAL_PREFETCH_DELAY_MS)
+
+    def _settings_service(self):
+        return getattr(self.main_window, "settings", None)
+
+    def _load_shared_documents_dir(self) -> str:
+        settings = self._settings_service()
+        getter = getattr(settings, "tcra_shared_documents_dir", None)
+        if callable(getter):
+            return _stringify(getter())
+        return ""
+
+    def _set_shared_documents_dir(self, path: str) -> None:
+        normalized = _stringify(path)
+        self.shared_documents_dir = normalized
+        settings = self._settings_service()
+        setter = getattr(settings, "set_tcra_shared_documents_dir", None)
+        if callable(setter):
+            setter(normalized)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -956,6 +1169,10 @@ class TcraTab(QWidget):
         summary_actions.addWidget(self.btn_summary_quality)
         summary_actions.addWidget(self.btn_summary_dashboard)
         summary_actions.addWidget(self.btn_summary_upcoming)
+        self.btn_configure_documents_dir = QPushButton("Pasta de anexos")
+        self.btn_configure_documents_dir.setProperty("kind", "chip-quiet")
+        self.btn_configure_documents_dir.setToolTip("Define a pasta compartilhada institucional para anexos dos eventos TCRA.")
+        summary_actions.addWidget(self.btn_configure_documents_dir)
         summary_actions.addWidget(self.btn_toggle_workspace_context)
         self.lbl_workspace_digest = QLabel("Alertas, qualidade e carga aparecem aqui.")
         self.lbl_workspace_digest.setProperty("role", "helper")
@@ -1005,6 +1222,26 @@ class TcraTab(QWidget):
         record_helper.setProperty("role", "helper")
         record_helper.setWordWrap(True)
         record_layout.addWidget(record_helper)
+
+        record_quick_actions = QHBoxLayout()
+        record_quick_actions.setSpacing(int(6 * self.sf))
+        self.btn_record_quick_report = QPushButton("Registrar relatorio")
+        self.btn_record_quick_report.setProperty("kind", "chip-quiet")
+        self.btn_record_quick_report.setEnabled(False)
+        self.btn_record_quick_report.setToolTip("Abre o registro de relatorio entregue para o TCRA selecionado.")
+        self.btn_record_quick_responsavel = QPushButton("Definir responsavel")
+        self.btn_record_quick_responsavel.setProperty("kind", "chip-quiet")
+        self.btn_record_quick_responsavel.setEnabled(False)
+        self.btn_record_quick_responsavel.setToolTip("Define o responsavel do TCRA selecionado sem procurar o campo.")
+        self.btn_record_quick_fix = QPushButton("Tratar pendencia")
+        self.btn_record_quick_fix.setProperty("kind", "chip-quiet")
+        self.btn_record_quick_fix.setEnabled(False)
+        self.btn_record_quick_fix.setToolTip("Leva direto para a acao mais provavel da pendencia atual.")
+        record_quick_actions.addWidget(self.btn_record_quick_report)
+        record_quick_actions.addWidget(self.btn_record_quick_responsavel)
+        record_quick_actions.addWidget(self.btn_record_quick_fix)
+        record_quick_actions.addStretch(1)
+        record_layout.addLayout(record_quick_actions)
 
         self.record_details = QPlainTextEdit(self)
         self.record_details.setReadOnly(True)
@@ -2044,6 +2281,9 @@ class TcraTab(QWidget):
         self.btn_open_selected.clicked.connect(self._open_selected_record_in_editor)
         self.btn_record_details.clicked.connect(self._open_selected_record_details)
         self.btn_record_map.clicked.connect(self._open_selected_record_on_map)
+        self.btn_record_quick_report.clicked.connect(lambda: self._open_selected_record_details_with_preset("relatorio_entregue"))
+        self.btn_record_quick_responsavel.clicked.connect(self._assign_responsavel_for_selected_record)
+        self.btn_record_quick_fix.clicked.connect(self._open_suggested_action_for_selected_record)
         self.btn_bulk_alerts.clicked.connect(self._select_alert_rows)
         self.btn_clear_selection.clicked.connect(self._clear_table_selection)
         self.btn_bulk_action.clicked.connect(self.apply_bulk_action)
@@ -2054,6 +2294,7 @@ class TcraTab(QWidget):
         self.btn_summary_quality.clicked.connect(self._open_quality_overview)
         self.btn_summary_dashboard.clicked.connect(self._open_dashboard_overview)
         self.btn_summary_upcoming.clicked.connect(self._open_upcoming_overview)
+        self.btn_configure_documents_dir.clicked.connect(self._configure_shared_documents_dir)
         self.btn_toggle_workspace_context.clicked.connect(self._toggle_workspace_context)
         self.operational_dialog.rejected.connect(lambda: self._mark_operational_dialog_closed())
         self.btn_agenda_view_all.clicked.connect(self._toggle_agenda_preview)
@@ -2214,6 +2455,12 @@ class TcraTab(QWidget):
                 snapshot.route_summary_text,
                 snapshot.upcoming_summary_text,
             ]
+
+        if self.shared_documents_dir:
+            tooltip_parts.append(f"Anexos TCRA: pasta compartilhada {self.shared_documents_dir}")
+        else:
+            digest_text = f"{digest_text} | Anexos locais" if digest_text else "Anexos locais"
+            tooltip_parts.append("Anexos TCRA: sem pasta compartilhada configurada; arquivos novos ficam apenas neste computador.")
 
         if self.lbl_sync_status.isVisible():
             tooltip_parts.append(self.lbl_sync_status.text())
@@ -2949,7 +3196,7 @@ class TcraTab(QWidget):
             (
                 evento
                 for evento in sorted(list(updated_record.eventos), key=self._event_sort_key, reverse=True)
-                if "RELATORIO" in _stringify(evento.tipo_evento).upper()
+                if "RELATORIO" in normalize_key(evento.tipo_evento)
             ),
             None,
         )
@@ -2970,8 +3217,14 @@ class TcraTab(QWidget):
 
         if latest_report_event is not None and latest_report_event.data_evento is not None:
             data_ultimo_relatorio = latest_report_event.data_evento
-            if latest_report_event.prazo_resultante is not None and status not in {STATUS_CUMPRIDO, STATUS_ARQUIVADO}:
-                data_proximo_relatorio = latest_report_event.prazo_resultante
+            next_report = latest_report_event.prazo_resultante
+            if next_report is None:
+                next_report = self._add_months(
+                    latest_report_event.data_evento,
+                    updated_record.periodicidade_relatorio_meses or 0,
+                )
+            if next_report is not None and status not in {STATUS_CUMPRIDO, STATUS_ARQUIVADO}:
+                data_proximo_relatorio = next_report
 
         return replace(
             updated_record,
@@ -3062,6 +3315,7 @@ class TcraTab(QWidget):
             apply_event_effects_to_record=self._apply_event_effects_to_record_snapshot,
             persist_record_changes=self._persist_record_changes_from_details,
             open_audit_callback=self._open_record_audit,
+            shared_documents_dir=self.shared_documents_dir,
         )
         if event_preset:
             schedule_owned_single_shot(
@@ -3076,6 +3330,59 @@ class TcraTab(QWidget):
     def _open_selected_record_details(self) -> None:
         record = self._current_selected_record()
         if record is None:
+            return
+        self._open_record_details_for_record(record)
+
+    def _open_selected_record_details_with_preset(self, preset_key: str) -> None:
+        record = self._current_selected_record()
+        if record is None:
+            return
+        self._open_record_details_for_record(record, event_preset=preset_key)
+
+    def _assign_responsavel_for_selected_record(self) -> None:
+        record = self._current_selected_record()
+        if record is None:
+            return
+        value, ok = QInputDialog.getText(
+            self,
+            "Definir responsavel",
+            "Responsavel de execucao:",
+            text=record.responsavel_execucao,
+        )
+        responsavel = _stringify(value)
+        if not ok or not responsavel:
+            return
+        try:
+            result = self.module_operations.save_record(
+                replace(record, responsavel_execucao=responsavel),
+                pending_audit_metadata={"source": "tcra_record_panel", "field": "responsavel_execucao"},
+            )
+        except Exception as exc:
+            logger.exception("Falha ao definir responsavel pelo painel do TCRA")
+            QMessageBox.critical(self, "Erro", f"Falha ao definir o responsavel: {exc}")
+            return
+        if result.status == "invalid":
+            QMessageBox.warning(
+                self,
+                "Aviso",
+                "Revise o cadastro do TCRA antes de salvar:\n- " + "\n- ".join(result.consistency_issues),
+            )
+            return
+        self._set_sync_status_for_result("Responsavel definido", result.authority_source, result.sync_issues)
+        self.refresh_data(preferred_uid=result.saved_uid or record.uid)
+
+    def _open_suggested_action_for_selected_record(self) -> None:
+        record = self._current_selected_record()
+        if record is None:
+            return
+        if tcra_has_relatorio_pendente(record, today=self.today) or tcra_has_report_due_soon(record, today=self.today):
+            self._open_record_details_for_record(record, event_preset="relatorio_entregue")
+            return
+        if tcra_has_missing_responsavel(record):
+            self._assign_responsavel_for_selected_record()
+            return
+        if tcra_has_prazo_vencido(record, today=self.today) or tcra_has_stale_movement(record, today=self.today):
+            self._open_record_details_for_record(record, event_preset="despacho")
             return
         self._open_record_details_for_record(record)
 
@@ -3245,7 +3552,13 @@ class TcraTab(QWidget):
             return
         candidate = Path(target)
         if candidate.exists():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate)))
+            open_target = _prepare_document_for_open(target, shared_root=self.shared_documents_dir)
+            if _shared_document_ref_is_local_fallback(target, shared_root=self.shared_documents_dir):
+                self._set_sync_status(
+                    "Anexos TCRA: este arquivo esta em cache local; configure ou reconecte a pasta compartilhada para outros usuarios acessarem.",
+                    visible=True,
+                )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(open_target))
             return
         QMessageBox.warning(self, "Aviso", f"Documento não encontrado: {target}")
 
@@ -3346,6 +3659,9 @@ class TcraTab(QWidget):
         self.btn_record_details.setEnabled(False)
         self.btn_record_map.setEnabled(False)
         self.btn_record_edit.setEnabled(False)
+        self.btn_record_quick_report.setEnabled(False)
+        self.btn_record_quick_responsavel.setEnabled(False)
+        self.btn_record_quick_fix.setEnabled(False)
 
     def _build_record_event_lines(self, eventos: list[TcraEvento], *, limit: int = 6) -> list[str]:
         return build_event_lines(eventos, limit=limit)
@@ -3370,6 +3686,19 @@ class TcraTab(QWidget):
             combined_timeline = f"{panel_data.timeline}\n\nAuditoria:\n{audit_timeline}".strip()
         self.record_timeline.setPlainText(combined_timeline)
         self.btn_record_edit.setEnabled(True)
+        self.btn_record_details.setEnabled(True)
+        self.btn_record_map.setEnabled(True)
+        self.btn_record_quick_report.setEnabled(True)
+        self.btn_record_quick_responsavel.setEnabled(True)
+        self.btn_record_quick_fix.setEnabled(True)
+        if tcra_has_relatorio_pendente(record, today=self.today) or tcra_has_report_due_soon(record, today=self.today):
+            self.btn_record_quick_fix.setText("Registrar relatorio")
+        elif tcra_has_missing_responsavel(record):
+            self.btn_record_quick_fix.setText("Definir responsavel")
+        elif tcra_has_prazo_vencido(record, today=self.today) or tcra_has_stale_movement(record, today=self.today):
+            self.btn_record_quick_fix.setText("Registrar despacho")
+        else:
+            self.btn_record_quick_fix.setText("Abrir detalhes")
 
     def _open_inbox_overview(self):
         self.overview_tabs.setCurrentIndex(1)
@@ -3387,6 +3716,34 @@ class TcraTab(QWidget):
         self._set_quick_filter_mode(QUICK_FILTER_PROXIMOS)
         self.overview_tabs.setCurrentIndex(1)
         self._set_overview_panel_visible(True)
+
+    def _configure_shared_documents_dir(self) -> None:
+        current = self.shared_documents_dir or str(resolve_data_path("tcra_event_documents"))
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Selecionar pasta compartilhada para anexos TCRA",
+            current,
+        )
+        if not selected:
+            return
+        try:
+            ensure_dir(Path(selected))
+            probe = Path(selected) / ".tcra_write_test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Pasta indisponivel",
+                f"Não foi possível gravar nessa pasta. Verifique permissões ou rede:\n{exc}",
+            )
+            return
+        self._set_shared_documents_dir(selected)
+        self._set_sync_status(
+            f"Anexos TCRA: pasta compartilhada configurada em {selected}",
+            visible=True,
+        )
+        self._update_workspace_digest(self._workspace_snapshot)
 
     def _update_editor_context(self):
         label = (
@@ -4200,6 +4557,7 @@ class TcraTab(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Aviso", str(exc))
             return
+        evento = self._with_managed_event_document(evento)
 
         self.form_eventos.append(evento)
         self._normalize_form_eventos()
@@ -4241,12 +4599,27 @@ class TcraTab(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Aviso", str(exc))
             return
+        self.form_eventos[row] = self._with_managed_event_document(self.form_eventos[row])
 
         self._normalize_form_eventos()
         self._apply_latest_event_effect_to_form()
         self._populate_events(selected_row=row)
         self._remember_pending_event_audit(action="edit", event_type=self.form_eventos[row].tipo_evento)
         self._on_form_changed()
+
+    def _current_event_document_record(self) -> Tcra:
+        return self._build_form_preview_record()
+
+    def _with_managed_event_document(self, evento: TcraEvento, record: Tcra | None = None) -> TcraEvento:
+        document_ref = _copy_event_document_to_managed_store(
+            getattr(evento, "documento_ref", ""),
+            record=record or self._current_event_document_record(),
+            sequence=evento.sequence,
+            shared_root=self.shared_documents_dir,
+        )
+        if document_ref == getattr(evento, "documento_ref", ""):
+            return evento
+        return replace(evento, documento_ref=document_ref)
 
     def delete_selected_event(self):
         self._switch_to_editor_view()
@@ -4492,6 +4865,7 @@ class TcraTab(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Aviso", str(exc))
             return
+        evento = self._with_managed_event_document(evento, record=record)
         updated_record = self.module_operations.append_event_to_record(record, evento)
         try:
             result = self.module_operations.save_record(
@@ -4660,7 +5034,11 @@ class TcraTab(QWidget):
                     )
                 else:
                     self._apply_item_palette(item, None, row_index=row_index)
-                item.setToolTip(row_data.tooltip)
+                tooltip = row_data.tooltip
+                search_sources = self._search_match_sources(row_data.record)
+                if search_sources:
+                    tooltip = f"{tooltip}\n\nEncontrado em: {', '.join(search_sources)}"
+                item.setToolTip(tooltip)
                 if column_index in MAIN_TABLE_BOLD_COLUMNS:
                     item.setFont(bold_font)
                 if column_index in {0, MAIN_TABLE_STATUS_COLUMN}:
@@ -4695,6 +5073,31 @@ class TcraTab(QWidget):
         if not any(record.uid == target_uid for record in self.filtered_tcras):
             target_uid = self.filtered_tcras[0].uid
         self._select_uid_in_table(target_uid)
+
+    def _search_match_sources(self, record: Tcra) -> list[str]:
+        query = normalize_key(self.search_input.text())
+        if not query:
+            return []
+        sources: list[tuple[str, object]] = [
+            ("processo/TCRA", f"{record.numero_processo} {record.numero_tcra}"),
+            ("local/endereco", f"{record.local} {record.endereco} {record.bairro}"),
+            ("orgao/responsavel", f"{record.orgao_acompanhamento} {record.responsavel_execucao}"),
+            ("observacoes", f"{record.observacoes} {record.servicos_exigidos}"),
+        ]
+        event_text = " ".join(
+            " ".join(
+                [
+                    _stringify(evento.tipo_evento),
+                    _stringify(evento.descricao),
+                    _stringify(evento.status_resultante),
+                    _stringify(getattr(evento, "protocolo", "")),
+                    _stringify(getattr(evento, "documento_ref", "")),
+                ]
+            )
+            for evento in record.eventos
+        )
+        sources.append(("eventos/documentos", event_text))
+        return [label for label, text in sources if query in normalize_key(text)]
 
     def _update_quick_filter_labels(self, label_by_mode: dict[str, str]):
         for mode, button in self.quick_filter_buttons.items():
@@ -5093,7 +5496,7 @@ class TcraTab(QWidget):
         return max(self.form_eventos, key=self._event_sort_key)
 
     def _latest_report_event(self) -> TcraEvento | None:
-        report_events = [evento for evento in self.form_eventos if "RELATORIO" in _stringify(evento.tipo_evento).upper()]
+        report_events = [evento for evento in self.form_eventos if "RELATORIO" in normalize_key(evento.tipo_evento)]
         if not report_events:
             return None
         return max(report_events, key=self._event_sort_key)
@@ -5167,10 +5570,13 @@ class TcraTab(QWidget):
                 _format_date(evento.prazo_resultante),
                 evento.status_resultante or "--",
                 getattr(evento, "protocolo", "") or "--",
-                getattr(evento, "documento_ref", "") or "--",
+                _document_display_label(getattr(evento, "documento_ref", "")),
             ]
             for column_index, value in enumerate(values):
-                self.events_table.setItem(row_index, column_index, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column_index == 7 and getattr(evento, "documento_ref", ""):
+                    item.setToolTip(_stringify(getattr(evento, "documento_ref", "")))
+                self.events_table.setItem(row_index, column_index, item)
 
         if self.form_eventos:
             target_row = min(max(selected_row, 0), len(self.form_eventos) - 1)

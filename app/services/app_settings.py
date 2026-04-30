@@ -173,6 +173,12 @@ class AppSettings:
     def set_tcra_operational_rules(self, rules: dict):
         self.setValue("tcra_operational_rules", dict(rules or {}))
 
+    def tcra_shared_documents_dir(self) -> str:
+        return str(self.value("tcra_shared_documents_dir", "") or "").strip()
+
+    def set_tcra_shared_documents_dir(self, path: str):
+        self.setValue("tcra_shared_documents_dir", str(path or "").strip())
+
     def tcra_form_draft(self) -> dict:
         return self._read_mapping("tcra_form_draft")
 

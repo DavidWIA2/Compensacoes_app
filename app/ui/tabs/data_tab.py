@@ -746,6 +746,16 @@ class DataTab(QWidget):
         self.address_completer = None
 
     def _trigger_review_search_address(self) -> None:
+        action = getattr(self, "_cadastro_review_recommended_action", "")
+        if action == "endereco" and hasattr(self, "in_end"):
+            self.in_end.setFocus()
+            return
+        if action == "mudas" and hasattr(self, "in_comp"):
+            self.in_comp.setFocus()
+            return
+        if action == "tipo" and hasattr(self, "eletronico_cont"):
+            self.eletronico_cont.setFocus()
+            return
         if hasattr(self, "btn_maps") and self.btn_maps.isEnabled():
             self.btn_maps.click()
 
@@ -953,6 +963,7 @@ class DataTab(QWidget):
         self.lbl_cadastro_review_next.setText(next_step)
         self.lbl_cadastro_review_score.setText(score_text)
         self.lbl_cadastro_review_pending.setText(pending_text)
+        self._cadastro_review_recommended_action = recommended_action
         self._adjust_form_dialog_for_review(pending_count)
         self._update_contextual_form_states(compensado=compensado, arquivado=arquivado)
         for button in [
@@ -974,7 +985,21 @@ class DataTab(QWidget):
         elif recommended_action == "salvar":
             self._set_recommended_button(self.btn_save_edit, True)
             self._set_recommended_button(self.btn_review_save, True)
-        self.btn_review_search_address.setEnabled(bool(recommended_action in {"buscar_endereco", "endereco"}))
+        action_labels = {
+            "endereco": "Preencher endereco",
+            "buscar_endereco": "Validar no mapa",
+            "mudas": "Informar mudas",
+            "tipo": "Informar tipo",
+            "plantios": "Vincular plantio",
+            "salvar": "Salvar revisao",
+        }
+        self.btn_review_search_address.setText(action_labels.get(recommended_action, "Buscar endereco"))
+        self.btn_review_open_plantios.setText("Vincular plantio" if recommended_action == "plantios" else "Plantios")
+        self.btn_review_save.setText("Salvar revisao" if recommended_action == "salvar" else "Salvar")
+        self.btn_review_search_address.setToolTip(next_step)
+        self.btn_review_open_plantios.setToolTip("Abra os plantios vinculados ao cadastro.")
+        self.btn_review_save.setToolTip("Salva o cadastro atual apos conferir as pendencias.")
+        self.btn_review_search_address.setEnabled(bool(recommended_action in {"buscar_endereco", "endereco", "mudas", "tipo"}))
         self.btn_review_open_plantios.setEnabled(bool(compensado))
         self.btn_review_save.setEnabled(bool(self.btn_save_edit.isEnabled()))
 

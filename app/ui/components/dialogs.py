@@ -43,6 +43,7 @@ from app.services.tcra_records_service import (
     STATUS_EM_ACOMPANHAMENTO,
     STATUS_PRAZO_VENCIDO,
     STATUS_RELATORIO_PENDENTE,
+    normalize_key,
     normalize_status_label,
 )
 from app.ui.components.import_preview_dialog_support import (
@@ -884,7 +885,7 @@ class TcraEventoEditorDialog(QDialog):
 
     @staticmethod
     def _resolve_preset_key(*, tipo_evento: str, status_resultante: str) -> str:
-        normalized_tipo = str(tipo_evento or "").strip().upper()
+        normalized_tipo = normalize_key(tipo_evento)
         normalized_status = normalize_status_label(status_resultante)
         if "RELATORIO" in normalized_tipo:
             return "relatorio_entregue"
